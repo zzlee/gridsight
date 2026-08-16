@@ -1,0 +1,88 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+jobs:
+  build-agent:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      - name: Install MinGW-w64
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y mingw-w64 cmake make
+
+      - name: Build gs-agent.exe
+        working-directory: beacon
+        run: |
+          make CXX=x86_64-w64-mingw32-g++
+
+      - name: Upload Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: gs-agent-windows-x64
+          path: beacon/gs-agent.exe
+
+  build-console:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: 'npm'
+          cache-dependency-path: console/package.json
+
+      - name: Install Dependencies
+        working-directory: console
+        run: npm ci
+
+      - name: Type Check & Build Frontend
+        working-directory: console
+        run: npm run build
+
+      - name: Create Release Archive
+        run: |
+          zip -r gridsight-console.zip console -x "console/node_modules/*"
+
+      - name: Upload Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: gridsight-console
+          path: gridsight-console.zip
+
+  release:
+    needs: [build-agent, build-console]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      - name: Download Agent Artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: gs-agent-windows-x64
+          path: .
+
+      - name: Download Console Artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: gridsight-console
+          path: .
+
+      - name: Create Release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            gs-agent.exe
+            gridsight-console.zip

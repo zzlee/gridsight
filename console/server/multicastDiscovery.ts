@@ -1,5 +1,5 @@
 import dgram from 'dgram';
-import { TokenAuthority } from './tokenAuthority';
+import { TokenAuthority } from './tokenAuthority.js';
 
 export class MulticastDiscoveryService {
   private server: dgram.Socket | null = null;

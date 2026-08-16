@@ -1,8 +1,8 @@
 import express from 'express';
 import cors from 'cors';
-import { TokenAuthority } from './tokenAuthority';
-import { MulticastDiscoveryService } from './multicastDiscovery';
-import { TeacherBroadcastStreamer } from './broadcastStreamer';
+import { TokenAuthority } from './tokenAuthority.js';
+import { MulticastDiscoveryService } from './multicastDiscovery.js';
+import { TeacherBroadcastStreamer } from './broadcastStreamer.js';
 
 const app = express();
 const PORT = 3001;

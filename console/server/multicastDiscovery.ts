@@ -3,8 +3,8 @@ import { TokenAuthority } from './tokenAuthority.js';
 
 export class MulticastDiscoveryService {
   private server: dgram.Socket | null = null;
-  private multicastAddress = '239.255.42.99';
-  private port = 9001;
+  private multicastAddress = process.env.DISCOVERY_MULTICAST_IP || '239.255.42.99';
+  private port = process.env.DISCOVERY_PORT ? parseInt(process.env.DISCOVERY_PORT, 10) : 9001;
   private tokenAuth: TokenAuthority;
   private onDeviceDiscovered?: (device: any) => void;
 

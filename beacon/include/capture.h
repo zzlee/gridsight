@@ -34,7 +34,9 @@ private:
     bool initialized_ = false;
     std::mutex capture_mutex_;
     void* dxgi_device_ = nullptr;
+    void* d3d_context_ = nullptr;
     void* dxgi_dup_ = nullptr;
+    void* staging_tex_ = nullptr;
 };
 
 } // namespace GridSight

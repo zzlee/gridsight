@@ -14,8 +14,8 @@ export class TeacherBroadcastStreamer {
   startStream(options: StreamerOptions = {}) {
     if (this.isStreaming) return;
 
-    const multicastIp = options.multicastIp || '239.255.42.100';
-    const port = options.port || 9000;
+    const multicastIp = options.multicastIp || process.env.BROADCAST_MULTICAST_IP || '239.255.42.100';
+    const port = options.port || (process.env.BROADCAST_PORT ? parseInt(process.env.BROADCAST_PORT, 10) : 9000);
     const fps = options.fps || 30;
     const bitrate = options.bitrateKbps || 5000;
 

@@ -1,3 +1,4 @@
+import 'dotenv/config';
 import express from 'express';
 import cors from 'cors';
 import { TokenAuthority } from './tokenAuthority.js';
@@ -5,7 +6,8 @@ import { MulticastDiscoveryService } from './multicastDiscovery.js';
 import { TeacherBroadcastStreamer } from './broadcastStreamer.js';
 
 const app = express();
-const PORT = 3001;
+const PORT = process.env.API_PORT ? parseInt(process.env.API_PORT, 10) : 3001;
+const HOST = process.env.API_HOST || '0.0.0.0';
 
 app.use(cors());
 app.use(express.json());
@@ -36,6 +38,6 @@ app.get('/api/broadcast/status', (req, res) => {
   res.json({ active: broadcastStreamer.isActive() });
 });
 
-app.listen(PORT, '0.0.0.0', () => {
-  console.log(`[GridSight Server] Coordinator API running on http://0.0.0.0:${PORT}`);
+app.listen(PORT, HOST, () => {
+  console.log(`[GridSight Server] Coordinator API running on http://${HOST}:${PORT}`);
 });

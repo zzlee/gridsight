@@ -6,6 +6,9 @@
 #include <sstream>
 #include <iomanip>
 #include <cstring>
+#include <fstream>
+#include <map>
+#include <cstdlib>
 
 #ifdef _WIN32
 #include <winsock2.h>
@@ -100,6 +103,61 @@ std::string Utils::GenerateRandomToken(size_t length) {
 
 void Utils::Log(const std::string& level, const std::string& message) {
     std::cout << "[" << level << "] " << message << std::endl;
+}
+
+static std::map<std::string, std::string> g_env_vars;
+
+void Utils::LoadEnv(const std::string& filepath) {
+    std::ifstream file(filepath);
+    if (!file.is_open()) {
+        Log("INFO", "No " + filepath + " file found, using system env / defaults");
+        return;
+    }
+
+    std::string line;
+    while (std::getline(file, line)) {
+        if (line.empty() || line[0] == '#') continue;
+
+        size_t delimiterPos = line.find('=');
+        if (delimiterPos != std::string::npos) {
+            std::string key = line.substr(0, delimiterPos);
+            std::string value = line.substr(delimiterPos + 1);
+
+            // Trim whitespace
+            key.erase(key.find_last_not_of(" \n\r\t") + 1);
+            key.erase(0, key.find_first_not_of(" \n\r\t"));
+            value.erase(value.find_last_not_of(" \n\r\t") + 1);
+            value.erase(0, value.find_first_not_of(" \n\r\t"));
+
+            g_env_vars[key] = value;
+        }
+    }
+}
+
+std::string Utils::GetEnv(const std::string& key, const std::string& default_value) {
+    if (g_env_vars.find(key) != g_env_vars.end()) {
+        return g_env_vars[key];
+    }
+
+    // Fallback to system environment variable
+    const char* val = std::getenv(key.c_str());
+    if (val != nullptr) {
+        return std::string(val);
+    }
+
+    return default_value;
+}
+
+int Utils::GetEnvInt(const std::string& key, int default_value) {
+    std::string val = GetEnv(key);
+    if (val.empty()) {
+        return default_value;
+    }
+    try {
+        return std::stoi(val);
+    } catch (...) {
+        return default_value;
+    }
 }
 
 } // namespace GridSight

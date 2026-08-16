@@ -29,25 +29,35 @@ int main(int argc, char* argv[]) {
 
     GridSight::Utils::Log("INFO", "GridSight Beacon (gs-agent) starting in Session 1...");
 
+    // Load .env configuration
+    GridSight::Utils::LoadEnv(".env");
+
+    std::string multicast_ip = GridSight::Utils::GetEnv("MULTICAST_IP", "239.255.42.99");
+    int multicast_port = GridSight::Utils::GetEnvInt("MULTICAST_PORT", 9001);
+    int http_port = GridSight::Utils::GetEnvInt("HTTP_PORT", 8080);
+    int ws_port = GridSight::Utils::GetEnvInt("WS_PORT", 8081);
+    std::string rtp_ip = GridSight::Utils::GetEnv("RTP_IP", "239.255.42.100");
+    int rtp_port = GridSight::Utils::GetEnvInt("RTP_PORT", 9000);
+
     auto capturer = std::make_shared<GridSight::ScreenCapturer>();
     if (!capturer->Initialize()) {
         GridSight::Utils::Log("ERROR", "Failed to initialize ScreenCapturer");
     }
 
-    // 1. Start Beacon Discovery (UDP Multicast 239.255.42.99:9001)
-    GridSight::BeaconClient beacon_client("239.255.42.99", 9001);
+    // 1. Start Beacon Discovery
+    GridSight::BeaconClient beacon_client(multicast_ip, multicast_port);
     beacon_client.Start();
 
-    // 2. Start HTTP Server for 1 FPS Snapshot Polling (Port 8080)
-    GridSight::HttpServer http_server(8080, capturer);
+    // 2. Start HTTP Server for 1 FPS Snapshot Polling
+    GridSight::HttpServer http_server(http_port, capturer);
     http_server.Start();
 
-    // 3. Start WebSocket Server for On-demand 30 FPS Stream (Port 8081)
-    GridSight::WebSocketStreamer ws_streamer(8081, capturer);
+    // 3. Start WebSocket Server for On-demand 30 FPS Stream
+    GridSight::WebSocketStreamer ws_streamer(ws_port, capturer);
     ws_streamer.Start();
 
-    // 4. Start RTP Receiver for Teacher Multicast Broadcast (239.255.42.100:9000)
-    GridSight::RTPReceiver rtp_receiver("239.255.42.100", 9000);
+    // 4. Start RTP Receiver for Teacher Multicast Broadcast
+    GridSight::RTPReceiver rtp_receiver(rtp_ip, rtp_port);
     rtp_receiver.Start();
 
     GridSight::Utils::Log("INFO", "GridSight Beacon running.");

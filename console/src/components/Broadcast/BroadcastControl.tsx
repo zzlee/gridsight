@@ -1,6 +1,6 @@
 import React from 'react';
 import { BroadcastConfig } from '../../types';
-import { Radio, Play, Square, Settings, Wifi } from 'lucide-react';
+import { Radio, Play, Square, Wifi } from 'lucide-react';
 
 interface BroadcastControlProps {
   config: BroadcastConfig;

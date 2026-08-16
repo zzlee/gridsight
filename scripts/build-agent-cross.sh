@@ -10,7 +10,7 @@ if ! command -v x86_64-w64-mingw32-g++ &> /dev/null; then
 fi
 
 make clean
-make -j$(nproc)
+make CXX=x86_64-w64-mingw32-g++ -j$(nproc)
 
 echo "=== Build Complete: beacon/gs-agent.exe ==="
 ls -lh gs-agent.exe

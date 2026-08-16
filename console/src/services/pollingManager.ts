@@ -1,0 +1,76 @@
+import { StudentDevice } from '../types';
+import { AbortableRequestCircuitBreaker } from '../utils/circuitBreaker';
+
+export class PollingManager {
+  private circuitBreaker = new AbortableRequestCircuitBreaker(800); // 800ms circuit breaker timeout
+  private intervalId: number | null = null;
+  private isPolling = false;
+
+  startPolling(
+    getDevices: () => StudentDevice[],
+    onUpdateDevice: (device: Partial<StudentDevice> & { id: string }) => void,
+    intervalMs = 1000
+  ) {
+    if (this.intervalId) return;
+
+    this.intervalId = window.setInterval(async () => {
+      if (this.isPolling) return;
+      this.isPolling = true;
+
+      const devices = getDevices();
+      const onlineOrDegraded = devices.filter((d) => d.ip && d.status !== 'offline');
+
+      // Batch poll in parallel batches of 10 to protect teacher client socket pool
+      const batchSize = 10;
+      for (let i = 0; i < onlineOrDegraded.length; i += batchSize) {
+        const batch = onlineOrDegraded.slice(i, i + batchSize);
+        await Promise.allSettled(
+          batch.map(async (device) => {
+            const start = performance.now();
+            try {
+              const url = `http://${device.ip}:8080/snapshot?t=${Date.now()}`;
+              const resp = await this.circuitBreaker.fetchWithTimeout(url, {
+                headers: device.token ? { 'X-Auth-Token': device.token } : {},
+              });
+
+              if (resp.ok) {
+                const blob = await resp.blob();
+                const latency = Math.round(performance.now() - start);
+                const thumbUrl = URL.createObjectURL(blob);
+
+                onUpdateDevice({
+                  id: device.id,
+                  thumbnailUrl: thumbUrl,
+                  latencyMs: latency,
+                  lastSeen: Date.now(),
+                  status: latency > 500 ? 'degraded' : 'online',
+                });
+              } else {
+                onUpdateDevice({
+                  id: device.id,
+                  status: 'degraded',
+                  latencyMs: 800,
+                });
+              }
+            } catch (err) {
+              onUpdateDevice({
+                id: device.id,
+                status: 'offline',
+                latencyMs: 999,
+              });
+            }
+          })
+        );
+      }
+
+      this.isPolling = false;
+    }, intervalMs);
+  }
+
+  stopPolling() {
+    if (this.intervalId) {
+      clearInterval(this.intervalId);
+      this.intervalId = null;
+    }
+  }
+}

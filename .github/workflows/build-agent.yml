@@ -1,0 +1,30 @@
+name: Build gs-agent (Beacon)
+
+on:
+  push:
+    branches: [ main, master ]
+  pull_request:
+    branches: [ main, master ]
+
+jobs:
+  cross-compile:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      - name: Install MinGW-w64
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y mingw-w64 cmake make
+
+      - name: Build gs-agent.exe
+        working-directory: beacon
+        run: |
+          make
+
+      - name: Upload Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: gs-agent-windows-x64
+          path: beacon/gs-agent.exe

@@ -21,7 +21,7 @@ jobs:
       - name: Build gs-agent.exe
         working-directory: beacon
         run: |
-          make
+          make CXX=x86_64-w64-mingw32-g++
 
       - name: Upload Artifact
         uses: actions/upload-artifact@v4

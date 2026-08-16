@@ -1,3 +1,4 @@
+#include <thread>
 #include "../include/utils.h"
 #include <iostream>
 #include <chrono>
@@ -79,7 +80,7 @@ void Utils::EnableDPIAwareness() {
 }
 
 void Utils::SleepMs(uint32_t ms) {
-    std::this_thread::sleep_for(std::chrono::milliseconds(ms));
+std::this_thread::sleep_for(std::chrono::milliseconds(ms));
 }
 
 std::string Utils::GenerateRandomToken(size_t length) {

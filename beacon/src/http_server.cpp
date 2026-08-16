@@ -100,15 +100,14 @@ void HttpServer::HandleClient(uintptr_t client_socket) {
     // Check token authentication header if token set
     std::string token_header;
     std::string line;
-    while (std::getline(stream, line) && line != "") {
+    while (std::getline(stream, line) && line != "\r" && line != "") {
         if (line.find("X-Auth-Token:") == 0 || line.find("x-auth-token:") == 0) {
             size_t colon = line.find(':');
             if (colon != std::string::npos) {
                 token_header = line.substr(colon + 1);
-                while (!token_header.empty() && (token_header.front() == ' ' || token_header.front() == '	'))
+                while (!token_header.empty() && (token_header.front() == ' ' || token_header.front() == '\t'))
                     token_header.erase(0, 1);
-                while (!token_header.empty() && (token_header.back() == '' || token_header.back() == '
-' || token_header.back() == ' '))
+                while (!token_header.empty() && (token_header.back() == '\r' || token_header.back() == '\n' || token_header.back() == ' '))
                     token_header.pop_back();
             }
         }
@@ -116,7 +115,7 @@ void HttpServer::HandleClient(uintptr_t client_socket) {
 
     if (TokenManager::Instance().HasValidToken()) {
         if (!TokenManager::Instance().ValidateToken(token_header)) {
-            std::string err = "{"error":"Unauthorized: Invalid X-Auth-Token"}";
+            std::string err = "{\"error\":\"Unauthorized: Invalid X-Auth-Token\"}";
             SendResponse(client_socket, 401, "application/json", std::vector<uint8_t>(err.begin(), err.end()));
             closesocket(s);
             return;
@@ -130,14 +129,14 @@ void HttpServer::HandleClient(uintptr_t client_socket) {
             ImageEncoder::EncodeToJPEG(frame.bgra_buffer.data(), frame.width, frame.height, 480, 270, 75, jpeg_data);
             SendResponse(client_socket, 200, "image/jpeg", jpeg_data);
         } else {
-            std::string err = "{"error":"Capture failed"}";
+            std::string err = "{\"error\":\"Capture failed\"}";
             SendResponse(client_socket, 500, "application/json", std::vector<uint8_t>(err.begin(), err.end()));
         }
     } else if (path == "/ping" || path == "/status") {
-        std::string json = "{"status":"ok","service":"GridSight Beacon"}";
+        std::string json = "{\"status\":\"ok\",\"service\":\"GridSight Beacon\"}";
         SendResponse(client_socket, 200, "application/json", std::vector<uint8_t>(json.begin(), json.end()));
     } else {
-        std::string not_found = "{"error":"Not found"}";
+        std::string not_found = "{\"error\":\"Not found\"}";
         SendResponse(client_socket, 404, "application/json", std::vector<uint8_t>(not_found.begin(), not_found.end()));
     }
 
@@ -151,19 +150,12 @@ void HttpServer::SendResponse(uintptr_t client_socket, int status_code,
     SOCKET s = (SOCKET)client_socket;
     std::string status_msg = (status_code == 200) ? "200 OK" : (status_code == 401 ? "401 Unauthorized" : "404 Not Found");
     std::ostringstream oss;
-    oss << "HTTP/1.1 " << status_msg << "
-"
-        << "Access-Control-Allow-Origin: *
-"
-        << "Access-Control-Allow-Headers: X-Auth-Token, Content-Type
-"
-        << "Content-Type: " << content_type << "
-"
-        << "Content-Length: " << body.size() << "
-"
-        << "Connection: close
-
-";
+    oss << "HTTP/1.1 " << status_msg << "\r\n"
+        << "Access-Control-Allow-Origin: *\r\n"
+        << "Access-Control-Allow-Headers: X-Auth-Token, Content-Type\r\n"
+        << "Content-Type: " << content_type << "\r\n"
+        << "Content-Length: " << body.size() << "\r\n"
+        << "Connection: close\r\n\r\n";
     
     std::string header = oss.str();
     send(s, header.c_str(), (int)header.length(), 0);

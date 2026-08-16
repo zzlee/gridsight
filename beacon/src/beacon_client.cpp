@@ -45,11 +45,11 @@ void BeaconClient::DiscoveryLoop() {
 
     while (running_) {
         // Send UDP announcement
-        std::string payload = "{"type":"BEACON","hostname":"" + net_info.hostname +
-                              "","ip":"" + net_info.ip +
-                              "","mac":"" + net_info.mac +
-                              "","username":"" + net_info.username +
-                              "","timestamp":" + std::to_string(Utils::GetCurrentTimestampMs()) + "}";
+        std::string payload = "{\"type\":\"BEACON\",\"hostname\":\"" + net_info.hostname +
+                              "\",\"ip\":\"" + net_info.ip +
+                              "\",\"mac\":\"" + net_info.mac +
+                              "\",\"username\":\"" + net_info.username +
+                              "\",\"timestamp\":" + std::to_string(Utils::GetCurrentTimestampMs()) + "}";
 
 #ifdef _WIN32
         SOCKET sock = socket(AF_INET, SOCK_DGRAM, 0);
@@ -60,6 +60,10 @@ void BeaconClient::DiscoveryLoop() {
             inet_pton(AF_INET, multicast_ip_.c_str(), &addr.sin_addr);
 
             sendto(sock, payload.c_str(), (int)payload.length(), 0, (sockaddr*)&addr, sizeof(addr));
+
+            // Listen for TOKEN_GRANT response
+            ListenForToken((int)sock);
+
             closesocket(sock);
         }
 #endif
@@ -68,6 +72,46 @@ void BeaconClient::DiscoveryLoop() {
         int sleep_time = jitter_dist(gen);
         Utils::SleepMs(sleep_time + 3000);
     }
+}
+
+void BeaconClient::ListenForToken(int socket_fd) {
+#ifdef _WIN32
+    SOCKET sock = (SOCKET)socket_fd;
+
+    // Set socket to non-blocking or use select with timeout
+    fd_set readfds;
+    FD_ZERO(&readfds);
+    FD_SET(sock, &readfds);
+
+    timeval tv;
+    tv.tv_sec = 2; // Wait up to 2 seconds for a token grant
+    tv.tv_usec = 0;
+
+    int ret = select(0, &readfds, NULL, NULL, &tv);
+    if (ret > 0) {
+        if (FD_ISSET(sock, &readfds)) {
+            char buffer[1024] = {0};
+            sockaddr_in from_addr;
+            int from_len = sizeof(from_addr);
+
+            int bytes = recvfrom(sock, buffer, sizeof(buffer) - 1, 0, (sockaddr*)&from_addr, &from_len);
+            if (bytes > 0) {
+                std::string response(buffer, bytes);
+                // Simple JSON parsing to find token
+                size_t token_pos = response.find("\"token\":\"");
+                if (token_pos != std::string::npos) {
+                    token_pos += 9;
+                    size_t token_end = response.find("\"", token_pos);
+                    if (token_end != std::string::npos) {
+                        std::string token = response.substr(token_pos, token_end - token_pos);
+                        TokenManager::Instance().SetSessionToken(token);
+                        Utils::Log("INFO", "Received dynamic session token: " + token);
+                    }
+                }
+            }
+        }
+    }
+#endif
 }
 
 } // namespace GridSight

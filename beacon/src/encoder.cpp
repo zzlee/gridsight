@@ -241,24 +241,7 @@ bool ImageEncoder::EncodeToJPEG(const uint8_t* bgra_data, int width, int height,
         return true;
     }
 
-    // 2. Primary: Try Windows WIC Hardware/SIMD Engine
-    static bool wic_available = true;
-    static bool wic_attempted = false;
-
-    if (wic_available) {
-        if (EncodeWithWIC(bgra_data, width, height, target_width, target_height, quality, out_jpeg)) {
-            g_active_engine_name = "Windows WIC (Hardware/SIMD)";
-            tl_last_hash = current_hash;
-            tl_cached_jpeg = out_jpeg;
-            return true;
-        }
-        if (!wic_attempted) {
-            wic_attempted = true;
-            wic_available = false; // Mark unavailable to avoid repeated slow COM failures
-        }
-    }
-
-    // 3. Fallback: Fast Turbo SIMD / Fixed-point Engine
+    // 2. High performance RGB downscaler and JPEG encoder (100% stride aligned)
     g_active_engine_name = "Turbo SIMD / Fast-DCT Engine";
     if (EncodeWithTurbo(bgra_data, width, height, target_width, target_height, quality, out_jpeg)) {
         tl_last_hash = current_hash;

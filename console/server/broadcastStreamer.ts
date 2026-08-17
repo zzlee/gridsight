@@ -1,4 +1,5 @@
 import { spawn, ChildProcess } from 'child_process';
+import { logger } from './logger.js';
 
 export interface StreamerOptions {
   multicastIp?: string;
@@ -19,7 +20,7 @@ export class TeacherBroadcastStreamer {
     const fps = options.fps || 30;
     const bitrate = options.bitrateKbps || 5000;
 
-    console.log(`[Broadcast] Initiating RTP Multicast Stream -> ${multicastIp}:${port} @ ${fps}fps (${bitrate}kbps)`);
+    logger.info(`[Broadcast] Initiating RTP Multicast Stream -> ${multicastIp}:${port} @ ${fps}fps (${bitrate}kbps)`);
 
     // FFmpeg pipeline: capture X11/D3D screen, encode OpenH264/NVENC, output RTP Multicast
     const ffmpegArgs = [
@@ -48,12 +49,12 @@ export class TeacherBroadcastStreamer {
       });
 
       this.process.on('close', (code) => {
-        console.log(`[Broadcast] Streamer exited with code ${code}`);
+        logger.info(`[Broadcast] Streamer exited with code ${code}`);
         this.isStreaming = false;
         this.process = null;
       });
     } catch (err) {
-      console.error('[Broadcast] Failed to spawn FFmpeg streamer:', err);
+      logger.error('[Broadcast] Failed to spawn FFmpeg streamer:', err);
     }
   }
 
@@ -63,7 +64,7 @@ export class TeacherBroadcastStreamer {
       this.process = null;
     }
     this.isStreaming = false;
-    console.log('[Broadcast] Broadcast stream terminated.');
+    logger.info('[Broadcast] Broadcast stream terminated.');
   }
 
   isActive() {

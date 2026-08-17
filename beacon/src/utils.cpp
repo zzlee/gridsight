@@ -9,6 +9,7 @@
 #include <fstream>
 #include <map>
 #include <cstdlib>
+#include <mutex>
 
 #ifdef _WIN32
 #include <winsock2.h>
@@ -101,8 +102,35 @@ std::string Utils::GenerateRandomToken(size_t length) {
     return result;
 }
 
+static std::mutex g_log_mutex;
+static std::ofstream g_log_file;
+static bool g_log_initialized = false;
+
 void Utils::Log(const std::string& level, const std::string& message) {
-    std::cout << "[" << level << "] " << message << std::endl;
+    std::lock_guard<std::mutex> lock(g_log_mutex);
+
+    if (!g_log_initialized) {
+        g_log_file.open("gs-agent.log", std::ios::app);
+        g_log_initialized = true;
+    }
+
+    auto now = std::chrono::system_clock::now();
+    std::time_t now_c = std::chrono::system_clock::to_time_t(now);
+    std::tm now_tm;
+#ifdef _WIN32
+    localtime_s(&now_tm, &now_c);
+#else
+    localtime_r(&now_c, &now_tm);
+#endif
+
+    std::stringstream ss;
+    ss << "[" << std::put_time(&now_tm, "%Y-%m-%d %H:%M:%S") << "] [" << level << "] " << message;
+
+    std::cout << ss.str() << std::endl;
+    if (g_log_file.is_open()) {
+        g_log_file << ss.str() << std::endl;
+        g_log_file.flush();
+    }
 }
 
 static std::map<std::string, std::string> g_env_vars;

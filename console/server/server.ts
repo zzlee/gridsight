@@ -4,6 +4,7 @@ import cors from 'cors';
 import { TokenAuthority } from './tokenAuthority.js';
 import { MulticastDiscoveryService } from './multicastDiscovery.js';
 import { TeacherBroadcastStreamer } from './broadcastStreamer.js';
+import { logger } from './logger.js';
 
 const app = express();
 const PORT = process.env.API_PORT ? parseInt(process.env.API_PORT, 10) : 3001;
@@ -15,7 +16,7 @@ app.use(express.json());
 const tokenAuth = new TokenAuthority();
 const broadcastStreamer = new TeacherBroadcastStreamer();
 const discoveryService = new MulticastDiscoveryService(tokenAuth, (device) => {
-  console.log(`[Discovery] New Beacon: ${device.hostname} (${device.ip})`);
+  logger.info(`[Discovery] New Beacon: ${device.hostname} (${device.ip})`);
 });
 
 discoveryService.start();
@@ -39,5 +40,5 @@ app.get('/api/broadcast/status', (req, res) => {
 });
 
 app.listen(PORT, HOST, () => {
-  console.log(`[GridSight Server] Coordinator API running on http://${HOST}:${PORT}`);
+  logger.info(`[GridSight Server] Coordinator API running on http://${HOST}:${PORT}`);
 });

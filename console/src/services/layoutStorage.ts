@@ -1,6 +1,6 @@
-import { ClassroomLayout } from '../types';
+import { ClassroomLayout, StudentDevice } from '../types';
 
-const STORAGE_KEY = 'gridsight_layouts_v6';
+const STORAGE_KEY = 'gridsight_layouts_v7';
 
 export const LayoutStorage = {
   saveLayout(layout: ClassroomLayout) {
@@ -16,11 +16,11 @@ export const LayoutStorage = {
 
   getAllLayouts(): ClassroomLayout[] {
     const data = localStorage.getItem(STORAGE_KEY);
-    if (!data) return [this.getDefaultPreset('matrix')];
+    if (!data) return [this.createMatrixLayout(8, 6, '電腦教室 (8×6, 48台)')];
     try {
       return JSON.parse(data);
     } catch {
-      return [this.getDefaultPreset('matrix')];
+      return [this.createMatrixLayout(8, 6, '電腦教室 (8×6, 48台)')];
     }
   },
 
@@ -36,72 +36,29 @@ export const LayoutStorage = {
     }
   },
 
-  getDefaultPreset(type: 'matrix' | 'aisle' | 'island'): ClassroomLayout {
-    if (type === 'aisle') {
-      // Dual-zone center aisle (5x7 left + 5x7 right = 70 seats)
-      const seats = [];
-      let count = 1;
-      for (let r = 0; r < 7; r++) {
-        for (let c = 0; c < 5; c++) {
-          seats.push({
-            id: `PC-${String(count).padStart(2, '0')}`,
-            hostname: `PC-${String(count).padStart(2, '0')}`,
-            ip: `192.168.1.${100 + count}`,
-            mac: `00:1A:2B:3C:4D:${String(count).padStart(2, '0')}`,
-            username: `Student${String(count).padStart(2, '0')}`,
-            seatNo: `L${r + 1}-${c + 1}`,
-            gridX: c,
-            gridY: r + 1,
-            status: 'offline' as const,
-            latencyMs: 0,
-            lastSeen: 0,
-          });
-          count++;
-        }
-        for (let c = 6; c < 11; c++) {
-          seats.push({
-            id: `PC-${String(count).padStart(2, '0')}`,
-            hostname: `PC-${String(count).padStart(2, '0')}`,
-            ip: `192.168.1.${100 + count}`,
-            mac: `00:1A:2B:3C:4D:${String(count).padStart(2, '0')}`,
-            username: `Student${String(count).padStart(2, '0')}`,
-            seatNo: `R${r + 1}-${c - 5}`,
-            gridX: c,
-            gridY: r + 1,
-            status: 'offline' as const,
-            latencyMs: 0,
-            lastSeen: 0,
-          });
-          count++;
-        }
-      }
-      return {
-        id: 'layout-aisle-70',
-        name: '雙分區中走道 (左5×7 + 右5×7, 70台)',
-        rows: 9,
-        cols: 11,
-        seats,
-        aisles: [{ id: 'aisle-center', type: 'vertical', index: 5, label: '中央走道' }],
-        obstacles: [
-          { id: 'obs-podium', gridX: 4, gridY: 0, width: 3, height: 1, label: '教師講台 / 黑板', type: 'podium' }
-        ]
-      };
-    }
-
-    // Default: Standard Matrix 7x10
-    const seats = [];
+  /**
+   * Generates a customizable X * Y standard matrix layout (No person limit).
+   * @param cols Number of horizontal columns (X)
+   * @param rows Number of vertical rows (Y)
+   * @param name Classroom layout name
+   */
+  createMatrixLayout(cols: number, rows: number, name?: string): ClassroomLayout {
+    const seats: StudentDevice[] = [];
     let count = 1;
-    for (let r = 0; r < 7; r++) {
-      for (let c = 0; c < 10; c++) {
+
+    for (let r = 0; r < rows; r++) {
+      const rowLabel = String.fromCharCode(65 + (r % 26)) + (r >= 26 ? Math.floor(r / 26) : '');
+      for (let c = 0; c < cols; c++) {
+        const seatNo = `${rowLabel}${c + 1}`;
         seats.push({
           id: `PC-${String(count).padStart(2, '0')}`,
           hostname: `PC-${String(count).padStart(2, '0')}`,
           ip: `192.168.1.${100 + count}`,
           mac: `00:1A:2B:3C:4D:${String(count).padStart(2, '0')}`,
           username: `Student${String(count).padStart(2, '0')}`,
-          seatNo: `${String.fromCharCode(65 + r)}${c + 1}`,
+          seatNo,
           gridX: c,
-          gridY: r + 1,
+          gridY: r + 1, // Row 0 is reserved for podium/blackboard
           status: 'offline' as const,
           latencyMs: 0,
           lastSeen: 0,
@@ -109,16 +66,28 @@ export const LayoutStorage = {
         count++;
       }
     }
+
+    const podiumWidth = Math.min(cols, Math.max(2, Math.floor(cols * 0.4)));
+    const podiumX = Math.max(0, Math.floor((cols - podiumWidth) / 2));
+
     return {
-      id: 'layout-matrix-70',
-      name: '標準矩陣 (7×10, 70台)',
-      rows: 9,
-      cols: 10,
+      id: `layout-matrix-${cols}x${rows}-${Date.now()}`,
+      name: name || `標準矩陣 (${cols}×${rows}, ${cols * rows}台)`,
+      rows: rows + 1, // +1 for teacher podium row
+      cols: Math.max(cols, 4),
       seats,
       aisles: [],
       obstacles: [
-        { id: 'obs-podium', gridX: 3, gridY: 0, width: 4, height: 1, label: '講台 / 黑板', type: 'podium' }
-      ]
+        {
+          id: 'obs-podium',
+          gridX: podiumX,
+          gridY: 0,
+          width: podiumWidth,
+          height: 1,
+          label: '教師講台 / 黑板',
+          type: 'podium',
+        },
+      ],
     };
-  }
+  },
 };

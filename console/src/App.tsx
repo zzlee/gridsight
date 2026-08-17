@@ -1,10 +1,10 @@
 import React, { useEffect, useState, useRef } from 'react';
-import { ClassroomLayout, StudentDevice, AppMode, BroadcastConfig } from './types';
+import { ClassroomLayout, StudentDevice, AppMode } from './types';
 import { TopNav } from './components/Toolbar/TopNav';
 import { GridCanvas } from './components/Canvas/GridCanvas';
 import { FocusModal } from './components/Viewer/FocusModal';
 import { DeviceSpecsModal } from './components/Viewer/DeviceSpecsModal';
-import { PresetsModal } from './components/Toolbar/PresetsModal';
+import { MatrixConfigModal } from './components/Toolbar/MatrixConfigModal';
 import { DevicePool } from './components/Toolbar/DevicePool';
 import { AuthLockModal } from './components/Auth/AuthLockModal';
 import { ChangePinModal } from './components/Auth/ChangePinModal';
@@ -20,14 +20,18 @@ export const App: React.FC = () => {
   const [isLocked, setIsLocked] = useState(true);
   const [isChangePinOpen, setIsChangePinOpen] = useState(false);
   const [mode, setMode] = useState<AppMode>('MONITOR');
-  const [layout, setLayout] = useState<ClassroomLayout>(() => LayoutStorage.getDefaultPreset('aisle'));
+  const [layout, setLayout] = useState<ClassroomLayout>(() => {
+    const saved = LayoutStorage.getAllLayouts();
+    return saved.length > 0 ? saved[0] : LayoutStorage.createMatrixLayout(8, 6, '電腦教室 (8×6, 48台)');
+  });
   const layoutRef = useRef(layout);
   useEffect(() => {
     layoutRef.current = layout;
   }, [layout]);
+
   const [focusDevice, setFocusDevice] = useState<StudentDevice | null>(null);
   const [specsDevice, setSpecsDevice] = useState<StudentDevice | null>(null);
-  const [isPresetsOpen, setIsPresetsOpen] = useState(false);
+  const [isMatrixConfigOpen, setIsMatrixConfigOpen] = useState(false);
   const [isDevicePoolOpen, setIsDevicePoolOpen] = useState(false);
   const [zoom, setZoom] = useState(0.85);
 
@@ -173,39 +177,10 @@ export const App: React.FC = () => {
   };
 
   const handleUnbindSeat = (id: string) => {
-    setLayout((prev) => ({
-      ...prev,
-      seats: prev.seats.filter((s) => s.id !== id),
-    }));
+    handleReturnToPool(id);
   };
 
-  const handleAutoAssign = () => {
-    // Assign unassigned devices sequentially into seats
-    setLayout((prev) => {
-      let seatIdx = 0;
-      const updatedSeats = [...prev.seats];
-      unassignedDevices.forEach((dev) => {
-        while (seatIdx < updatedSeats.length && updatedSeats[seatIdx].status === 'online') {
-          seatIdx++;
-        }
-        if (seatIdx < updatedSeats.length) {
-          updatedSeats[seatIdx] = {
-            ...updatedSeats[seatIdx],
-            id: dev.id,
-            hostname: dev.hostname,
-            ip: dev.ip,
-            mac: dev.mac,
-            token: dev.token,
-            status: 'online',
-          };
-          seatIdx++;
-        }
-      });
-      setUnassignedDevices([]);
-      return { ...prev, seats: updatedSeats };
-    });
-  };
-
+  // Drag & Drop: Swap two seats on the grid
   const handleSwapSeats = (idA: string, idB: string) => {
     setLayout((prev) => {
       const idxA = prev.seats.findIndex((s) => s.id === idA);
@@ -229,6 +204,7 @@ export const App: React.FC = () => {
     });
   };
 
+  // Drag & Drop: Move a seat to an empty grid cell [x, y]
   const handleMoveSeat = (id: string, newGridX: number, newGridY: number) => {
     setLayout((prev) => {
       const updated = prev.seats.map((s) => (s.id === id ? { ...s, gridX: newGridX, gridY: newGridY } : s));
@@ -238,6 +214,245 @@ export const App: React.FC = () => {
     });
   };
 
+  // Drag & Drop: Return a student card from canvas back to Device Pool
+  const handleReturnToPool = (seatId: string) => {
+    setLayout((prev) => {
+      const seat = prev.seats.find((s) => s.id === seatId);
+      if (!seat) return prev;
+
+      // Add to unassigned devices if it is a real online machine or discovered device
+      if (seat.status === 'online' || seat.mac || !seat.id.startsWith('PC-Slot-')) {
+        setUnassignedDevices((pool) => {
+          if (pool.some((d) => d.id === seat.id || (d.mac && d.mac === seat.mac) || d.ip === seat.ip)) {
+            return pool;
+          }
+          return [...pool, seat];
+        });
+      }
+
+      // Remove from active layout seats
+      const updatedSeats = prev.seats.filter((s) => s.id !== seatId);
+      const newLayout = { ...prev, seats: updatedSeats };
+      LayoutStorage.saveLayout(newLayout);
+      return newLayout;
+    });
+  };
+
+  // Drag & Drop: Drag an unassigned machine from Device Pool into canvas grid [x, y]
+  const handleAssignFromPool = (deviceId: string, targetGridX: number, targetGridY: number) => {
+    const dev = unassignedDevices.find((d) => d.id === deviceId);
+    if (!dev) return;
+
+    // Remove from unassigned pool
+    setUnassignedDevices((prev) => prev.filter((d) => d.id !== deviceId));
+
+    setLayout((prev) => {
+      const rowLabel = String.fromCharCode(65 + ((targetGridY - 1) % 26));
+      const seatNo = `${rowLabel}${targetGridX + 1}`;
+
+      // If a seat already exists at target coordinate, return that old seat to pool
+      const existingSeat = prev.seats.find((s) => s.gridX === targetGridX && s.gridY === targetGridY);
+      if (existingSeat && (existingSeat.status === 'online' || existingSeat.mac)) {
+        setUnassignedDevices((pool) => [...pool, existingSeat]);
+      }
+
+      const otherSeats = prev.seats.filter(
+        (s) => !(s.gridX === targetGridX && s.gridY === targetGridY) && s.id !== dev.id
+      );
+
+      const newSeat: StudentDevice = {
+        ...dev,
+        gridX: targetGridX,
+        gridY: targetGridY,
+        seatNo: dev.seatNo || seatNo,
+        status: 'online',
+      };
+
+      const newLayout = {
+        ...prev,
+        seats: [...otherSeats, newSeat],
+      };
+      LayoutStorage.saveLayout(newLayout);
+      return newLayout;
+    });
+  };
+
+  // Auto assign all unassigned pool devices sequentially into empty seats
+  const handleAutoAssign = () => {
+    setLayout((prev) => {
+      const occupiedCoords = new Set(prev.seats.map((s) => `${s.gridX},${s.gridY}`));
+      const newSeats = [...prev.seats];
+      const remainingPool: StudentDevice[] = [];
+
+      unassignedDevices.forEach((dev) => {
+        let assigned = false;
+        for (let r = 1; r < prev.rows; r++) {
+          for (let c = 0; c < prev.cols; c++) {
+            const key = `${c},${r}`;
+            if (!occupiedCoords.has(key)) {
+              occupiedCoords.add(key);
+              const rowLabel = String.fromCharCode(65 + ((r - 1) % 26));
+              newSeats.push({
+                ...dev,
+                gridX: c,
+                gridY: r,
+                seatNo: `${rowLabel}${c + 1}`,
+                status: 'online',
+              });
+              assigned = true;
+              break;
+            }
+          }
+          if (assigned) break;
+        }
+
+        if (!assigned) {
+          remainingPool.push(dev);
+        }
+      });
+
+      setUnassignedDevices(remainingPool);
+      const newLayout = { ...prev, seats: newSeats };
+      LayoutStorage.saveLayout(newLayout);
+      return newLayout;
+    });
+  };
+
+  const handleAssignToFirstAvailable = (device: StudentDevice) => {
+    setLayout((prev) => {
+      const occupiedCoords = new Set(prev.seats.map((s) => `${s.gridX},${s.gridY}`));
+      let targetX = 0;
+      let targetY = 1;
+      let found = false;
+
+      for (let r = 1; r < prev.rows; r++) {
+        for (let c = 0; c < prev.cols; c++) {
+          if (!occupiedCoords.has(`${c},${r}`)) {
+            targetX = c;
+            targetY = r;
+            found = true;
+            break;
+          }
+        }
+        if (found) break;
+      }
+
+      if (!found) {
+        targetX = 0;
+        targetY = prev.rows;
+      }
+
+      setUnassignedDevices((pool) => pool.filter((d) => d.id !== device.id));
+
+      const rowLabel = String.fromCharCode(65 + ((targetY - 1) % 26));
+      const newSeat: StudentDevice = {
+        ...device,
+        gridX: targetX,
+        gridY: targetY,
+        seatNo: `${rowLabel}${targetX + 1}`,
+        status: 'online',
+      };
+
+      const newLayout = {
+        ...prev,
+        rows: Math.max(prev.rows, targetY + 1),
+        seats: [...prev.seats, newSeat],
+      };
+      LayoutStorage.saveLayout(newLayout);
+      return newLayout;
+    });
+  };
+
+  // Apply customizable X * Y Matrix Dimensions
+  const handleApplyMatrix = (cols: number, rows: number, name: string, keepExisting: boolean) => {
+    if (!keepExisting) {
+      // Move all current online devices into unassigned pool
+      const onlineAssigned = layout.seats.filter((s) => s.status === 'online');
+      setUnassignedDevices((prev) => {
+        const poolIps = new Set(prev.map((d) => d.ip));
+        const added = onlineAssigned.filter((d) => !poolIps.has(d.ip));
+        return [...prev, ...added];
+      });
+
+      const newLayout = LayoutStorage.createMatrixLayout(cols, rows, name);
+      setLayout(newLayout);
+      LayoutStorage.saveLayout(newLayout);
+    } else {
+      const withinBounds: StudentDevice[] = [];
+      const outOfBounds: StudentDevice[] = [];
+
+      layout.seats.forEach((seat) => {
+        if (seat.gridX < cols && seat.gridY <= rows) {
+          withinBounds.push(seat);
+        } else {
+          if (seat.status === 'online' || seat.mac) {
+            outOfBounds.push(seat);
+          }
+        }
+      });
+
+      if (outOfBounds.length > 0) {
+        setUnassignedDevices((prev) => {
+          const poolIps = new Set(prev.map((d) => d.ip));
+          const added = outOfBounds.filter((d) => !poolIps.has(d.ip));
+          return [...prev, ...added];
+        });
+      }
+
+      // Fill in empty coordinates with clean empty seat slots
+      const existingCoordSet = new Set(withinBounds.map((s) => `${s.gridX},${s.gridY}`));
+      let count = withinBounds.length + 1;
+      for (let r = 0; r < rows; r++) {
+        const rowLabel = String.fromCharCode(65 + (r % 26));
+        for (let c = 0; c < cols; c++) {
+          const key = `${c},${r + 1}`;
+          if (!existingCoordSet.has(key)) {
+            withinBounds.push({
+              id: `PC-Slot-${c}-${r + 1}`,
+              hostname: `PC-${String(count).padStart(2, '0')}`,
+              ip: `192.168.1.${100 + count}`,
+              mac: `00:1A:2B:3C:4D:${String(count).padStart(2, '0')}`,
+              username: `Student${String(count).padStart(2, '0')}`,
+              seatNo: `${rowLabel}${c + 1}`,
+              gridX: c,
+              gridY: r + 1,
+              status: 'offline',
+              latencyMs: 0,
+              lastSeen: 0,
+            });
+            count++;
+          }
+        }
+      }
+
+      const podiumWidth = Math.min(cols, Math.max(2, Math.floor(cols * 0.4)));
+      const podiumX = Math.max(0, Math.floor((cols - podiumWidth) / 2));
+
+      const newLayout: ClassroomLayout = {
+        id: `layout-matrix-${cols}x${rows}-${Date.now()}`,
+        name: name || `標準矩陣 (${cols}×${rows}, ${cols * rows}台)`,
+        cols: Math.max(cols, 4),
+        rows: rows + 1,
+        seats: withinBounds,
+        aisles: [],
+        obstacles: [
+          {
+            id: 'obs-podium',
+            gridX: podiumX,
+            gridY: 0,
+            width: podiumWidth,
+            height: 1,
+            label: '教師講台 / 黑板',
+            type: 'podium',
+          },
+        ],
+      };
+
+      setLayout(newLayout);
+      LayoutStorage.saveLayout(newLayout);
+    }
+  };
+
   return (
     <div className="w-screen h-screen flex flex-col bg-slate-950 overflow-hidden">
       <TopNav
@@ -245,8 +460,9 @@ export const App: React.FC = () => {
         setMode={setMode}
         layout={layout}
         onLayoutChange={setLayout}
-        onOpenPresets={() => setIsPresetsOpen(true)}
+        onOpenMatrixConfig={() => setIsMatrixConfigOpen(true)}
         onOpenDevicePool={() => setIsDevicePoolOpen(true)}
+        unassignedCount={unassignedDevices.length}
         zoom={zoom}
         setZoom={setZoom}
         onResetView={() => setZoom(0.85)}
@@ -269,6 +485,7 @@ export const App: React.FC = () => {
         }}
         onSwapSeats={handleSwapSeats}
         onMoveSeat={handleMoveSeat}
+        onAssignFromPool={handleAssignFromPool}
       />
 
       {/* Focus 30FPS WebCodecs Viewer Modal */}
@@ -283,22 +500,22 @@ export const App: React.FC = () => {
         onClose={() => setSpecsDevice(null)}
       />
 
-      {/* Layout Presets Modal */}
-      <PresetsModal
-        isOpen={isPresetsOpen}
-        onClose={() => setIsPresetsOpen(false)}
-        onSelectLayout={(newLayout) => {
-          setLayout(newLayout);
-          LayoutStorage.saveLayout(newLayout);
-        }}
+      {/* X * Y Standard Matrix Customizer Modal */}
+      <MatrixConfigModal
+        isOpen={isMatrixConfigOpen}
+        onClose={() => setIsMatrixConfigOpen(false)}
+        currentLayout={layout}
+        onApplyMatrix={handleApplyMatrix}
       />
 
-      {/* Device Pool Drawer */}
+      {/* Device Pool Drawer (Two-Way Drag-and-Drop) */}
       <DevicePool
         isOpen={isDevicePoolOpen}
         onClose={() => setIsDevicePoolOpen(false)}
         unassignedDevices={unassignedDevices}
         onAutoAssign={handleAutoAssign}
+        onReturnToPool={handleReturnToPool}
+        onAssignToFirstAvailable={handleAssignToFirstAvailable}
       />
 
       {/* Change Teacher PIN Modal */}

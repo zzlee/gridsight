@@ -1,7 +1,6 @@
 import React, { useRef, useState, useEffect, useCallback } from 'react';
 import { ClassroomLayout, StudentDevice, AppMode } from '../../types';
 import { StudentCard } from './StudentCard';
-import { AisleMarker } from './AisleMarker';
 import { ObstacleMarker } from './ObstacleMarker';
 import { MiniMap } from './MiniMap';
 
@@ -17,6 +16,7 @@ interface GridCanvasProps {
   onVisibleSeatsChange?: (visibleIds: Set<string>) => void;
   onSwapSeats?: (idA: string, idB: string) => void;
   onMoveSeat?: (id: string, newGridX: number, newGridY: number) => void;
+  onAssignFromPool?: (deviceId: string, targetGridX: number, targetGridY: number) => void;
 }
 
 export const GridCanvas: React.FC<GridCanvasProps> = ({
@@ -31,6 +31,7 @@ export const GridCanvas: React.FC<GridCanvasProps> = ({
   onVisibleSeatsChange,
   onSwapSeats,
   onMoveSeat,
+  onAssignFromPool,
 }) => {
   const containerRef = useRef<HTMLDivElement>(null);
   const [pan, setPan] = useState({ x: 0, y: 0 });
@@ -43,8 +44,8 @@ export const GridCanvas: React.FC<GridCanvasProps> = ({
   const [dragOverCell, setDragOverCell] = useState<{ x: number; y: number } | null>(null);
 
   const handleMouseDown = (e: React.MouseEvent) => {
-    // In edit mode or monitor mode, Middle-click or Alt+Left-click triggers canvas panning
-    if (e.button === 1 || (e.button === 0 && (e.altKey || (mode === 'MONITOR' && e.target === containerRef.current)))) {
+    // Middle-click or Alt+Left-click or background drag triggers canvas panning
+    if (e.button === 1 || (e.button === 0 && (e.altKey || e.target === containerRef.current))) {
       setIsPanning(true);
       setStartPan({ x: e.clientX - pan.x, y: e.clientY - pan.y });
     }
@@ -113,6 +114,7 @@ export const GridCanvas: React.FC<GridCanvasProps> = ({
   // Handle Drag Events for Cards
   const handleCardDragStart = (e: React.DragEvent, id: string) => {
     e.dataTransfer.setData('text/plain', id);
+    e.dataTransfer.setData('source', 'canvas-seat');
     e.dataTransfer.effectAllowed = 'move';
     setDraggedSeatId(id);
   };
@@ -141,10 +143,18 @@ export const GridCanvas: React.FC<GridCanvasProps> = ({
   const handleCardDrop = (e: React.DragEvent, targetId: string) => {
     e.preventDefault();
     e.stopPropagation();
+    const source = e.dataTransfer.getData('source');
     const sourceId = e.dataTransfer.getData('text/plain') || draggedSeatId;
-    if (sourceId && sourceId !== targetId && onSwapSeats) {
+    const targetSeat = layout.seats.find((s) => s.id === targetId);
+
+    if (source === 'device-pool') {
+      if (sourceId && targetSeat && onAssignFromPool) {
+        onAssignFromPool(sourceId, targetSeat.gridX, targetSeat.gridY);
+      }
+    } else if (sourceId && sourceId !== targetId && onSwapSeats) {
       onSwapSeats(sourceId, targetId);
     }
+
     setDraggedSeatId(null);
     setDragOverSeatId(null);
     setDragOverCell(null);
@@ -161,10 +171,17 @@ export const GridCanvas: React.FC<GridCanvasProps> = ({
 
   const handleCellDrop = (e: React.DragEvent, x: number, y: number) => {
     e.preventDefault();
+    const source = e.dataTransfer.getData('source');
     const sourceId = e.dataTransfer.getData('text/plain') || draggedSeatId;
-    if (sourceId && onMoveSeat) {
+
+    if (source === 'device-pool') {
+      if (sourceId && onAssignFromPool) {
+        onAssignFromPool(sourceId, x, y);
+      }
+    } else if (sourceId && onMoveSeat) {
       onMoveSeat(sourceId, x, y);
     }
+
     setDraggedSeatId(null);
     setDragOverSeatId(null);
     setDragOverCell(null);
@@ -172,6 +189,10 @@ export const GridCanvas: React.FC<GridCanvasProps> = ({
 
   // Create lookup set for occupied grid cells
   const occupiedCells = new Set(layout.seats.map((s) => `${s.gridX},${s.gridY}`));
+
+  // Matrix bounds
+  const totalCols = layout.cols;
+  const totalRows = layout.rows;
 
   return (
     <div
@@ -202,26 +223,28 @@ export const GridCanvas: React.FC<GridCanvasProps> = ({
           transformOrigin: '0 0',
         }}
       >
-        {/* In Edit Mode: Render Drop-Target Grid Matrix for Empty Cells */}
-        {mode === 'EDIT_LAYOUT' && (
+        {/* Render Drop-Target Grid Matrix for Empty Cells (in Edit Mode or when Dragging) */}
+        {(mode === 'EDIT_LAYOUT' || draggedSeatId) && (
           <div className="absolute inset-0 pointer-events-none">
-            {Array.from({ length: layout.rows + 2 }).map((_, r) =>
-              Array.from({ length: layout.cols + 2 }).map((_, c) => {
+            {Array.from({ length: totalRows }).map((_, r) => {
+              if (r === 0) return null; // Row 0 is teacher podium
+              return Array.from({ length: totalCols }).map((_, c) => {
                 const key = `${c},${r}`;
                 const isOccupied = occupiedCells.has(key);
                 const isTarget = dragOverCell && dragOverCell.x === c && dragOverCell.y === r;
+                const rowLabel = String.fromCharCode(65 + ((r - 1) % 26));
 
                 return (
                   <div
                     key={key}
                     onDragOver={(e) => handleCellDragOver(e, c, r)}
                     onDrop={(e) => handleCellDrop(e, c, r)}
-                    className={`absolute rounded-lg border transition-colors ${
+                    className={`absolute rounded-lg border transition-all ${
                       isOccupied
                         ? 'border-transparent pointer-events-none'
                         : isTarget
-                        ? 'border-sky-400 bg-sky-500/20 ring-2 ring-sky-400 pointer-events-auto'
-                        : 'border-slate-800/40 border-dashed bg-slate-900/20 hover:border-slate-700/60 pointer-events-auto'
+                        ? 'border-sky-400 bg-sky-500/30 ring-2 ring-sky-400 pointer-events-auto scale-105 shadow-lg'
+                        : 'border-slate-800/60 border-dashed bg-slate-900/30 hover:border-sky-500/50 hover:bg-slate-900/60 pointer-events-auto'
                     }`}
                     style={{
                       left: c * (cardWidth + gap),
@@ -231,18 +254,19 @@ export const GridCanvas: React.FC<GridCanvasProps> = ({
                     }}
                   >
                     {!isOccupied && (
-                      <div className="w-full h-full flex items-center justify-center text-[11px] font-mono text-slate-700 select-none">
-                        [{c},{r}]
+                      <div className="w-full h-full flex flex-col items-center justify-center text-[11px] font-mono text-slate-600 select-none">
+                        <span className="text-xs font-semibold text-slate-500">{rowLabel}{c + 1}</span>
+                        <span className="text-[10px] text-slate-700">可放置席位</span>
                       </div>
                     )}
                   </div>
                 );
-              })
-            )}
+              });
+            })}
           </div>
         )}
 
-        {/* Render Obstacles (e.g. Teacher Podium / Blackboard) */}
+        {/* Render Teacher Podium */}
         {layout.obstacles.map((obs) => (
           <div
             key={obs.id}
@@ -255,22 +279,6 @@ export const GridCanvas: React.FC<GridCanvasProps> = ({
             }}
           >
             <ObstacleMarker obstacle={obs} />
-          </div>
-        ))}
-
-        {/* Render Aisles */}
-        {layout.aisles.map((aisle) => (
-          <div
-            key={aisle.id}
-            style={{
-              position: 'absolute',
-              left: aisle.type === 'vertical' ? aisle.index * (cardWidth + gap) : 0,
-              top: aisle.type === 'horizontal' ? aisle.index * (cardHeight + gap) : (cardHeight + gap),
-              width: aisle.type === 'vertical' ? cardWidth : layout.cols * (cardWidth + gap),
-              height: aisle.type === 'horizontal' ? cardHeight : (layout.rows - 1) * (cardHeight + gap),
-            }}
-          >
-            <AisleMarker aisle={aisle} />
           </div>
         ))}
 

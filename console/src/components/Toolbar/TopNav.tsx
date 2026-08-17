@@ -13,6 +13,7 @@ import {
   ZoomIn,
   ZoomOut,
   RotateCcw,
+  Sliders,
 } from 'lucide-react';
 
 interface TopNavProps {
@@ -20,8 +21,9 @@ interface TopNavProps {
   setMode: (m: AppMode) => void;
   layout: ClassroomLayout;
   onLayoutChange: (l: ClassroomLayout) => void;
-  onOpenPresets: () => void;
+  onOpenMatrixConfig: () => void;
   onOpenDevicePool: () => void;
+  unassignedCount?: number;
   zoom: number;
   setZoom: React.Dispatch<React.SetStateAction<number>>;
   onResetView: () => void;
@@ -35,8 +37,9 @@ export const TopNav: React.FC<TopNavProps> = ({
   setMode,
   layout,
   onLayoutChange,
-  onOpenPresets,
+  onOpenMatrixConfig,
   onOpenDevicePool,
+  unassignedCount = 0,
   zoom,
   setZoom,
   onResetView,
@@ -72,6 +75,10 @@ export const TopNav: React.FC<TopNavProps> = ({
     reader.readAsText(file);
   };
 
+  const activeSeatCount = layout.seats.length;
+  const cols = layout.cols;
+  const rows = Math.max(1, layout.rows - 1);
+
   return (
     <header className="h-14 bg-slate-950 border-b border-slate-800 px-4 flex items-center justify-between z-30 select-none">
       {/* Brand Title & Classroom Title */}
@@ -82,14 +89,15 @@ export const TopNav: React.FC<TopNavProps> = ({
           </div>
           <div>
             <div className="font-bold text-slate-100 text-sm tracking-wide">GridSight</div>
-            <div className="text-[10px] text-slate-400 font-medium">70人電腦教室螢幕即時監控系統</div>
+            <div className="text-[10px] text-slate-400 font-medium">電腦教室螢幕即時監控系統</div>
           </div>
         </div>
 
         <div className="h-5 w-px bg-slate-800" />
 
-        <div className="text-xs font-semibold text-slate-300 bg-slate-900 px-2.5 py-1 rounded border border-slate-800">
-          {layout.name}
+        <div className="text-xs font-semibold text-slate-300 bg-slate-900 px-2.5 py-1 rounded border border-slate-800 flex items-center space-x-1.5">
+          <span>{layout.name}</span>
+          <span className="text-[10px] text-sky-400 font-mono">({activeSeatCount}台席位)</span>
         </div>
       </div>
 
@@ -164,29 +172,35 @@ export const TopNav: React.FC<TopNavProps> = ({
 
         <div className="h-5 w-px bg-slate-800" />
 
-        {/* Layout Presets */}
+        {/* Matrix Dimensions Button (X × Y Standard Matrix) */}
         <button
-          onClick={onOpenPresets}
-          className="flex items-center space-x-1 px-2.5 py-1 rounded bg-slate-900 hover:bg-slate-800 border border-slate-800 text-xs text-slate-300"
-          title="切換預設佈局"
+          onClick={onOpenMatrixConfig}
+          className="flex items-center space-x-1.5 px-2.5 py-1 rounded bg-slate-900 hover:bg-slate-800 border border-slate-800 text-xs text-slate-300 hover:text-white"
+          title="自訂 X × Y 矩陣尺寸"
         >
-          <LayoutGrid className="w-3.5 h-3.5" />
-          <span>預設排位</span>
+          <Sliders className="w-3.5 h-3.5 text-sky-400" />
+          <span>矩陣尺寸 ({cols}×{rows})</span>
         </button>
 
+        {/* Device Pool Button with unassigned badge */}
         <button
           onClick={onOpenDevicePool}
-          className="flex items-center space-x-1 px-2.5 py-1 rounded bg-slate-900 hover:bg-slate-800 border border-slate-800 text-xs text-slate-300"
-          title="待分配設備池"
+          className="flex items-center space-x-1.5 px-2.5 py-1 rounded bg-slate-900 hover:bg-slate-800 border border-slate-800 text-xs text-slate-300 hover:text-white relative"
+          title="開啟待分配設備池"
         >
-          <HardDrive className="w-3.5 h-3.5" />
+          <HardDrive className="w-3.5 h-3.5 text-indigo-400" />
           <span>設備池</span>
+          {unassignedCount > 0 && (
+            <span className="px-1.5 py-0.2 rounded-full bg-amber-500 text-slate-950 font-bold text-[10px]">
+              {unassignedCount}
+            </span>
+          )}
         </button>
 
         {/* Zoom Controls */}
         <div className="flex items-center space-x-1 bg-slate-900 p-0.5 rounded border border-slate-800 text-slate-400">
           <button
-            onClick={() => setZoom((z) => Math.max(0.5, z - 0.1))}
+            onClick={() => setZoom((z) => Math.max(0.3, z - 0.1))}
             className="p-1 hover:text-slate-200"
             title="縮小"
           >
@@ -196,7 +210,7 @@ export const TopNav: React.FC<TopNavProps> = ({
             {Math.round(zoom * 100)}%
           </span>
           <button
-            onClick={() => setZoom((z) => Math.min(2.0, z + 0.1))}
+            onClick={() => setZoom((z) => Math.min(2.5, z + 0.1))}
             className="p-1 hover:text-slate-200"
             title="放大"
           >

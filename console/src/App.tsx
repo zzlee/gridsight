@@ -122,7 +122,7 @@ export const App: React.FC = () => {
     fetchAgents();
     const timer = setInterval(fetchAgents, 3000);
     return () => clearInterval(timer);
-  }, []);
+  }, [isLocked]);
 
   // 1 FPS Snapshot Polling & Periodic /status Telemetry with Circuit Breaker
   useEffect(() => {

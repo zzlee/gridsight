@@ -119,7 +119,20 @@ wss.on('connection', (ws, req) => {
     });
   } else if (pathname.startsWith('/ws/stream/')) {
     const rawTarget = pathname.replace('/ws/stream/', '');
-    const mac = normalizeTarget(rawTarget);
+    let mac = normalizeTarget(rawTarget);
+
+    // Smart resolution: resolve IP, hostname, or ID to actual connected agent MAC
+    if (!agentSockets.has(mac)) {
+      const dev = discoveryService.getDevices().find(
+        (d) => d.mac === mac || d.ip === mac || d.id === mac || d.hostname === mac || normalizeTarget(d.mac) === mac
+      );
+      if (dev && agentSockets.has(normalizeTarget(dev.mac))) {
+        mac = normalizeTarget(dev.mac);
+      } else if (agentSockets.size === 1) {
+        mac = Array.from(agentSockets.keys())[0];
+      }
+    }
+
     if (!viewerSockets.has(mac)) {
       viewerSockets.set(mac, new Set());
     }

@@ -1,6 +1,6 @@
 import { ClassroomLayout } from '../types';
 
-const STORAGE_KEY = 'gridsight_layouts_v5';
+const STORAGE_KEY = 'gridsight_layouts_v6';
 
 export const LayoutStorage = {
   saveLayout(layout: ClassroomLayout) {
@@ -52,9 +52,9 @@ export const LayoutStorage = {
             seatNo: `L${r + 1}-${c + 1}`,
             gridX: c,
             gridY: r + 1,
-            status: 'online' as const,
-            latencyMs: 12,
-            lastSeen: Date.now(),
+            status: 'offline' as const,
+            latencyMs: 0,
+            lastSeen: 0,
           });
           count++;
         }
@@ -68,9 +68,9 @@ export const LayoutStorage = {
             seatNo: `R${r + 1}-${c - 5}`,
             gridX: c,
             gridY: r + 1,
-            status: 'online' as const,
-            latencyMs: 15,
-            lastSeen: Date.now(),
+            status: 'offline' as const,
+            latencyMs: 0,
+            lastSeen: 0,
           });
           count++;
         }
@@ -102,9 +102,9 @@ export const LayoutStorage = {
           seatNo: `${String.fromCharCode(65 + r)}${c + 1}`,
           gridX: c,
           gridY: r + 1,
-          status: 'online' as const,
-          latencyMs: 14,
-          lastSeen: Date.now(),
+          status: 'offline' as const,
+          latencyMs: 0,
+          lastSeen: 0,
         });
         count++;
       }

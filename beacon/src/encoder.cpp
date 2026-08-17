@@ -7,53 +7,60 @@
 
 #ifdef _WIN32
 #include <windows.h>
-#include <wincodec.h>
+#include <gdiplus.h>
 #include <objbase.h>
 #include <mfapi.h>
 #include <mfidl.h>
 #include <mferror.h>
 #include <wmcodecdsp.h>
 
-#pragma comment(lib, "windowscodecs.lib")
+#pragma comment(lib, "gdiplus.lib")
 #pragma comment(lib, "mfplat.lib")
 #pragma comment(lib, "mfuuid.lib")
 #pragma comment(lib, "wmcodecdspuuid.lib")
 #pragma comment(lib, "ole32.lib")
 #endif
 
-#define STB_IMAGE_WRITE_IMPLEMENTATION
-#include "../include/stb_image_write.h"
-
 namespace GridSight {
 
-static const char* g_active_engine_name = "Auto-Detecting";
+static const char* g_active_engine_name = "Windows GDI+ SIMD/Bilinear JPEG";
 
 const char* ImageEncoder::GetActiveJpegEngineName() {
     return g_active_engine_name;
 }
 
-// Single-pass 16.16 fixed-point downsampler and BGRA->RGB converter
-static void DownscaleAndConvertBGRAtoRGB(const uint8_t* __restrict src, int src_w, int src_h,
-                                        uint8_t* __restrict dst_rgb, int dst_w, int dst_h) {
-    uint32_t x_ratio = ((uint32_t)src_w << 16) / dst_w;
-    uint32_t y_ratio = ((uint32_t)src_h << 16) / dst_h;
+#ifdef _WIN32
+static ULONG_PTR g_gdiplusToken = 0;
+static CLSID g_clsidJpeg = { 0 };
+static bool g_gdiplus_initialized = false;
 
-    for (int y = 0; y < dst_h; ++y) {
-        int src_y = (y * y_ratio) >> 16;
-        if (src_y >= src_h) src_y = src_h - 1;
-        const uint8_t* src_row = src + (src_y * src_w * 4);
-        uint8_t* dst_row = dst_rgb + (y * dst_w * 3);
-
-        for (int x = 0; x < dst_w; ++x) {
-            int src_x = (x * x_ratio) >> 16;
-            if (src_x >= src_w) src_x = src_w - 1;
-            const uint8_t* p = src_row + (src_x * 4);
-            dst_row[x * 3 + 0] = p[2]; // R
-            dst_row[x * 3 + 1] = p[1]; // G
-            dst_row[x * 3 + 2] = p[0]; // B
+static int GetEncoderClsid(const WCHAR* format, CLSID* pClsid) {
+    UINT num = 0, size = 0;
+    Gdiplus::GetImageEncodersSize(&num, &size);
+    if (size == 0) return -1;
+    Gdiplus::ImageCodecInfo* pImageCodecInfo = (Gdiplus::ImageCodecInfo*)(malloc(size));
+    if (!pImageCodecInfo) return -1;
+    Gdiplus::GetImageEncoders(num, size, pImageCodecInfo);
+    for (UINT j = 0; j < num; ++j) {
+        if (wcscmp(pImageCodecInfo[j].MimeType, format) == 0) {
+            *pClsid = pImageCodecInfo[j].Clsid;
+            free(pImageCodecInfo);
+            return j;
         }
     }
+    free(pImageCodecInfo);
+    return -1;
 }
+
+static void EnsureGdiPlus() {
+    if (!g_gdiplus_initialized) {
+        Gdiplus::GdiplusStartupInput gdiplusStartupInput;
+        Gdiplus::GdiplusStartup(&g_gdiplusToken, &gdiplusStartupInput, NULL);
+        GetEncoderClsid(L"image/jpeg", &g_clsidJpeg);
+        g_gdiplus_initialized = true;
+    }
+}
+#endif
 
 // Fast 64-bit sampling hash to detect static screen frames
 static uint64_t ComputeFastFrameHash(const uint8_t* data, size_t total_bytes) {
@@ -66,164 +73,8 @@ static uint64_t ComputeFastFrameHash(const uint8_t* data, size_t total_bytes) {
     return hash;
 }
 
-// Thread-local scratch buffers to eliminate heap allocation churn
-static thread_local std::vector<uint8_t> tl_rgb_buffer;
 static thread_local uint64_t tl_last_hash = 0;
 static thread_local std::vector<uint8_t> tl_cached_jpeg;
-
-#ifdef _WIN32
-static thread_local std::vector<uint8_t> tl_downscaled_bgra;
-
-bool ImageEncoder::EncodeWithWIC(const uint8_t* bgra_data, int width, int height,
-                                 int target_width, int target_height, int quality,
-                                 std::vector<uint8_t>& out_jpeg) {
-    if (!bgra_data || width <= 0 || height <= 0 || target_width <= 0 || target_height <= 0) {
-        return false;
-    }
-
-    IWICImagingFactory* pFactory = nullptr;
-    HRESULT hr = CoCreateInstance(CLSID_WICImagingFactory, NULL, CLSCTX_INPROC_SERVER, IID_PPV_ARGS(&pFactory));
-    if (FAILED(hr) || !pFactory) {
-        return false;
-    }
-
-    IStream* pStream = nullptr;
-    hr = CreateStreamOnHGlobal(NULL, TRUE, &pStream);
-    if (FAILED(hr) || !pStream) {
-        pFactory->Release();
-        return false;
-    }
-
-    IWICBitmapEncoder* pEncoder = nullptr;
-    hr = pFactory->CreateEncoder(GUID_ContainerFormatJpeg, NULL, &pEncoder);
-    if (FAILED(hr) || !pEncoder) {
-        pStream->Release();
-        pFactory->Release();
-        return false;
-    }
-
-    hr = pEncoder->Initialize(pStream, WICBitmapEncoderNoCache);
-    if (FAILED(hr)) {
-        pEncoder->Release();
-        pStream->Release();
-        pFactory->Release();
-        return false;
-    }
-
-    IWICBitmapFrameEncode* pFrame = nullptr;
-    IPropertyBag2* pPropertyBag = nullptr;
-    hr = pEncoder->CreateNewFrame(&pFrame, &pPropertyBag);
-    if (FAILED(hr) || !pFrame) {
-        pEncoder->Release();
-        pStream->Release();
-        pFactory->Release();
-        return false;
-    }
-
-    if (pPropertyBag) {
-        PROPBAG2 option = { 0 };
-        option.pstrName = (LPOLESTR)L"ImageQuality";
-        VARIANT varValue;
-        VariantInit(&varValue);
-        varValue.vt = VT_R4;
-        varValue.fltVal = (float)quality / 100.0f;
-        pPropertyBag->Write(1, &option, &varValue);
-    }
-
-    hr = pFrame->Initialize(pPropertyBag);
-    if (pPropertyBag) pPropertyBag->Release();
-    if (FAILED(hr)) {
-        pFrame->Release();
-        pEncoder->Release();
-        pStream->Release();
-        pFactory->Release();
-        return false;
-    }
-
-    pFrame->SetSize(target_width, target_height);
-    WICPixelFormatGUID format = GUID_WICPixelFormat32bppBGRA;
-    pFrame->SetPixelFormat(&format);
-
-    // Fast 16.16 integer downsampling for BGRA
-    size_t downscaled_bytes = (size_t)target_width * target_height * 4;
-    if (tl_downscaled_bgra.size() != downscaled_bytes) {
-        tl_downscaled_bgra.resize(downscaled_bytes);
-    }
-
-    uint32_t x_ratio = ((uint32_t)width << 16) / target_width;
-    uint32_t y_ratio = ((uint32_t)height << 16) / target_height;
-    for (int y = 0; y < target_height; ++y) {
-        int src_y = (y * y_ratio) >> 16;
-        if (src_y >= height) src_y = height - 1;
-        const uint32_t* src_row = (const uint32_t*)(bgra_data + src_y * width * 4);
-        uint32_t* dst_row = (uint32_t*)(tl_downscaled_bgra.data() + y * target_width * 4);
-        for (int x = 0; x < target_width; ++x) {
-            int src_x = (x * x_ratio) >> 16;
-            if (src_x >= width) src_x = width - 1;
-            dst_row[x] = src_row[src_x];
-        }
-    }
-
-    hr = pFrame->WritePixels(target_height, target_width * 4, (UINT)downscaled_bytes, tl_downscaled_bgra.data());
-    if (FAILED(hr)) {
-        pFrame->Release();
-        pEncoder->Release();
-        pStream->Release();
-        pFactory->Release();
-        return false;
-    }
-
-    pFrame->Commit();
-    pEncoder->Commit();
-
-    // Read back stream to out_jpeg
-    STATSTG stat;
-    if (SUCCEEDED(pStream->Stat(&stat, STATFLAG_NONAME))) {
-        ULONG stream_size = (ULONG)stat.cbSize.QuadPart;
-        out_jpeg.resize(stream_size);
-        LARGE_INTEGER seek_pos;
-        seek_pos.QuadPart = 0;
-        pStream->Seek(seek_pos, STREAM_SEEK_SET, NULL);
-        ULONG bytes_read = 0;
-        pStream->Read(out_jpeg.data(), stream_size, &bytes_read);
-        out_jpeg.resize(bytes_read);
-    }
-
-    pFrame->Release();
-    pEncoder->Release();
-    pStream->Release();
-    pFactory->Release();
-
-    return !out_jpeg.empty();
-}
-#else
-bool ImageEncoder::EncodeWithWIC(const uint8_t*, int, int, int, int, int, std::vector<uint8_t>&) {
-    return false;
-}
-#endif
-
-bool ImageEncoder::EncodeWithTurbo(const uint8_t* bgra_data, int width, int height,
-                                  int target_width, int target_height, int quality,
-                                  std::vector<uint8_t>& out_jpeg) {
-    size_t rgb_size = (size_t)target_width * target_height * 3;
-    if (tl_rgb_buffer.size() != rgb_size) {
-        tl_rgb_buffer.resize(rgb_size);
-    }
-
-    DownscaleAndConvertBGRAtoRGB(bgra_data, width, height, tl_rgb_buffer.data(), target_width, target_height);
-
-    out_jpeg.clear();
-    out_jpeg.reserve(24576);
-
-    auto write_callback = [](void* context, void* data, int size) {
-        auto* vec = static_cast<std::vector<uint8_t>*>(context);
-        const uint8_t* byte_data = static_cast<const uint8_t*>(data);
-        vec->insert(vec->end(), byte_data, byte_data + size);
-    };
-
-    int success = stbi_write_jpg_to_func(write_callback, &out_jpeg, target_width, target_height, 3, tl_rgb_buffer.data(), quality);
-    return (success != 0) && !out_jpeg.empty();
-}
 
 bool ImageEncoder::EncodeToJPEG(const uint8_t* bgra_data, int width, int height, 
                                 int target_width, int target_height, int quality, 
@@ -241,15 +92,53 @@ bool ImageEncoder::EncodeToJPEG(const uint8_t* bgra_data, int width, int height,
         return true;
     }
 
-    // 2. High performance RGB downscaler and JPEG encoder (100% stride aligned)
-    g_active_engine_name = "Turbo SIMD / Fast-DCT Engine";
-    if (EncodeWithTurbo(bgra_data, width, height, target_width, target_height, quality, out_jpeg)) {
-        tl_last_hash = current_hash;
-        tl_cached_jpeg = out_jpeg;
-        return true;
+#ifdef _WIN32
+    EnsureGdiPlus();
+
+    // 2. Wrap DXGI BGRA memory directly into GDI+ source bitmap
+    Gdiplus::Bitmap srcBmp(width, height, width * 4, PixelFormat32bppRGB, (BYTE*)bgra_data);
+
+    // 3. Create target 480x270 thumbnail bitmap with Bilinear Interpolation
+    Gdiplus::Bitmap dstBmp(target_width, target_height, PixelFormat24bppRGB);
+    {
+        Gdiplus::Graphics g(&dstBmp);
+        g.SetInterpolationMode(Gdiplus::InterpolationModeBilinear);
+        g.SetPixelOffsetMode(Gdiplus::PixelOffsetModeHalf);
+        g.DrawImage(&srcBmp, Gdiplus::Rect(0, 0, target_width, target_height), 0, 0, width, height, Gdiplus::UnitPixel);
     }
 
+    // 4. Setup JPEG Quality Parameter
+    Gdiplus::EncoderParameters encoderParameters;
+    encoderParameters.Count = 1;
+    encoderParameters.Parameter[0].Guid = Gdiplus::EncoderQuality;
+    encoderParameters.Parameter[0].Type = Gdiplus::EncoderParameterValueTypeLong;
+    encoderParameters.Parameter[0].NumberOfValues = 1;
+    ULONG q = quality;
+    encoderParameters.Parameter[0].Value = &q;
+
+    // 5. Stream output to memory buffer
+    IStream* pStream = NULL;
+    if (CreateStreamOnHGlobal(NULL, TRUE, &pStream) == S_OK) {
+        if (dstBmp.Save(pStream, &g_clsidJpeg, &encoderParameters) == Gdiplus::Ok) {
+            STATSTG stat;
+            if (pStream->Stat(&stat, STATFLAG_NONAME) == S_OK) {
+                ULONG stream_size = (ULONG)stat.cbSize.QuadPart;
+                out_jpeg.resize(stream_size);
+                LARGE_INTEGER seek_pos = { 0 };
+                pStream->Seek(seek_pos, STREAM_SEEK_SET, NULL);
+                ULONG bytes_read = 0;
+                pStream->Read(out_jpeg.data(), stream_size, &bytes_read);
+                out_jpeg.resize(bytes_read);
+                tl_last_hash = current_hash;
+                tl_cached_jpeg = out_jpeg;
+            }
+        }
+        pStream->Release();
+    }
+    return !out_jpeg.empty();
+#else
     return false;
+#endif
 }
 
 bool ImageEncoder::EncodeToWebP(const uint8_t* bgra_data, int width, int height, 

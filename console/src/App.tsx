@@ -8,7 +8,7 @@ import { PresetsModal } from './components/Toolbar/PresetsModal';
 import { DevicePool } from './components/Toolbar/DevicePool';
 import { AuthLockModal } from './components/Auth/AuthLockModal';
 import { ChangePinModal } from './components/Auth/ChangePinModal';
-import { PollingManager } from './services/pollingManager';
+import { PollingManager, TrafficStats } from './services/pollingManager';
 import { LayoutStorage } from './services/layoutStorage';
 import { AuthService } from './services/authService';
 
@@ -16,6 +16,7 @@ const pollingManager = new PollingManager();
 
 export const App: React.FC = () => {
   const visibleDeviceIdsRef = useRef<Set<string>>(new Set());
+  const [trafficStats, setTrafficStats] = useState<TrafficStats | null>(null);
   const [isLocked, setIsLocked] = useState(true);
   const [isChangePinOpen, setIsChangePinOpen] = useState(false);
   const [mode, setMode] = useState<AppMode>('MONITOR');
@@ -132,13 +133,18 @@ export const App: React.FC = () => {
           setSpecsDevice((prev) => (prev && prev.id === updated.id ? { ...prev, ...updated } : prev));
         },
         1000,
-        () => visibleDeviceIdsRef.current
+        () => visibleDeviceIdsRef.current,
+        (stats) => setTrafficStats(stats)
       );
     } else {
       pollingManager.stopPolling();
+      setTrafficStats(null);
     }
 
-    return () => pollingManager.stopPolling();
+    return () => {
+      pollingManager.stopPolling();
+      setTrafficStats(null);
+    };
   }, [mode, isLocked]);
 
   const handleSelectStudent = (id: string, multi: boolean) => {
@@ -210,6 +216,7 @@ export const App: React.FC = () => {
         onResetView={() => setZoom(0.85)}
         onLock={() => setIsLocked(true)}
         onOpenChangePin={() => setIsChangePinOpen(true)}
+        trafficStats={trafficStats}
       />
 
       <GridCanvas

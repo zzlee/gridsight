@@ -1,23 +1,39 @@
 import { StudentDevice } from '../types';
 import { AbortableRequestCircuitBreaker } from '../utils/circuitBreaker';
 
+export interface TrafficStats {
+  bytesPerSec: number;
+  totalBytes: number;
+  polledCount: number;
+  onlineCount: number;
+  avgLatencyMs: number;
+}
+
 export class PollingManager {
   private circuitBreaker = new AbortableRequestCircuitBreaker(1200);
   private intervalId: number | null = null;
   private isPolling = false;
   private activeThumbUrls = new Map<string, string>(); // deviceId -> blob URL
+  private totalBytesTransferred = 0;
 
   startPolling(
     getDevices: () => StudentDevice[],
     onUpdateDevice: (device: Partial<StudentDevice> & { id: string }) => void,
     intervalMs = 1000,
-    getVisibleDeviceIds?: () => Set<string> | null
+    getVisibleDeviceIds?: () => Set<string> | null,
+    onTrafficStats?: (stats: TrafficStats) => void
   ) {
     if (this.intervalId) return;
+
+    let lastTickTime = performance.now();
 
     this.intervalId = window.setInterval(async () => {
       if (this.isPolling) return;
       this.isPolling = true;
+
+      const tickStart = performance.now();
+      const timeDeltaSec = Math.max(0.1, (tickStart - lastTickTime) / 1000);
+      lastTickTime = tickStart;
 
       const devices = getDevices();
       const onlineDevices = devices.filter((d) => d.ip && d.status !== 'offline');
@@ -27,6 +43,9 @@ export class PollingManager {
       const targetDevices = visibleIds && visibleIds.size > 0
         ? onlineDevices.filter((d) => visibleIds.has(d.id) || (d.mac && visibleIds.has(d.mac)))
         : onlineDevices;
+
+      let tickBytes = 0;
+      let tickLatencies: number[] = [];
 
       // Batch poll visible devices in parallel chunks of 10
       const batchSize = 10;
@@ -57,6 +76,10 @@ export class PollingManager {
                 const latency = Math.round(performance.now() - start);
                 const thumbUrl = URL.createObjectURL(blob);
 
+                tickBytes += blob.size;
+                this.totalBytesTransferred += blob.size;
+                tickLatencies.push(latency);
+
                 // Revoke previously created blob URL
                 const prevUrl = this.activeThumbUrls.get(device.id);
                 if (prevUrl) {
@@ -77,6 +100,20 @@ export class PollingManager {
             }
           })
         );
+      }
+
+      if (onTrafficStats) {
+        const avgLat = tickLatencies.length > 0
+          ? Math.round(tickLatencies.reduce((a, b) => a + b, 0) / tickLatencies.length)
+          : 0;
+
+        onTrafficStats({
+          bytesPerSec: Math.round(tickBytes / timeDeltaSec),
+          totalBytes: this.totalBytesTransferred,
+          polledCount: targetDevices.length,
+          onlineCount: onlineDevices.length,
+          avgLatencyMs: avgLat,
+        });
       }
 
       this.isPolling = false;

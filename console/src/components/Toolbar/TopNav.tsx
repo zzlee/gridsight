@@ -1,6 +1,7 @@
 import React, { useRef } from 'react';
 import { AppMode, ClassroomLayout } from '../../types';
 import { LayoutStorage } from '../../services/layoutStorage';
+import { TrafficStats } from '../../services/pollingManager';
 import {
   Layers,
   Edit3,
@@ -26,6 +27,7 @@ interface TopNavProps {
   onResetView: () => void;
   onLock: () => void;
   onOpenChangePin: () => void;
+  trafficStats?: TrafficStats | null;
 }
 
 export const TopNav: React.FC<TopNavProps> = ({
@@ -40,6 +42,7 @@ export const TopNav: React.FC<TopNavProps> = ({
   onResetView,
   onLock,
   onOpenChangePin,
+  trafficStats,
 }) => {
   const fileInputRef = useRef<HTMLInputElement>(null);
 
@@ -90,8 +93,8 @@ export const TopNav: React.FC<TopNavProps> = ({
         </div>
       </div>
 
-      {/* Central Mode Switcher & Tools */}
-      <div className="flex items-center space-x-2">
+      {/* Central Mode Switcher & Tools & Network Traffic Telemetry */}
+      <div className="flex items-center space-x-3">
         <div className="flex rounded-lg bg-slate-900 p-0.5 border border-slate-800">
           <button
             onClick={() => setMode('MONITOR')}
@@ -116,6 +119,48 @@ export const TopNav: React.FC<TopNavProps> = ({
             <span>佈局編輯</span>
           </button>
         </div>
+
+        {/* Real-time Network Traffic HUD (Monitor Mode Only) */}
+        {mode === 'MONITOR' && trafficStats && (
+          <div className="flex items-center space-x-3 px-3 py-1 bg-slate-900/90 border border-slate-800 rounded-lg text-xs font-mono shadow-inner">
+            {/* Inbound Bandwidth Speed */}
+            <div className="flex items-center space-x-1.5">
+              <span
+                className={`w-2 h-2 rounded-full ${
+                  trafficStats.bytesPerSec > 0 ? 'bg-emerald-400 animate-pulse' : 'bg-slate-600'
+                }`}
+              />
+              <span className="text-slate-400 text-[11px]">流量:</span>
+              <span className="text-emerald-400 font-bold">
+                {trafficStats.bytesPerSec >= 1048576
+                  ? `${(trafficStats.bytesPerSec / 1048576).toFixed(2)} MB/s`
+                  : `${Math.round(trafficStats.bytesPerSec / 1024)} KB/s`}
+              </span>
+            </div>
+
+            <div className="h-3.5 w-px bg-slate-800" />
+
+            {/* Viewport Polled Devices */}
+            <div className="flex items-center space-x-1">
+              <span className="text-slate-400 text-[11px]">視口:</span>
+              <span className="text-sky-400 font-semibold">
+                {trafficStats.polledCount} / {trafficStats.onlineCount} 台
+              </span>
+            </div>
+
+            <div className="h-3.5 w-px bg-slate-800" />
+
+            {/* Cumulative Transferred Bytes */}
+            <div className="flex items-center space-x-1 text-[11px] text-slate-400">
+              <span>累積:</span>
+              <span className="text-slate-300">
+                {trafficStats.totalBytes >= 1073741824
+                  ? `${(trafficStats.totalBytes / 1073741824).toFixed(2)} GB`
+                  : `${(trafficStats.totalBytes / 1048576).toFixed(1)} MB`}
+              </span>
+            </div>
+          </div>
+        )}
 
         <div className="h-5 w-px bg-slate-800" />
 

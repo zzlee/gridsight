@@ -206,6 +206,38 @@ export const App: React.FC = () => {
     });
   };
 
+  const handleSwapSeats = (idA: string, idB: string) => {
+    setLayout((prev) => {
+      const idxA = prev.seats.findIndex((s) => s.id === idA);
+      const idxB = prev.seats.findIndex((s) => s.id === idB);
+      if (idxA === -1 || idxB === -1) return prev;
+
+      const updated = [...prev.seats];
+      const seatA = updated[idxA];
+      const seatB = updated[idxB];
+
+      const tempX = seatA.gridX;
+      const tempY = seatA.gridY;
+      const tempSeatNo = seatA.seatNo;
+
+      updated[idxA] = { ...seatA, gridX: seatB.gridX, gridY: seatB.gridY, seatNo: seatB.seatNo };
+      updated[idxB] = { ...seatB, gridX: tempX, gridY: tempY, seatNo: tempSeatNo };
+
+      const newLayout = { ...prev, seats: updated };
+      LayoutStorage.saveLayout(newLayout);
+      return newLayout;
+    });
+  };
+
+  const handleMoveSeat = (id: string, newGridX: number, newGridY: number) => {
+    setLayout((prev) => {
+      const updated = prev.seats.map((s) => (s.id === id ? { ...s, gridX: newGridX, gridY: newGridY } : s));
+      const newLayout = { ...prev, seats: updated };
+      LayoutStorage.saveLayout(newLayout);
+      return newLayout;
+    });
+  };
+
   return (
     <div className="w-screen h-screen flex flex-col bg-slate-950 overflow-hidden">
       <TopNav
@@ -235,6 +267,8 @@ export const App: React.FC = () => {
         onVisibleSeatsChange={(ids) => {
           visibleDeviceIdsRef.current = ids;
         }}
+        onSwapSeats={handleSwapSeats}
+        onMoveSeat={handleMoveSeat}
       />
 
       {/* Focus 30FPS WebCodecs Viewer Modal */}

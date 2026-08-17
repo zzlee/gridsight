@@ -1,6 +1,6 @@
 import React from 'react';
 import { StudentDevice } from '../../types';
-import { Monitor, Maximize2, RefreshCw, Cpu, Activity } from 'lucide-react';
+import { Monitor, Maximize2, RefreshCw, Cpu, Move } from 'lucide-react';
 
 interface StudentCardProps {
   device: StudentDevice;
@@ -10,6 +10,13 @@ interface StudentCardProps {
   onRefreshAuth: (device: StudentDevice) => void;
   onUnbind: (id: string) => void;
   onOpenSpecs?: (device: StudentDevice) => void;
+  onDragStart?: (e: React.DragEvent, id: string) => void;
+  onDragEnd?: (e: React.DragEvent) => void;
+  onDragOver?: (e: React.DragEvent, id: string) => void;
+  onDragLeave?: (e: React.DragEvent) => void;
+  onDrop?: (e: React.DragEvent, targetId: string) => void;
+  isDragging?: boolean;
+  isDragOver?: boolean;
 }
 
 export const StudentCard: React.FC<StudentCardProps> = ({
@@ -20,6 +27,13 @@ export const StudentCard: React.FC<StudentCardProps> = ({
   onRefreshAuth,
   onUnbind,
   onOpenSpecs,
+  onDragStart,
+  onDragEnd,
+  onDragOver,
+  onDragLeave,
+  onDrop,
+  isDragging = false,
+  isDragOver = false,
 }) => {
   const getStatusBadge = () => {
     switch (device.status) {
@@ -37,13 +51,23 @@ export const StudentCard: React.FC<StudentCardProps> = ({
 
   return (
     <div
+      draggable={isEditMode}
+      onDragStart={(e) => isEditMode && onDragStart?.(e, device.id)}
+      onDragEnd={(e) => isEditMode && onDragEnd?.(e)}
+      onDragOver={(e) => isEditMode && onDragOver?.(e, device.id)}
+      onDragLeave={(e) => isEditMode && onDragLeave?.(e)}
+      onDrop={(e) => isEditMode && onDrop?.(e, device.id)}
       onClick={(e) => onSelect(device.id, e.ctrlKey || e.metaKey)}
       onDoubleClick={() => !isEditMode && onDoubleClick(device)}
-      className={`group relative flex flex-col rounded-lg border bg-slate-900/90 backdrop-blur transition-all duration-150 overflow-hidden ${
-        device.selected
+      className={`group relative flex flex-col rounded-lg border bg-slate-900/90 backdrop-blur transition-all duration-150 overflow-hidden select-none ${
+        isDragging
+          ? 'opacity-40 scale-95 border-dashed border-sky-400'
+          : isDragOver
+          ? 'ring-2 ring-sky-400 border-sky-400 bg-sky-950/60 scale-105 shadow-xl shadow-sky-500/30'
+          : device.selected
           ? 'border-sky-500 ring-2 ring-sky-500/50 shadow-lg shadow-sky-500/20'
           : 'border-slate-800 hover:border-slate-700 hover:shadow-md'
-      } ${isEditMode ? 'cursor-grab active:cursor-grabbing' : 'cursor-pointer'}`}
+      } ${isEditMode ? 'cursor-grab active:cursor-grabbing hover:border-sky-500/60' : 'cursor-pointer'}`}
       style={{ width: '100%', height: '100%' }}
     >
       {/* Header Info Bar */}
@@ -57,17 +81,26 @@ export const StudentCard: React.FC<StudentCardProps> = ({
           </span>
         </div>
         <div className="flex items-center space-x-1.5">
-          {device.status !== 'offline' && (
-            <span className="text-[10px] font-mono text-slate-400">
-              {device.latencyMs}ms
+          {isEditMode ? (
+            <span className="text-[10px] text-sky-400/80 flex items-center space-x-0.5 font-sans">
+              <Move className="w-3 h-3" />
+              <span>拖曳</span>
             </span>
+          ) : (
+            <>
+              {device.status !== 'offline' && (
+                <span className="text-[10px] font-mono text-slate-400">
+                  {device.latencyMs}ms
+                </span>
+              )}
+              {getStatusBadge()}
+            </>
           )}
-          {getStatusBadge()}
         </div>
       </div>
 
       {/* 480x270 Realtime Preview Thumbnail */}
-      <div className="relative flex-1 bg-slate-950 flex items-center justify-center overflow-hidden">
+      <div className="relative flex-1 bg-slate-950 flex items-center justify-center overflow-hidden pointer-events-none">
         {device.thumbnailUrl ? (
           <img
             src={device.thumbnailUrl}
@@ -86,7 +119,7 @@ export const StudentCard: React.FC<StudentCardProps> = ({
 
         {/* Hover Quick Actions */}
         {!isEditMode && (
-          <div className="absolute inset-0 bg-slate-950/75 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center space-x-1.5 backdrop-blur-[2px]">
+          <div className="absolute inset-0 bg-slate-950/75 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center space-x-1.5 backdrop-blur-[2px] pointer-events-auto">
             <button
               onClick={(e) => {
                 e.stopPropagation();

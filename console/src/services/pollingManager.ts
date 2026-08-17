@@ -2,10 +2,9 @@ import { StudentDevice } from '../types';
 import { AbortableRequestCircuitBreaker } from '../utils/circuitBreaker';
 
 export class PollingManager {
-  private circuitBreaker = new AbortableRequestCircuitBreaker(800); // 800ms circuit breaker timeout
+  private circuitBreaker = new AbortableRequestCircuitBreaker(1200);
   private intervalId: number | null = null;
   private isPolling = false;
-  private pollCount = 0;
   private activeThumbUrls = new Map<string, string>(); // deviceId -> blob URL
 
   startPolling(
@@ -18,31 +17,40 @@ export class PollingManager {
     this.intervalId = window.setInterval(async () => {
       if (this.isPolling) return;
       this.isPolling = true;
-      this.pollCount++;
 
       const devices = getDevices();
-      const onlineOrDegraded = devices.filter((d) => d.ip && d.status !== 'offline');
-      const shouldPollStatus = this.pollCount % 5 === 0; // Poll hardware status every 5 seconds
+      const onlineDevices = devices.filter((d) => d.ip && d.status !== 'offline');
 
-      // Batch poll in parallel batches of 10 to protect teacher client socket pool
+      // Batch poll in parallel batches of 10
       const batchSize = 10;
-      for (let i = 0; i < onlineOrDegraded.length; i += batchSize) {
-        const batch = onlineOrDegraded.slice(i, i + batchSize);
+      for (let i = 0; i < onlineDevices.length; i += batchSize) {
+        const batch = onlineDevices.slice(i, i + batchSize);
         await Promise.allSettled(
           batch.map(async (device) => {
             const start = performance.now();
             try {
-              const url = `http://${device.ip}:8080/snapshot?t=${Date.now()}`;
-              const headers: Record<string, string> = device.token ? { 'X-Auth-Token': device.token } : {};
-              
-              const resp = await this.circuitBreaker.fetchWithTimeout(url, { headers });
+              // 1. Primary: Fetch outbound cached snapshot from Teacher Console Server
+              const serverSnapshotUrl = `/api/snapshot/${encodeURIComponent(device.mac || device.ip)}?t=${Date.now()}`;
+              let resp = await this.circuitBreaker.fetchWithTimeout(serverSnapshotUrl);
 
-              if (resp.ok) {
+              // 2. Fallback: If not cached on server yet, try direct student port 8080
+              if (!resp.ok && device.ip) {
+                try {
+                  const directUrl = `http://${device.ip}:8080/snapshot?t=${Date.now()}`;
+                  resp = await this.circuitBreaker.fetchWithTimeout(directUrl, {
+                    headers: device.token ? { 'X-Auth-Token': device.token } : {},
+                  });
+                } catch {
+                  // Direct connection blocked by firewall, wait for outbound push
+                }
+              }
+
+              if (resp && resp.ok) {
                 const blob = await resp.blob();
                 const latency = Math.round(performance.now() - start);
                 const thumbUrl = URL.createObjectURL(blob);
 
-                // Revoke previously created blob URL for this device to prevent memory leak
+                // Revoke previously created blob URL
                 const prevUrl = this.activeThumbUrls.get(device.id);
                 if (prevUrl) {
                   URL.revokeObjectURL(prevUrl);
@@ -54,38 +62,11 @@ export class PollingManager {
                   thumbnailUrl: thumbUrl,
                   latencyMs: latency,
                   lastSeen: Date.now(),
-                  status: latency > 500 ? 'degraded' : 'online',
-                });
-              } else {
-                onUpdateDevice({
-                  id: device.id,
-                  status: 'degraded',
-                  latencyMs: 800,
+                  status: 'online',
                 });
               }
-
-              // Periodic /status polling for CPU/RAM/Disk hardware specs
-              if (shouldPollStatus || !device.specs) {
-                try {
-                  const statusUrl = `http://${device.ip}:8080/status`;
-                  const statusResp = await this.circuitBreaker.fetchWithTimeout(statusUrl, { headers });
-                  if (statusResp.ok) {
-                    const specs = await statusResp.json();
-                    onUpdateDevice({
-                      id: device.id,
-                      specs,
-                    });
-                  }
-                } catch {
-                  // Non-fatal telemetry poll error
-                }
-              }
-            } catch (err) {
-              onUpdateDevice({
-                id: device.id,
-                status: 'offline',
-                latencyMs: 999,
-              });
+            } catch {
+              // Do not toggle status to offline here; online lifecycle is governed by UDP discovery beacons
             }
           })
         );

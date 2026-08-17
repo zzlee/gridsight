@@ -27,6 +27,9 @@ const discoveryService = new MulticastDiscoveryService(tokenAuth, (device) => {
 
 discoveryService.start();
 
+// In-memory JPEG snapshot cache for outbound student pushes
+const snapshotCache = new Map<string, { buffer: Buffer; timestamp: number }>();
+
 app.get('/api/health', (req, res) => {
   res.json({ status: 'ok', time: Date.now() });
 });
@@ -57,6 +60,38 @@ app.post('/api/broadcast/stop', (req, res) => {
 
 app.get('/api/broadcast/status', (req, res) => {
   res.json({ active: broadcastStreamer.isActive() });
+});
+
+// Route: Receive outbound JPEG snapshots pushed from student agents (100% firewall proof)
+app.post(
+  '/api/agent/snapshot',
+  express.raw({ type: ['image/jpeg', 'application/octet-stream', '*/*'], limit: '2mb' }),
+  (req, res) => {
+    const mac = (req.headers['x-agent-mac'] as string) || '';
+    const ip = (req.headers['x-agent-ip'] as string) || req.ip?.replace(/^.*:/, '') || '';
+    const buffer = req.body as Buffer;
+
+    if (buffer && buffer.length > 0) {
+      if (mac) snapshotCache.set(mac, { buffer, timestamp: Date.now() });
+      if (ip) snapshotCache.set(ip, { buffer, timestamp: Date.now() });
+      res.status(200).json({ status: 'ok' });
+    } else {
+      res.status(400).json({ error: 'empty snapshot' });
+    }
+  }
+);
+
+// Route: Serve cached JPEG snapshots to Teacher Browser UI
+app.get(['/api/snapshot/:id', '/api/snapshot'], (req, res) => {
+  const id = req.params.id || (req.query.id as string) || (req.query.mac as string) || (req.query.ip as string) || '';
+  const entry = snapshotCache.get(id);
+  if (entry && Date.now() - entry.timestamp < 15000) {
+    res.setHeader('Content-Type', 'image/jpeg');
+    res.setHeader('Cache-Control', 'no-cache, no-store, must-revalidate');
+    res.send(entry.buffer);
+  } else {
+    res.status(404).json({ error: 'No snapshot available' });
+  }
 });
 
 // Route: One-click PowerShell installation script for Student PCs

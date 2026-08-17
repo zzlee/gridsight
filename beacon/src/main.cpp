@@ -197,13 +197,15 @@ int main(int argc, char* argv[]) {
         GridSight::Utils::Log("ERROR", "Failed to initialize ScreenCapturer");
     }
 
-    // 1. Start Beacon Discovery
-    GridSight::BeaconClient beacon_client(multicast_ip, multicast_port);
-    beacon_client.Start();
+    // 1. Start HTTP Server with Outbound Snapshot Push to Teacher
+    auto http_server = std::make_shared<GridSight::HttpServer>(http_port, capturer);
+    std::string default_teacher = GridSight::Utils::GetEnv("TEACHER_IP", "192.168.190.201");
+    http_server->SetTeacherHost(default_teacher, 3000);
+    http_server->Start();
 
-    // 2. Start HTTP Server for 1 FPS Snapshot Polling
-    GridSight::HttpServer http_server(http_port, capturer);
-    http_server.Start();
+    // 2. Start Beacon Discovery (notifies http_server of discovered teacher IP)
+    GridSight::BeaconClient beacon_client(multicast_ip, multicast_port, http_server);
+    beacon_client.Start();
 
     // 3. Start WebSocket Server for On-demand 30 FPS Stream
     GridSight::WebSocketStreamer ws_streamer(ws_port, capturer);
@@ -222,7 +224,7 @@ int main(int argc, char* argv[]) {
     GridSight::Utils::Log("INFO", "GridSight Beacon shutting down...");
     rtp_receiver.Stop();
     ws_streamer.Stop();
-    http_server.Stop();
+    http_server->Stop();
     beacon_client.Stop();
     capturer->Release();
 

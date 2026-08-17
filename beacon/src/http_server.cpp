@@ -52,17 +52,76 @@ void HttpServer::Stop() {
     }
 }
 
+void HttpServer::SetTeacherHost(const std::string& host, int port) {
+    std::lock_guard<std::mutex> lock(teacher_mutex_);
+    teacher_host_ = host;
+    teacher_port_ = port;
+    Utils::Log("INFO", "HttpServer updated teacher destination for outbound push: " + host + ":" + std::to_string(port));
+}
+
+void HttpServer::PushSnapshotToTeacher(const std::vector<uint8_t>& jpeg_data) {
+    std::string host;
+    int port = 3000;
+    {
+        std::lock_guard<std::mutex> lock(teacher_mutex_);
+        host = teacher_host_;
+        port = teacher_port_;
+    }
+    if (host.empty()) return;
+
+    SOCKET s = socket(AF_INET, SOCK_STREAM, 0);
+    if (s == INVALID_SOCKET) return;
+
+#ifdef _WIN32
+    DWORD timeout = 2000;
+    setsockopt(s, SOL_SOCKET, SO_SNDTIMEO, (const char*)&timeout, sizeof(timeout));
+    setsockopt(s, SOL_SOCKET, SO_RCVTIMEO, (const char*)&timeout, sizeof(timeout));
+#else
+    struct timeval timeout = { 2, 0 };
+    setsockopt(s, SOL_SOCKET, SO_SNDTIMEO, &timeout, sizeof(timeout));
+    setsockopt(s, SOL_SOCKET, SO_RCVTIMEO, &timeout, sizeof(timeout));
+#endif
+
+    sockaddr_in addr = {0};
+    addr.sin_family = AF_INET;
+    addr.sin_port = htons(port);
+    inet_pton(AF_INET, host.c_str(), &addr.sin_addr);
+
+    if (connect(s, (sockaddr*)&addr, sizeof(addr)) != SOCKET_ERROR) {
+        NetworkInfo net = Utils::GetSystemNetworkInfo();
+        std::ostringstream oss;
+        oss << "POST /api/agent/snapshot HTTP/1.1\r\n"
+            << "Host: " << host << ":" << port << "\r\n"
+            << "X-Agent-MAC: " << net.mac << "\r\n"
+            << "X-Agent-IP: " << net.ip << "\r\n"
+            << "Content-Type: image/jpeg\r\n"
+            << "Content-Length: " << jpeg_data.size() << "\r\n"
+            << "Connection: close\r\n\r\n";
+        std::string header = oss.str();
+        send(s, header.c_str(), (int)header.length(), 0);
+        send(s, (const char*)jpeg_data.data(), (int)jpeg_data.size(), 0);
+
+        // Consume quick ACK response
+        char buf[256];
+        recv(s, buf, sizeof(buf) - 1, 0);
+    }
+    closesocket(s);
+}
+
 void HttpServer::SnapshotWorkerLoop() {
-    // Background snapshot engine: captures and compresses screen at 1 FPS
-    // Decouples DXGI capture and JPEG encoding from incoming HTTP socket requests
+    // Background snapshot engine: captures, compresses, and pushes screen at 1 FPS
     while (running_) {
         FrameData frame;
         if (capturer_->CaptureFrame(frame)) {
             std::vector<uint8_t> jpeg_data;
             if (ImageEncoder::EncodeToJPEG(frame.bgra_buffer.data(), frame.width, frame.height, 480, 270, 70, jpeg_data)) {
-                std::lock_guard<std::mutex> lock(snapshot_mutex_);
-                cached_jpeg_data_ = std::move(jpeg_data);
-                cached_jpeg_timestamp_ = Utils::GetCurrentTimestampMs();
+                {
+                    std::lock_guard<std::mutex> lock(snapshot_mutex_);
+                    cached_jpeg_data_ = jpeg_data;
+                    cached_jpeg_timestamp_ = Utils::GetCurrentTimestampMs();
+                }
+                // Outbound push to teacher console (100% bypasses student firewall)
+                PushSnapshotToTeacher(jpeg_data);
             }
         }
         Utils::SleepMs(1000); // 1 FPS polling cadence

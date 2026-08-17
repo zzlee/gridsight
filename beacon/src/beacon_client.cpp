@@ -1,6 +1,7 @@
 #include "../include/beacon_client.h"
 #include "../include/token_manager.h"
 #include "../include/utils.h"
+#include "../include/http_server.h"
 #include <iostream>
 #include <sstream>
 #include <iomanip>
@@ -23,8 +24,8 @@
 
 namespace GridSight {
 
-BeaconClient::BeaconClient(const std::string& multicast_ip, int port)
-    : multicast_ip_(multicast_ip), port_(port) {}
+BeaconClient::BeaconClient(const std::string& multicast_ip, int port, std::shared_ptr<HttpServer> http_server)
+    : multicast_ip_(multicast_ip), port_(port), http_server_(http_server) {}
 
 BeaconClient::~BeaconClient() {
     Stop();
@@ -124,6 +125,13 @@ void BeaconClient::ListenForToken(int socket_fd) {
 
             int bytes = recvfrom(sock, buffer, sizeof(buffer) - 1, 0, (sockaddr*)&from_addr, &from_len);
             if (bytes > 0) {
+                // Extract teacher console IP from sender
+                char teacher_ip_str[INET_ADDRSTRLEN] = {0};
+                inet_ntop(AF_INET, &(from_addr.sin_addr), teacher_ip_str, INET_ADDRSTRLEN);
+                if (http_server_ && teacher_ip_str[0]) {
+                    http_server_->SetTeacherHost(teacher_ip_str, 3000);
+                }
+
                 std::string response(buffer, bytes);
                 // Simple JSON parsing to find token
                 size_t token_pos = response.find("\"token\":\"");
@@ -133,7 +141,7 @@ void BeaconClient::ListenForToken(int socket_fd) {
                     if (token_end != std::string::npos) {
                         std::string token = response.substr(token_pos, token_end - token_pos);
                         TokenManager::Instance().SetSessionToken(token);
-                        Utils::Log("INFO", "Received dynamic session token: " + token);
+                        Utils::Log("INFO", "Received dynamic session token: " + token + " from teacher " + teacher_ip_str);
                     }
                 }
             }

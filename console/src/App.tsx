@@ -21,6 +21,10 @@ export const App: React.FC = () => {
   const [isChangePinOpen, setIsChangePinOpen] = useState(false);
   const [mode, setMode] = useState<AppMode>('MONITOR');
   const [layout, setLayout] = useState<ClassroomLayout>(() => LayoutStorage.getDefaultPreset('aisle'));
+  const layoutRef = useRef(layout);
+  useEffect(() => {
+    layoutRef.current = layout;
+  }, [layout]);
   const [focusDevice, setFocusDevice] = useState<StudentDevice | null>(null);
   const [specsDevice, setSpecsDevice] = useState<StudentDevice | null>(null);
   const [isPresetsOpen, setIsPresetsOpen] = useState(false);
@@ -121,7 +125,7 @@ export const App: React.FC = () => {
   useEffect(() => {
     if (mode === 'MONITOR' && !isLocked) {
       pollingManager.startPolling(
-        () => layout.seats,
+        () => layoutRef.current.seats,
         (updated) => {
           setLayout((prev) => ({
             ...prev,

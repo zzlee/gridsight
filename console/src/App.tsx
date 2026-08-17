@@ -31,11 +31,11 @@ export const App: React.FC = () => {
 
   const [unassignedDevices, setUnassignedDevices] = useState<StudentDevice[]>([]);
 
-  // Fetch discovered devices from backend /api/agents
+  // Fetch discovered devices from backend /api/agents (relative path for Docker & remote access)
   useEffect(() => {
     const fetchAgents = async () => {
       try {
-        const resp = await fetch('http://localhost:3001/api/agents');
+        const resp = await fetch('/api/agents');
         if (resp.ok) {
           const data = await resp.json();
           if (data.agents && Array.isArray(data.agents)) {
@@ -52,18 +52,46 @@ export const App: React.FC = () => {
 
             // Match discovered agents to layout seats
             setLayout((prev) => {
-              const assignedIps = new Set(prev.seats.map((s) => s.ip));
-              const unassigned = discovered.filter((d) => !assignedIps.has(d.ip));
-              setUnassignedDevices(unassigned);
+              const assignedIps = new Set<string>();
+              const updatedSeats = [...prev.seats];
 
-              // Update token/status for matching seats
-              const updatedSeats = prev.seats.map((seat) => {
-                const match = discovered.find((d) => d.ip === seat.ip || d.hostname === seat.hostname);
-                if (match) {
-                  return { ...seat, token: match.token || seat.token, status: 'online' as const };
+              // 1. First pass: Match exact IP or MAC
+              discovered.forEach((dev) => {
+                const idx = updatedSeats.findIndex((s) => s.ip === dev.ip || (s.mac && s.mac === dev.mac));
+                if (idx !== -1) {
+                  assignedIps.add(dev.ip);
+                  updatedSeats[idx] = {
+                    ...updatedSeats[idx],
+                    hostname: dev.hostname || updatedSeats[idx].hostname,
+                    token: dev.token || updatedSeats[idx].token,
+                    mac: dev.mac || updatedSeats[idx].mac,
+                    status: 'online',
+                  };
                 }
-                return seat;
               });
+
+              // 2. Second pass: Auto-bind any remaining online discovered devices to dummy/offline default seats (192.168.1.x)
+              const unassigned = discovered.filter((d) => !assignedIps.has(d.ip));
+              unassigned.forEach((dev) => {
+                const dummyIdx = updatedSeats.findIndex(
+                  (s) => (s.ip.startsWith('192.168.1.') || s.status === 'offline') && !assignedIps.has(s.ip)
+                );
+                if (dummyIdx !== -1) {
+                  assignedIps.add(dev.ip);
+                  updatedSeats[dummyIdx] = {
+                    ...updatedSeats[dummyIdx],
+                    id: dev.id,
+                    hostname: dev.hostname,
+                    ip: dev.ip,
+                    mac: dev.mac,
+                    token: dev.token,
+                    status: 'online',
+                  };
+                }
+              });
+
+              const remainingUnassigned = discovered.filter((d) => !assignedIps.has(d.ip));
+              setUnassignedDevices(remainingUnassigned);
 
               return { ...prev, seats: updatedSeats };
             });
@@ -75,7 +103,7 @@ export const App: React.FC = () => {
     };
 
     fetchAgents();
-    const timer = setInterval(fetchAgents, 5000);
+    const timer = setInterval(fetchAgents, 3000);
     return () => clearInterval(timer);
   }, []);
 
@@ -121,7 +149,7 @@ export const App: React.FC = () => {
 
     try {
       if (nextActive) {
-        await fetch('http://localhost:3001/api/broadcast/start', {
+        await fetch('/api/broadcast/start', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
@@ -132,7 +160,7 @@ export const App: React.FC = () => {
           }),
         });
       } else {
-        await fetch('http://localhost:3001/api/broadcast/stop', { method: 'POST' });
+        await fetch('/api/broadcast/stop', { method: 'POST' });
       }
     } catch {
       // Backend not reached, local broadcast toggle state remains
@@ -156,10 +184,29 @@ export const App: React.FC = () => {
   };
 
   const handleAutoAssign = () => {
-    // Sort seats cleanly by hostname
+    // Assign unassigned devices sequentially into seats
     setLayout((prev) => {
-      const sortedSeats = [...prev.seats].sort((a, b) => a.hostname.localeCompare(b.hostname));
-      return { ...prev, seats: sortedSeats };
+      let seatIdx = 0;
+      const updatedSeats = [...prev.seats];
+      unassignedDevices.forEach((dev) => {
+        while (seatIdx < updatedSeats.length && updatedSeats[seatIdx].status === 'online') {
+          seatIdx++;
+        }
+        if (seatIdx < updatedSeats.length) {
+          updatedSeats[seatIdx] = {
+            ...updatedSeats[seatIdx],
+            id: dev.id,
+            hostname: dev.hostname,
+            ip: dev.ip,
+            mac: dev.mac,
+            token: dev.token,
+            status: 'online',
+          };
+          seatIdx++;
+        }
+      });
+      setUnassignedDevices([]);
+      return { ...prev, seats: updatedSeats };
     });
   };
 

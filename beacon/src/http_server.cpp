@@ -61,7 +61,7 @@ void HttpServer::SetTeacherHost(const std::string& host, int port) {
 
 void HttpServer::PushSnapshotToTeacher(const std::vector<uint8_t>& jpeg_data) {
     std::string host;
-    int port = 3000;
+    int port = 3001;
     {
         std::lock_guard<std::mutex> lock(teacher_mutex_);
         host = teacher_host_;

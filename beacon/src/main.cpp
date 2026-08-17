@@ -202,7 +202,7 @@ int main(int argc, char* argv[]) {
     // 1. Start HTTP Server with Outbound Snapshot Push to Teacher
     auto http_server = std::make_shared<GridSight::HttpServer>(http_port, capturer);
     std::string default_teacher = GridSight::Utils::GetEnv("TEACHER_IP", "192.168.190.201");
-    http_server->SetTeacherHost(default_teacher, 3000);
+    http_server->SetTeacherHost(default_teacher, 3001);
     http_server->Start();
 
     // 2. Start Beacon Discovery (notifies http_server of discovered teacher IP)
@@ -211,7 +211,7 @@ int main(int argc, char* argv[]) {
 
     // 3. Start WebSocket Server for On-demand 30 FPS Stream (with Outbound Reverse Streaming)
     auto ws_streamer = std::make_shared<GridSight::WebSocketStreamer>(ws_port, capturer);
-    ws_streamer->SetTeacherHost(default_teacher, 3000);
+    ws_streamer->SetTeacherHost(default_teacher, 3001);
     ws_streamer->Start();
 
     // 4. Start RTP Receiver for Teacher Multicast Broadcast

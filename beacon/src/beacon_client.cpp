@@ -131,7 +131,7 @@ void BeaconClient::ListenForToken(int socket_fd) {
                 char teacher_ip_str[INET_ADDRSTRLEN] = {0};
                 inet_ntop(AF_INET, &(from_addr.sin_addr), teacher_ip_str, INET_ADDRSTRLEN);
                 if (http_server_ && teacher_ip_str[0]) {
-                    http_server_->SetTeacherHost(teacher_ip_str, 3000);
+                    http_server_->SetTeacherHost(teacher_ip_str, 3001);
                 }
 
                 std::string response(buffer, bytes);

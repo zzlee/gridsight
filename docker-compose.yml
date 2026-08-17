@@ -17,3 +17,4 @@ services:
       - BROADCAST_MULTICAST_IP=239.255.42.100
     volumes:
       - ./beacon/gs-agent.exe:/app/downloads/gs-agent.exe:ro
+      - ./debug_snapshots:/app/debug_snapshots

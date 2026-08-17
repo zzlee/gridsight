@@ -142,6 +142,21 @@ app.get('/api/broadcast/status', (req, res) => {
   res.json({ active: broadcastStreamer.isActive() });
 });
 
+// Debug snapshot disk persistence directory
+const possibleSnapshotDirs = [
+  '/app/debug_snapshots',
+  path.resolve(__dirname, '../../debug_snapshots'),
+  path.resolve(__dirname, '../debug_snapshots'),
+];
+let debugSnapshotsDir = '/app/debug_snapshots';
+for (const dir of possibleSnapshotDirs) {
+  try {
+    if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
+    debugSnapshotsDir = dir;
+    break;
+  } catch {}
+}
+
 // Route: Receive outbound JPEG snapshots pushed from student agents (100% firewall proof)
 app.post(
   '/api/agent/snapshot',
@@ -155,6 +170,16 @@ app.post(
     if (buffer && buffer.length > 0) {
       if (mac) snapshotCache.set(mac, { buffer, timestamp: Date.now() });
       if (ip) snapshotCache.set(ip, { buffer, timestamp: Date.now() });
+
+      // Save to disk for real-time inspection and debugging
+      try {
+        const fileKey = (mac || ip || 'unknown').replace(/[:]/g, '-');
+        fs.writeFileSync(path.join(debugSnapshotsDir, `${fileKey}.jpg`), buffer);
+        fs.writeFileSync(path.join(debugSnapshotsDir, 'latest.jpg'), buffer);
+      } catch (err: any) {
+        logger.warn(`[Snapshot Disk Save] Error: ${err.message}`);
+      }
+
       res.status(200).json({ status: 'ok' });
     } else {
       res.status(400).json({ error: 'empty snapshot' });

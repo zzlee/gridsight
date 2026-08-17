@@ -233,36 +233,12 @@ const ensureSeatsDirectory = () => {
 const getDefaultSeatsLayout = () => {
   const cols = 8;
   const rows = 6;
-  const seats = [];
-  let count = 1;
-
-  for (let r = 0; r < rows; r++) {
-    const rowLabel = String.fromCharCode(65 + (r % 26));
-    for (let c = 0; c < cols; c++) {
-      const seatNo = `${rowLabel}${c + 1}`;
-      seats.push({
-        id: `PC-${String(count).padStart(2, '0')}`,
-        hostname: `PC-${String(count).padStart(2, '0')}`,
-        ip: `192.168.1.${100 + count}`,
-        mac: `00:1A:2B:3C:4D:${String(count).padStart(2, '0')}`,
-        username: `Student${String(count).padStart(2, '0')}`,
-        seatNo,
-        gridX: c,
-        gridY: r,
-        status: 'offline',
-        latencyMs: 0,
-        lastSeen: 0,
-      });
-      count++;
-    }
-  }
-
   return {
     id: `layout-matrix-${cols}x${rows}`,
-    name: `電腦教室 (${cols}×${rows}, ${cols * rows}台)`,
+    name: `電腦教室 (${cols}×${rows}, ${cols * rows}席位)`,
     cols: Math.max(cols, 4),
     rows,
-    seats,
+    seats: [], // Clean empty matrix by default!
     aisles: [],
     obstacles: [],
   };
@@ -287,13 +263,16 @@ const loadSeatsLayout = () => {
       const content = fs.readFileSync(SEATS_FILE, 'utf-8');
       const parsed = JSON.parse(content);
       if (parsed && Array.isArray(parsed.seats)) {
-        const minGridY = Math.min(...parsed.seats.map((s: any) => s.gridY));
-        if (minGridY === 1) {
-          parsed.seats = parsed.seats.map((s: any) => ({ ...s, gridY: s.gridY - 1 }));
-          parsed.rows = Math.max(...parsed.seats.map((s: any) => s.gridY)) + 1;
-          parsed.obstacles = [];
-          saveSeatsLayout(parsed);
-        }
+        // Filter out legacy dummy offline seats
+        const cleanedSeats = parsed.seats.filter(
+          (s: any) =>
+            !(
+              s.status === 'offline' &&
+              s.ip?.startsWith('192.168.1.') &&
+              s.mac?.startsWith('00:1A:2B:3C')
+            )
+        );
+        parsed.seats = cleanedSeats;
         return parsed;
       }
     }

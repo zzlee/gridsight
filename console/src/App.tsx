@@ -424,38 +424,12 @@ export const App: React.FC = () => {
         });
       }
 
-      // Fill in empty coordinates with clean empty seat slots
-      const existingCoordSet = new Set(withinBounds.map((s) => `${s.gridX},${s.gridY}`));
-      let count = withinBounds.length + 1;
-      for (let r = 0; r < rows; r++) {
-        const rowLabel = String.fromCharCode(65 + (r % 26));
-        for (let c = 0; c < cols; c++) {
-          const key = `${c},${r}`;
-          if (!existingCoordSet.has(key)) {
-            withinBounds.push({
-              id: `PC-Slot-${c}-${r}`,
-              hostname: `PC-${String(count).padStart(2, '0')}`,
-              ip: `192.168.1.${100 + count}`,
-              mac: `00:1A:2B:3C:4D:${String(count).padStart(2, '0')}`,
-              username: `Student${String(count).padStart(2, '0')}`,
-              seatNo: `${rowLabel}${c + 1}`,
-              gridX: c,
-              gridY: r,
-              status: 'offline',
-              latencyMs: 0,
-              lastSeen: 0,
-            });
-            count++;
-          }
-        }
-      }
-
       const newLayout: ClassroomLayout = {
         id: `layout-matrix-${cols}x${rows}-${Date.now()}`,
-        name: name || `標準矩陣 (${cols}×${rows}, ${cols * rows}台)`,
+        name: name || `標準矩陣 (${cols}×${rows}, ${cols * rows}席位)`,
         cols: Math.max(cols, 4),
         rows,
-        seats: withinBounds,
+        seats: withinBounds, // Keep only actual assigned devices, unassigned slots remain clean & empty
         aisles: [],
         obstacles: [],
       };

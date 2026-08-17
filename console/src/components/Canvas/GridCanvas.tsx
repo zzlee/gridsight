@@ -3,6 +3,7 @@ import { ClassroomLayout, StudentDevice, AppMode } from '../../types';
 import { StudentCard } from './StudentCard';
 import { ObstacleMarker } from './ObstacleMarker';
 import { MiniMap } from './MiniMap';
+import { Monitor } from 'lucide-react';
 
 interface GridCanvasProps {
   layout: ClassroomLayout;
@@ -241,49 +242,54 @@ export const GridCanvas: React.FC<GridCanvasProps> = ({
           transformOrigin: '0 0',
         }}
       >
-        {/* Render Drop-Target Grid Matrix for Empty Cells (in Edit Mode or when Dragging) */}
-        {(mode === 'EDIT_LAYOUT' || draggedSeatId) && (
-          <div className="absolute inset-0 pointer-events-none">
-            {Array.from({ length: totalRows }).map((_, r) => {
-              return Array.from({ length: totalCols }).map((_, c) => {
-                const key = `${c},${r}`;
-                const isOccupied = occupiedCells.has(key);
-                const isTarget = dragOverCell && dragOverCell.x === c && dragOverCell.y === r;
-                const rowLabel = String.fromCharCode(65 + (r % 26));
+        {/* Render Drop-Target Grid Matrix for Empty Cells */}
+        <div className="absolute inset-0 pointer-events-none">
+          {Array.from({ length: totalRows }).map((_, r) => {
+            return Array.from({ length: totalCols }).map((_, c) => {
+              const key = `${c},${r}`;
+              const isOccupied = occupiedCells.has(key);
+              if (isOccupied) return null;
 
-                return (
-                  <div
-                    key={key}
-                    onDragOver={(e) => handleCellDragOver(e, c, r)}
-                    onDrop={(e) => handleCellDrop(e, c, r)}
-                    className={`absolute rounded-lg border transition-all ${
-                      isOccupied
-                        ? 'border-transparent pointer-events-none'
-                        : isTarget
+              const isTarget = dragOverCell && dragOverCell.x === c && dragOverCell.y === r;
+              const rowLabel = String.fromCharCode(65 + (r % 26));
+
+              const isInteractive = mode === 'EDIT_LAYOUT' || draggedSeatId;
+
+              return (
+                <div
+                  key={key}
+                  onDragOver={(e) => handleCellDragOver(e, c, r)}
+                  onDrop={(e) => handleCellDrop(e, c, r)}
+                  className={`absolute rounded-lg border transition-all ${
+                    isInteractive
+                      ? isTarget
                         ? 'border-sky-400 bg-sky-500/30 ring-2 ring-sky-400 pointer-events-auto scale-105 shadow-lg'
-                        : 'border-slate-800/60 border-dashed bg-slate-900/30 hover:border-sky-500/50 hover:bg-slate-900/60 pointer-events-auto'
-                    }`}
-                    style={{
-                      left: c * (cardWidth + gap),
-                      top: r * (cardHeight + gap),
-                      width: cardWidth,
-                      height: cardHeight,
-                    }}
-                  >
-                    {!isOccupied && (
-                      <div className="w-full h-full flex flex-col items-center justify-center text-[11px] font-mono text-slate-600 select-none">
-                        <span className="text-xs font-semibold text-slate-500">{rowLabel}{c + 1}</span>
-                        <span className="text-[10px] text-slate-700">可放置席位</span>
-                      </div>
-                    )}
+                        : 'border-slate-800/80 border-dashed bg-slate-900/30 hover:border-sky-500/50 hover:bg-slate-900/60 pointer-events-auto'
+                      : 'border-slate-900/80 bg-slate-950/40 pointer-events-none'
+                  }`}
+                  style={{
+                    left: c * (cardWidth + gap),
+                    top: r * (cardHeight + gap),
+                    width: cardWidth,
+                    height: cardHeight,
+                  }}
+                >
+                  <div className="w-full h-full flex flex-col items-center justify-center select-none space-y-1">
+                    <span className="px-2 py-0.5 rounded bg-slate-900/80 border border-slate-800 text-xs font-mono font-semibold text-slate-500">
+                      {rowLabel}{c + 1}
+                    </span>
+                    <Monitor className="w-5 h-5 text-slate-700 opacity-40" />
+                    <span className="text-[10px] text-slate-600 font-medium">
+                      {isInteractive ? '可放置席位' : '空白席位'}
+                    </span>
                   </div>
-                );
-              });
-            })}
-          </div>
-        )}
+                </div>
+              );
+            });
+          })}
+        </div>
 
-        {/* Render Teacher Podium */}
+        {/* Render Teacher Podium Obstacles if any */}
         {layout.obstacles.map((obs) => (
           <div
             key={obs.id}
@@ -299,7 +305,7 @@ export const GridCanvas: React.FC<GridCanvasProps> = ({
           </div>
         ))}
 
-        {/* Render Student Cards */}
+        {/* Render Assigned Student Cards */}
         {layout.seats.map((seat) => (
           <div
             key={seat.id}

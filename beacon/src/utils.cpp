@@ -30,14 +30,24 @@ NetworkInfo Utils::GetSystemNetworkInfo() {
     info.username = "Student";
 
 #ifdef _WIN32
-    char host[256] = {0};
-    if (gethostname(host, sizeof(host)) == 0) {
-        info.hostname = host;
+    // 1. Native Windows Computer Name (Kernel32 API - 100% reliable, no WinSock dependency)
+    char comp_name[MAX_COMPUTERNAME_LENGTH + 1] = {0};
+    DWORD comp_name_len = sizeof(comp_name);
+    if (GetComputerNameA(comp_name, &comp_name_len) && comp_name_len > 0) {
+        info.hostname = comp_name;
+    } else {
+        char host[256] = {0};
+        DWORD host_len = sizeof(host);
+        if (GetComputerNameExA(ComputerNamePhysicalDnsHostname, host, &host_len) && host_len > 0) {
+            info.hostname = host;
+        } else if (gethostname(host, sizeof(host)) == 0 && strlen(host) > 0) {
+            info.hostname = host;
+        }
     }
 
     char user[256] = {0};
     DWORD user_len = sizeof(user);
-    if (GetUserNameA(user, &user_len)) {
+    if (GetUserNameA(user, &user_len) && user_len > 0) {
         info.username = user;
     }
 

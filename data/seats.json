@@ -1,1 +1,46 @@
-{"id":"layout-matrix-8x6","name":"電腦教室 (8×6, 48席位)","cols":8,"rows":6,"seats":[],"aisles":[],"obstacles":[]}
+{
+  "id": "layout-matrix-8x6",
+  "name": "電腦教室 (8×6, 48席位)",
+  "cols": 8,
+  "rows": 6,
+  "seats": [
+    {
+      "id": "E0:D5:5E:66:22:B7",
+      "hostname": "DESKTOP-UNKNOWN",
+      "ip": "192.168.190.101",
+      "mac": "E0:D5:5E:66:22:B7",
+      "status": "online",
+      "token": "9dfd53d2dba3b35f9779fd353a3f032ec68925eb1491436a",
+      "specs": {
+        "agent_version": "5.3.0",
+        "os": "Windows (x64)",
+        "uptime": 429536,
+        "cpu": {
+          "model": "Intel(R) Core(TM) i7-8700K CPU @ 3.70GHz",
+          "cores": 12,
+          "usage_percent": 1.20025
+        },
+        "ram": {
+          "total_mb": 16232,
+          "avail_mb": 8996,
+          "usage_percent": 44
+        },
+        "disk": {
+          "drive": "C:",
+          "total_gb": 930,
+          "free_gb": 688,
+          "usage_percent": 26.0215
+        }
+      },
+      "gridX": 1,
+      "gridY": 0,
+      "seatNo": "A1",
+      "selected": false,
+      "thumbnailUrl": "blob:http://localhost:3000/0e47fad2-4963-4c71-b1ee-fdf31a231582",
+      "latencyMs": 65,
+      "lastSeen": 1786960661468
+    }
+  ],
+  "aisles": [],
+  "obstacles": []
+}

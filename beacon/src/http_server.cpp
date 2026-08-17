@@ -85,6 +85,21 @@ void HttpServer::ListenLoop() {
 void HttpServer::HandleClient(uintptr_t client_socket) {
 #ifdef _WIN32
     SOCKET s = (SOCKET)client_socket;
+
+    // Set send and receive timeouts to 5000ms
+    DWORD timeout = 5000;
+    setsockopt(s, SOL_SOCKET, SO_RCVTIMEO, (const char*)&timeout, sizeof(timeout));
+    setsockopt(s, SOL_SOCKET, SO_SNDTIMEO, (const char*)&timeout, sizeof(timeout));
+#else
+    int s = (int)client_socket;
+    struct timeval timeout;
+    timeout.tv_sec = 5;
+    timeout.tv_usec = 0;
+    setsockopt(s, SOL_SOCKET, SO_RCVTIMEO, &timeout, sizeof(timeout));
+    setsockopt(s, SOL_SOCKET, SO_SNDTIMEO, &timeout, sizeof(timeout));
+#endif
+
+#ifdef _WIN32
     char buffer[4096] = {0};
     int bytes = recv(s, buffer, sizeof(buffer) - 1, 0);
     if (bytes <= 0) {

@@ -161,8 +161,11 @@ bool ScreenCapturer::CaptureFrame(FrameData& out_frame) {
     IDXGIResource* desktop_resource = nullptr;
 
     HRESULT hr = dup->AcquireNextFrame(100, &frame_info, &desktop_resource);
-    if (hr == DXGI_ERROR_ACCESS_LOST) {
-        ReacquireDuplication();
+    if (FAILED(hr)) {
+        if (hr != DXGI_ERROR_WAIT_TIMEOUT) {
+            Utils::Log("ERROR", "DXGI AcquireNextFrame failed with HR: " + std::to_string(hr) + ". Reacquiring...");
+            ReacquireDuplication();
+        }
         return false;
     }
 

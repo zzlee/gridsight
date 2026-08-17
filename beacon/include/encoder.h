@@ -31,7 +31,10 @@ private:
     int fps_ = 30;
     int bitrate_kbps_ = 3000;
     bool initialized_ = false;
-    void* encoder_ctx_ = nullptr;
+
+    void* pEncoder_ = nullptr;
+    long long rtStart_ = 0;
+    std::vector<uint8_t> nv12_buffer_;
 };
 
 } // namespace GridSight

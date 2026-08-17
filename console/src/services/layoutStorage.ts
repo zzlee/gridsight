@@ -25,12 +25,42 @@ export const LayoutStorage = {
   },
 
   exportLayoutJson(layout: ClassroomLayout): string {
-    return JSON.stringify(layout, null, 2);
+    // Export with normalized MAC primary keys
+    const sanitizedSeats = layout.seats.map((s) => ({
+      id: s.id,
+      mac: s.mac ? s.mac.toUpperCase() : '',
+      hostname: s.hostname,
+      seatNo: s.seatNo,
+      gridX: s.gridX,
+      gridY: s.gridY,
+      lastKnownIp: s.ip,
+    }));
+
+    const exportObj = {
+      ...layout,
+      seats: sanitizedSeats,
+      version: '5.4.0',
+      exportedAt: new Date().toISOString(),
+      bindingMode: 'MAC_PRIMARY_KEY',
+    };
+
+    return JSON.stringify(exportObj, null, 2);
   },
 
   importLayoutJson(jsonStr: string): ClassroomLayout | null {
     try {
-      return JSON.parse(jsonStr) as ClassroomLayout;
+      const parsed = JSON.parse(jsonStr) as ClassroomLayout;
+      if (parsed && Array.isArray(parsed.seats)) {
+        parsed.seats = parsed.seats.map((s: any) => ({
+          ...s,
+          ip: s.ip || s.lastKnownIp || '192.168.1.1',
+          mac: s.mac ? s.mac.toUpperCase() : '',
+          status: 'offline' as const,
+          latencyMs: 0,
+          lastSeen: 0,
+        }));
+      }
+      return parsed;
     } catch {
       return null;
     }

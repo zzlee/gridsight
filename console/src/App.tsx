@@ -66,21 +66,24 @@ export const App: React.FC = () => {
               gridY: 0,
             }));
 
-            // Match discovered agents to layout seats
+            // Match discovered agents to layout seats via strict MAC-First Primary Key Binding
             setLayout((prev) => {
-              const assignedIps = new Set<string>();
+              const assignedMacs = new Set<string>();
               const updatedSeats = [...prev.seats];
+              const normMac = (m?: string) => (m ? m.replace(/[:-]/g, '').toUpperCase() : '');
 
-              // Update status and telemetry for devices currently assigned to seats
               discovered.forEach((dev) => {
-                const idx = updatedSeats.findIndex(
-                  (s) => (s.mac && s.mac === dev.mac) || (s.ip && s.ip === dev.ip)
-                );
+                const devKey = normMac(dev.mac);
+                if (!devKey) return;
+
+                // Match strictly by physical MAC address
+                const idx = updatedSeats.findIndex((s) => normMac(s.mac) === devKey);
                 if (idx !== -1) {
-                  assignedIps.add(dev.ip);
-                  if (dev.mac) assignedIps.add(dev.mac);
+                  assignedMacs.add(devKey);
+                  // Hot-update current dynamic DHCP IP without altering grid position!
                   updatedSeats[idx] = {
                     ...updatedSeats[idx],
+                    ip: dev.ip,
                     hostname: dev.hostname || updatedSeats[idx].hostname,
                     token: dev.token || updatedSeats[idx].token,
                     mac: dev.mac || updatedSeats[idx].mac,
@@ -92,7 +95,7 @@ export const App: React.FC = () => {
 
               // Discovered online agents NOT placed in the matrix stay in the Device Pool
               const unassigned = discovered.filter(
-                (d) => !assignedIps.has(d.ip) && (!d.mac || !assignedIps.has(d.mac))
+                (d) => !d.mac || !assignedMacs.has(normMac(d.mac))
               );
               setUnassignedDevices(unassigned);
 

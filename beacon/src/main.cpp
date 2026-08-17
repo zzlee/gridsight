@@ -11,21 +11,132 @@
 
 #ifdef _WIN32
 #include <windows.h>
+#else
+#include <unistd.h>
+#include <sys/types.h>
+#include <sys/wait.h>
+#include <string.h>
 #endif
 
 std::atomic<bool> g_keep_running{true};
 
+#ifdef _WIN32
+HANDLE g_child_process = NULL;
+#else
+pid_t g_child_pid = -1;
+#endif
+
 void SignalHandler(int signum) {
     g_keep_running = false;
+#ifdef _WIN32
+    if (g_child_process) {
+        TerminateProcess(g_child_process, 0);
+    }
+#else
+    if (g_child_pid > 0) {
+        kill(g_child_pid, SIGTERM);
+    }
+#endif
+}
+
+void RunWatchdog(const char* exe_path) {
+    GridSight::Utils::Log("INFO", "GridSight Watchdog started. Monitoring worker process...");
+
+    while (g_keep_running) {
+#ifdef _WIN32
+        STARTUPINFOA si;
+        PROCESS_INFORMATION pi;
+        ZeroMemory(&si, sizeof(si));
+        si.cb = sizeof(si);
+        ZeroMemory(&pi, sizeof(pi));
+
+        std::string cmd = "\"" + std::string(exe_path) + "\" --worker";
+
+        // Create the child process
+        if (!CreateProcessA(NULL, const_cast<LPSTR>(cmd.c_str()), NULL, NULL, FALSE, 0, NULL, NULL, &si, &pi)) {
+            GridSight::Utils::Log("ERROR", "Watchdog failed to create worker process. Retrying in 5s...");
+            GridSight::Utils::SleepMs(5000);
+            continue;
+        }
+
+        g_child_process = pi.hProcess;
+        GridSight::Utils::Log("INFO", "Watchdog spawned worker process (PID: " + std::to_string(pi.dwProcessId) + ")");
+
+        // Wait until child process exits
+        WaitForSingleObject(pi.hProcess, INFINITE);
+
+        DWORD exit_code = 0;
+        GetExitCodeProcess(pi.hProcess, &exit_code);
+
+        CloseHandle(pi.hProcess);
+        CloseHandle(pi.hThread);
+        g_child_process = NULL;
+
+        if (!g_keep_running) break;
+
+        GridSight::Utils::Log("WARNING", "Worker process exited with code " + std::to_string(exit_code) + ". Restarting...");
+        GridSight::Utils::SleepMs(1000); // Backoff before restart
+#else
+        pid_t pid = fork();
+        if (pid < 0) {
+            GridSight::Utils::Log("ERROR", "Watchdog failed to fork. Retrying in 5s...");
+            GridSight::Utils::SleepMs(5000);
+            continue;
+        }
+
+        if (pid == 0) {
+            // Child process
+            execlp(exe_path, exe_path, "--worker", NULL);
+            // If execlp fails
+            GridSight::Utils::Log("ERROR", "Watchdog failed to exec worker process.");
+            exit(1);
+        } else {
+            // Parent process
+            g_child_pid = pid;
+            GridSight::Utils::Log("INFO", "Watchdog spawned worker process (PID: " + std::to_string(pid) + ")");
+
+            int status;
+            waitpid(pid, &status, 0);
+            g_child_pid = -1;
+
+            if (!g_keep_running) break;
+
+            if (WIFEXITED(status)) {
+                GridSight::Utils::Log("WARNING", "Worker process exited with code " + std::to_string(WEXITSTATUS(status)) + ". Restarting...");
+            } else if (WIFSIGNALED(status)) {
+                GridSight::Utils::Log("WARNING", "Worker process killed by signal " + std::to_string(WTERMSIG(status)) + ". Restarting...");
+            }
+            GridSight::Utils::SleepMs(1000); // Backoff before restart
+        }
+#endif
+    }
+
+    GridSight::Utils::Log("INFO", "GridSight Watchdog shutting down...");
 }
 
 #ifdef _WIN32
 int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine, int nCmdShow) {
+    bool is_worker = (strstr(lpCmdLine, "--worker") != NULL);
+    char exe_path[MAX_PATH];
+    GetModuleFileNameA(NULL, exe_path, MAX_PATH);
 #else
 int main(int argc, char* argv[]) {
+    bool is_worker = false;
+    for (int i = 1; i < argc; ++i) {
+        if (strcmp(argv[i], "--worker") == 0) {
+            is_worker = true;
+            break;
+        }
+    }
+    const char* exe_path = argv[0];
 #endif
     signal(SIGINT, SignalHandler);
     signal(SIGTERM, SignalHandler);
+
+    if (!is_worker) {
+        RunWatchdog(exe_path);
+        return 0;
+    }
 
     GridSight::Utils::Log("INFO", "GridSight Beacon (gs-agent) starting in Session 1...");
 

@@ -124,13 +124,19 @@ void WebSocketStreamer::AcceptLoop() {
         std::string method, path, proto;
         stream >> method >> path >> proto;
 
+        char client_ip[INET_ADDRSTRLEN] = {0};
+        inet_ntop(AF_INET, &(client_addr.sin_addr), client_ip, INET_ADDRSTRLEN);
+
         std::string token_value;
 
-        // Extract token from query parameter ?token=...
+        // Extract token from query parameter ?token=... or &token=...
         size_t q_pos = path.find("?token=");
+        if (q_pos == std::string::npos) {
+            q_pos = path.find("&token=");
+        }
         if (q_pos != std::string::npos) {
             token_value = path.substr(q_pos + 7);
-            size_t end_q = token_value.find('&');
+            size_t end_q = token_value.find_first_of("&# \t\r\n");
             if (end_q != std::string::npos) {
                 token_value = token_value.substr(0, end_q);
             }
@@ -159,7 +165,8 @@ void WebSocketStreamer::AcceptLoop() {
                 std::string err_response = "HTTP/1.1 401 Unauthorized\r\nConnection: close\r\n\r\n";
                 send(client_fd, err_response.c_str(), (int)err_response.length(), 0);
                 closesocket(client_fd);
-                Utils::Log("WARN", "WebSocket client unauthorized");
+                std::string reason = token_value.empty() ? "Missing token" : "Invalid/expired token";
+                Utils::Log("WARN", "WebSocket client unauthorized (" + reason + ") from " + std::string(client_ip));
                 continue;
             }
         }

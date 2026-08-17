@@ -32,7 +32,53 @@ export const App: React.FC = () => {
   const [editingSeat, setEditingSeat] = useState<StudentDevice | null>(null);
   const [isMatrixConfigOpen, setIsMatrixConfigOpen] = useState(false);
   const [isDevicePoolOpen, setIsDevicePoolOpen] = useState(false);
-  const [zoom, setZoom] = useState(0.85);
+  // Viewport Zoom & Pan Persistence (localStorage)
+  const [zoom, setZoom] = useState<number>(() => {
+    try {
+      const savedZoom = localStorage.getItem('gridsight_viewport_zoom');
+      if (savedZoom) {
+        const val = parseFloat(savedZoom);
+        if (!isNaN(val) && val >= 0.2 && val <= 3.0) return val;
+      }
+    } catch {}
+    return 0.85;
+  });
+
+  const [pan, setPan] = useState<{ x: number; y: number }>(() => {
+    try {
+      const savedPan = localStorage.getItem('gridsight_viewport_pan');
+      if (savedPan) {
+        const parsed = JSON.parse(savedPan);
+        if (typeof parsed.x === 'number' && typeof parsed.y === 'number') {
+          return parsed;
+        }
+      }
+    } catch {}
+    return { x: 0, y: 0 };
+  });
+
+  // Persist zoom to localStorage
+  useEffect(() => {
+    try {
+      localStorage.setItem('gridsight_viewport_zoom', zoom.toString());
+    } catch {}
+  }, [zoom]);
+
+  // Persist pan to localStorage
+  useEffect(() => {
+    try {
+      localStorage.setItem('gridsight_viewport_pan', JSON.stringify(pan));
+    } catch {}
+  }, [pan]);
+
+  const handleResetView = () => {
+    setZoom(0.85);
+    setPan({ x: 0, y: 0 });
+    try {
+      localStorage.setItem('gridsight_viewport_zoom', '0.85');
+      localStorage.setItem('gridsight_viewport_pan', JSON.stringify({ x: 0, y: 0 }));
+    } catch {}
+  };
 
   const [unassignedDevices, setUnassignedDevices] = useState<StudentDevice[]>([]);
 
@@ -450,7 +496,7 @@ export const App: React.FC = () => {
         unassignedCount={unassignedDevices.length}
         zoom={zoom}
         setZoom={setZoom}
-        onResetView={() => setZoom(0.85)}
+        onResetView={handleResetView}
         onLock={() => setIsLocked(true)}
         onOpenChangePin={() => setIsChangePinOpen(true)}
         trafficStats={trafficStats}
@@ -460,6 +506,9 @@ export const App: React.FC = () => {
         layout={layout}
         mode={mode}
         zoom={zoom}
+        pan={pan}
+        setPan={setPan}
+        setZoom={setZoom}
         onSelectStudent={handleSelectStudent}
         onFocusStudent={setFocusDevice}
         onRefreshAuth={handleRefreshAuth}

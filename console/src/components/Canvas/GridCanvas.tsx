@@ -9,6 +9,9 @@ interface GridCanvasProps {
   layout: ClassroomLayout;
   mode: AppMode;
   zoom: number;
+  pan: { x: number; y: number };
+  setPan: React.Dispatch<React.SetStateAction<{ x: number; y: number }>>;
+  setZoom?: React.Dispatch<React.SetStateAction<number>>;
   onSelectStudent: (id: string, multi: boolean) => void;
   onFocusStudent: (device: StudentDevice) => void;
   onRefreshAuth: (device: StudentDevice) => void;
@@ -25,6 +28,9 @@ export const GridCanvas: React.FC<GridCanvasProps> = ({
   layout,
   mode,
   zoom,
+  pan,
+  setPan,
+  setZoom,
   onSelectStudent,
   onFocusStudent,
   onRefreshAuth,
@@ -37,7 +43,6 @@ export const GridCanvas: React.FC<GridCanvasProps> = ({
   onAssignFromPool,
 }) => {
   const containerRef = useRef<HTMLDivElement>(null);
-  const [pan, setPan] = useState({ x: 0, y: 0 });
   const [isPanning, setIsPanning] = useState(false);
   const [startPan, setStartPan] = useState({ x: 0, y: 0 });
 
@@ -213,12 +218,21 @@ export const GridCanvas: React.FC<GridCanvasProps> = ({
   const totalCols = layout.cols;
   const totalRows = layout.rows;
 
+  const handleWheel = (e: React.WheelEvent) => {
+    if ((e.ctrlKey || e.metaKey) && setZoom) {
+      e.preventDefault();
+      const delta = e.deltaY > 0 ? -0.05 : 0.05;
+      setZoom((z) => Math.min(3.0, Math.max(0.2, Math.round((z + delta) * 100) / 100)));
+    }
+  };
+
   return (
     <div
       ref={containerRef}
       onMouseDown={handleMouseDown}
       onMouseMove={handleMouseMove}
       onMouseUp={handleMouseUp}
+      onWheel={handleWheel}
       className={`relative w-full h-[calc(100vh-3.5rem)] bg-slate-950 overflow-hidden ${
         isPanning ? 'cursor-grabbing' : 'cursor-default'
       }`}

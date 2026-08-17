@@ -14,11 +14,33 @@
 ```json
 {
   "type": "BEACON",
+  "version": "5.3.0",
   "hostname": "PC-01",
   "ip": "192.168.1.101",
   "mac": "00:1A:2B:3C:4D:01",
   "username": "Student01",
-  "timestamp": 1723812345678
+  "timestamp": 1723812345678,
+  "specs": {
+    "agent_version": "5.3.0",
+    "os": "Windows 11",
+    "uptime": 3600,
+    "cpu": {
+      "model": "Intel Core i7",
+      "cores": 8,
+      "usage_percent": 15.5
+    },
+    "ram": {
+      "total_mb": 16384,
+      "avail_mb": 8192,
+      "usage_percent": 50.0
+    },
+    "disk": {
+      "drive": "C:\\",
+      "total_gb": 512,
+      "free_gb": 256,
+      "usage_percent": 50.0
+    }
+  }
 }
 ```
 
@@ -37,21 +59,34 @@
 
 ---
 
-## 2. 模式 1：常態監控縮圖 HTTP API
+## 2. 模式 1：常態監控縮圖 HTTP API (Push & Fetch)
 
-### `GET /snapshot`
-- **傳輸協定**：HTTP/1.1
-- **預設端口**：8080
+常態監控縮圖採用學生端主動推送 (Push) 與前端抓取 (Fetch) 兩段式架構，確保能穿越防火牆且教師端無需直連所有學生端。
+
+### 2.1 學生端推送縮圖至教師端 (Agent Push)
+- **傳輸協定**：HTTP/1.1 POST
+- **目標端點**：教師端伺服器 (IP 來自 Token Grant)
+- **API 路徑**：`POST /api/agent/snapshot`
+- **預設端口**：3000
+- **發送頻率**：約 1 FPS
 - **請求標頭 (Headers)**：
-  - `X-Auth-Token`: `<SESSION_TOKEN>`
+  - `X-Agent-MAC`: `<STUDENT_MAC_ADDRESS>`
+  - `X-Agent-IP`: `<STUDENT_IP_ADDRESS>`
+  - `Content-Type`: `image/jpeg`
+  - `Content-Length`: `<BYTES>`
+- **Payload**：JPEG 影像二進位資料
+  - **影像規格**：480×270 解析度，JPEG Quality 75
+
+### 2.2 前端網頁抓取快取縮圖 (Frontend Fetch)
+- **傳輸協定**：HTTP/1.1 GET
+- **API 路徑**：`GET /api/snapshot/:id` (id 可為 MAC 地址或 IP 地址，允許忽略冒號等分隔符)
+- **請求對象**：教師端後端伺服器
 - **回應內容**：
   - **狀態碼**：`200 OK`
-  - **Content-Type**：`image/jpeg` 或 `image/webp`
-  - **影像規格**：480×270 解析度，JPEG Quality 75
-  - **回應大小**：約 25~35 KB
+  - **Content-Type**：`image/jpeg`
+  - **Payload**：快取在記憶體中的最新縮圖
 - **錯誤回應**：
-  - `401 Unauthorized`：Token 不符或遺失
-  - `500 Internal Server Error`：DXGI 截圖失敗
+  - `404 Not Found`：無此學生的快取縮圖
 
 ---
 

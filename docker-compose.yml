@@ -10,10 +10,8 @@ services:
     container_name: gridsight-console
     network_mode: host
     restart: unless-stopped
-    environment:
-      - API_PORT=3000
-      - API_HOST=0.0.0.0
-      - MULTICAST_IP=239.255.42.99
-      - BROADCAST_MULTICAST_IP=239.255.42.100
+    env_file:
+      - .env
     volumes:
+      - ./data:/data
       - ./beacon/gs-agent.exe:/app/downloads/gs-agent.exe:ro

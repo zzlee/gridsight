@@ -1,68 +1,60 @@
 import { ClassroomLayout, StudentDevice } from '../types';
+import { AuthService } from './authService';
 
-const STORAGE_KEY = 'gridsight_layouts_v7';
+const STORAGE_KEY = 'gridsight_layouts_v8';
 
 export const LayoutStorage = {
-  saveLayout(layout: ClassroomLayout) {
-    const list = this.getAllLayouts();
-    const idx = list.findIndex((l) => l.id === layout.id);
-    if (idx >= 0) {
-      list[idx] = layout;
-    } else {
-      list.push(layout);
+  /**
+   * Save layout to backend server (which writes to SEATS_FILE specified in .env)
+   */
+  async saveLayout(layout: ClassroomLayout): Promise<boolean> {
+    // 1. Cache to localStorage for instant offline recovery
+    try {
+      localStorage.setItem(STORAGE_KEY, JSON.stringify(layout));
+    } catch {
+      // ignore
     }
-    localStorage.setItem(STORAGE_KEY, JSON.stringify(list));
+
+    // 2. Persist directly to backend server SEATS_FILE
+    try {
+      const resp = await AuthService.fetchWithAuth('/api/layout', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(layout),
+      });
+      return resp.ok;
+    } catch (err) {
+      console.warn('[LayoutStorage] Failed to persist to backend /api/layout:', err);
+      return false;
+    }
   },
 
-  getAllLayouts(): ClassroomLayout[] {
+  /**
+   * Fetch layout from backend server SEATS_FILE
+   */
+  async fetchServerLayout(): Promise<ClassroomLayout | null> {
+    try {
+      const resp = await AuthService.fetchWithAuth('/api/layout');
+      if (resp.ok) {
+        const data = await resp.json();
+        if (data.layout && Array.isArray(data.layout.seats)) {
+          localStorage.setItem(STORAGE_KEY, JSON.stringify(data.layout));
+          return data.layout;
+        }
+      }
+    } catch (err) {
+      console.warn('[LayoutStorage] Failed to fetch layout from server:', err);
+    }
+    return this.getLocalCachedLayout();
+  },
+
+  getLocalCachedLayout(): ClassroomLayout {
     const data = localStorage.getItem(STORAGE_KEY);
-    if (!data) return [this.createMatrixLayout(8, 6, '電腦教室 (8×6, 48台)')];
+    if (!data) return this.createMatrixLayout(8, 6, '電腦教室 (8×6, 48台)');
     try {
       return JSON.parse(data);
     } catch {
-      return [this.createMatrixLayout(8, 6, '電腦教室 (8×6, 48台)')];
-    }
-  },
-
-  exportLayoutJson(layout: ClassroomLayout): string {
-    // Export with normalized MAC primary keys
-    const sanitizedSeats = layout.seats.map((s) => ({
-      id: s.id,
-      mac: s.mac ? s.mac.toUpperCase() : '',
-      hostname: s.hostname,
-      seatNo: s.seatNo,
-      gridX: s.gridX,
-      gridY: s.gridY,
-      lastKnownIp: s.ip,
-    }));
-
-    const exportObj = {
-      ...layout,
-      seats: sanitizedSeats,
-      version: '5.4.0',
-      exportedAt: new Date().toISOString(),
-      bindingMode: 'MAC_PRIMARY_KEY',
-    };
-
-    return JSON.stringify(exportObj, null, 2);
-  },
-
-  importLayoutJson(jsonStr: string): ClassroomLayout | null {
-    try {
-      const parsed = JSON.parse(jsonStr) as ClassroomLayout;
-      if (parsed && Array.isArray(parsed.seats)) {
-        parsed.seats = parsed.seats.map((s: any) => ({
-          ...s,
-          ip: s.ip || s.lastKnownIp || '192.168.1.1',
-          mac: s.mac ? s.mac.toUpperCase() : '',
-          status: 'offline' as const,
-          latencyMs: 0,
-          lastSeen: 0,
-        }));
-      }
-      return parsed;
-    } catch {
-      return null;
+      return this.createMatrixLayout(8, 6, '電腦教室 (8×6, 48台)');
     }
   },
 

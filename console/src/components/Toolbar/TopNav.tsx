@@ -1,14 +1,10 @@
-import React, { useRef } from 'react';
+import React from 'react';
 import { AppMode, ClassroomLayout } from '../../types';
-import { LayoutStorage } from '../../services/layoutStorage';
 import { TrafficStats } from '../../services/pollingManager';
 import {
   Layers,
   Edit3,
   Eye,
-  LayoutGrid,
-  Download,
-  Upload,
   HardDrive,
   ZoomIn,
   ZoomOut,
@@ -20,7 +16,6 @@ interface TopNavProps {
   mode: AppMode;
   setMode: (m: AppMode) => void;
   layout: ClassroomLayout;
-  onLayoutChange: (l: ClassroomLayout) => void;
   onOpenMatrixConfig: () => void;
   onOpenDevicePool: () => void;
   unassignedCount?: number;
@@ -36,7 +31,6 @@ export const TopNav: React.FC<TopNavProps> = ({
   mode,
   setMode,
   layout,
-  onLayoutChange,
   onOpenMatrixConfig,
   onOpenDevicePool,
   unassignedCount = 0,
@@ -47,34 +41,6 @@ export const TopNav: React.FC<TopNavProps> = ({
   onOpenChangePin,
   trafficStats,
 }) => {
-  const fileInputRef = useRef<HTMLInputElement>(null);
-
-  const handleExport = () => {
-    const jsonStr = LayoutStorage.exportLayoutJson(layout);
-    const blob = new Blob([jsonStr], { type: 'application/json' });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement('a');
-    a.href = url;
-    a.download = `gridsight_layout_${layout.id}_${Date.now()}.json`;
-    a.click();
-    URL.revokeObjectURL(url);
-  };
-
-  const handleImport = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
-    if (!file) return;
-    const reader = new FileReader();
-    reader.onload = (ev) => {
-      const content = ev.target?.result as string;
-      const imported = LayoutStorage.importLayoutJson(content);
-      if (imported) {
-        onLayoutChange(imported);
-        LayoutStorage.saveLayout(imported);
-      }
-    };
-    reader.readAsText(file);
-  };
-
   const activeSeatCount = layout.seats.length;
   const cols = layout.cols;
   const rows = Math.max(1, layout.rows - 1);
@@ -97,7 +63,7 @@ export const TopNav: React.FC<TopNavProps> = ({
 
         <div className="text-xs font-semibold text-slate-300 bg-slate-900 px-2.5 py-1 rounded border border-slate-800 flex items-center space-x-1.5">
           <span>{layout.name}</span>
-          <span className="text-[10px] text-sky-400 font-mono">({activeSeatCount}台席位)</span>
+          <span className="text-[10px] text-sky-400 font-mono">({activeSeatCount}席位)</span>
         </div>
       </div>
 
@@ -224,29 +190,6 @@ export const TopNav: React.FC<TopNavProps> = ({
             <RotateCcw className="w-3 h-3" />
           </button>
         </div>
-
-        {/* Import/Export JSON */}
-        <button
-          onClick={handleExport}
-          className="p-1.5 rounded bg-slate-900 hover:bg-slate-800 border border-slate-800 text-slate-300"
-          title="匯出座位表 JSON"
-        >
-          <Download className="w-4 h-4" />
-        </button>
-        <button
-          onClick={() => fileInputRef.current?.click()}
-          className="p-1.5 rounded bg-slate-900 hover:bg-slate-800 border border-slate-800 text-slate-300"
-          title="匯入座位表 JSON"
-        >
-          <Upload className="w-4 h-4" />
-        </button>
-        <input
-          ref={fileInputRef}
-          type="file"
-          accept=".json"
-          onChange={handleImport}
-          className="hidden"
-        />
       </div>
 
       {/* Right: Security PIN settings & Lock Console */}

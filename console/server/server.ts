@@ -217,8 +217,121 @@ app.get('/api/stream/debug', requireTeacherAuth, (req, res) => {
   });
 });
 
+const SEATS_FILE = process.env.SEATS_FILE || '/data/seats.json';
+
+const ensureSeatsDirectory = () => {
+  const dir = path.dirname(SEATS_FILE);
+  if (!fs.existsSync(dir)) {
+    try {
+      fs.mkdirSync(dir, { recursive: true });
+    } catch (err) {
+      logger.warn(`[Seats] Failed to create directory ${dir}: ${err}`);
+    }
+  }
+};
+
+const getDefaultSeatsLayout = () => {
+  const cols = 8;
+  const rows = 6;
+  const seats = [];
+  let count = 1;
+
+  for (let r = 0; r < rows; r++) {
+    const rowLabel = String.fromCharCode(65 + (r % 26));
+    for (let c = 0; c < cols; c++) {
+      const seatNo = `${rowLabel}${c + 1}`;
+      seats.push({
+        id: `PC-${String(count).padStart(2, '0')}`,
+        hostname: `PC-${String(count).padStart(2, '0')}`,
+        ip: `192.168.1.${100 + count}`,
+        mac: `00:1A:2B:3C:4D:${String(count).padStart(2, '0')}`,
+        username: `Student${String(count).padStart(2, '0')}`,
+        seatNo,
+        gridX: c,
+        gridY: r + 1,
+        status: 'offline',
+        latencyMs: 0,
+        lastSeen: 0,
+      });
+      count++;
+    }
+  }
+
+  const podiumWidth = Math.min(cols, Math.max(2, Math.floor(cols * 0.4)));
+  const podiumX = Math.max(0, Math.floor((cols - podiumWidth) / 2));
+
+  return {
+    id: `layout-matrix-${cols}x${rows}`,
+    name: `電腦教室 (${cols}×${rows}, ${cols * rows}台)`,
+    cols: Math.max(cols, 4),
+    rows: rows + 1,
+    seats,
+    aisles: [],
+    obstacles: [
+      {
+        id: 'obs-podium',
+        gridX: podiumX,
+        gridY: 0,
+        width: podiumWidth,
+        height: 1,
+        label: '教師講台 / 黑板',
+        type: 'podium',
+      },
+    ],
+  };
+};
+
+const saveSeatsLayout = (layoutData: any) => {
+  ensureSeatsDirectory();
+  try {
+    fs.writeFileSync(SEATS_FILE, JSON.stringify(layoutData, null, 2), 'utf-8');
+    logger.info(`[Seats] Successfully saved layout to ${SEATS_FILE}`);
+    return true;
+  } catch (err) {
+    logger.error(`[Seats] Failed to write layout to ${SEATS_FILE}: ${err}`);
+    return false;
+  }
+};
+
+const loadSeatsLayout = () => {
+  ensureSeatsDirectory();
+  try {
+    if (fs.existsSync(SEATS_FILE)) {
+      const content = fs.readFileSync(SEATS_FILE, 'utf-8');
+      const parsed = JSON.parse(content);
+      if (parsed && Array.isArray(parsed.seats)) {
+        return parsed;
+      }
+    }
+  } catch (err) {
+    logger.warn(`[Seats] Error reading ${SEATS_FILE}: ${err}`);
+  }
+
+  const defaultLayout = getDefaultSeatsLayout();
+  saveSeatsLayout(defaultLayout);
+  return defaultLayout;
+};
+
 app.get('/api/health', (req, res) => {
-  res.json({ status: 'ok', time: Date.now() });
+  res.json({ status: 'ok', time: Date.now(), seatsFile: SEATS_FILE });
+});
+
+app.get('/api/layout', (req, res) => {
+  const layout = loadSeatsLayout();
+  res.json({ success: true, layout, file: SEATS_FILE });
+});
+
+app.post('/api/layout', requireTeacherAuth, (req, res) => {
+  const layout = req.body;
+  if (!layout || !Array.isArray(layout.seats)) {
+    return res.status(400).json({ success: false, error: 'Invalid layout structure' });
+  }
+  const saved = saveSeatsLayout(layout);
+  if (saved) {
+    res.json({ success: true, message: 'Layout successfully saved to server', file: SEATS_FILE });
+  } else {
+    res.status(500).json({ success: false, error: 'Failed to write to seats file' });
+  }
 });
 
 app.get('/api/agents', requireTeacherAuth, (req, res) => {

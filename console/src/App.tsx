@@ -20,10 +20,7 @@ export const App: React.FC = () => {
   const [isLocked, setIsLocked] = useState(true);
   const [isChangePinOpen, setIsChangePinOpen] = useState(false);
   const [mode, setMode] = useState<AppMode>('MONITOR');
-  const [layout, setLayout] = useState<ClassroomLayout>(() => {
-    const saved = LayoutStorage.getAllLayouts();
-    return saved.length > 0 ? saved[0] : LayoutStorage.createMatrixLayout(8, 6, '電腦教室 (8×6, 48台)');
-  });
+  const [layout, setLayout] = useState<ClassroomLayout>(() => LayoutStorage.getLocalCachedLayout());
   const layoutRef = useRef(layout);
   useEffect(() => {
     layoutRef.current = layout;
@@ -36,6 +33,15 @@ export const App: React.FC = () => {
   const [zoom, setZoom] = useState(0.85);
 
   const [unassignedDevices, setUnassignedDevices] = useState<StudentDevice[]>([]);
+
+  // Load layout from server SEATS_FILE on startup
+  useEffect(() => {
+    LayoutStorage.fetchServerLayout().then((srvLayout) => {
+      if (srvLayout) {
+        setLayout(srvLayout);
+      }
+    });
+  }, []);
 
   // Check auth session on startup
   useEffect(() => {
@@ -447,7 +453,6 @@ export const App: React.FC = () => {
         mode={mode}
         setMode={setMode}
         layout={layout}
-        onLayoutChange={setLayout}
         onOpenMatrixConfig={() => setIsMatrixConfigOpen(true)}
         onOpenDevicePool={() => setIsDevicePoolOpen(true)}
         unassignedCount={unassignedDevices.length}

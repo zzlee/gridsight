@@ -245,12 +245,11 @@ export const GridCanvas: React.FC<GridCanvasProps> = ({
         {(mode === 'EDIT_LAYOUT' || draggedSeatId) && (
           <div className="absolute inset-0 pointer-events-none">
             {Array.from({ length: totalRows }).map((_, r) => {
-              if (r === 0) return null; // Row 0 is teacher podium
               return Array.from({ length: totalCols }).map((_, c) => {
                 const key = `${c},${r}`;
                 const isOccupied = occupiedCells.has(key);
                 const isTarget = dragOverCell && dragOverCell.x === c && dragOverCell.y === r;
-                const rowLabel = String.fromCharCode(65 + ((r - 1) % 26));
+                const rowLabel = String.fromCharCode(65 + (r % 26));
 
                 return (
                   <div

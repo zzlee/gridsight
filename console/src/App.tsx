@@ -253,7 +253,7 @@ export const App: React.FC = () => {
     setUnassignedDevices((prev) => prev.filter((d) => d.id !== deviceId));
 
     setLayout((prev) => {
-      const rowLabel = String.fromCharCode(65 + ((targetGridY - 1) % 26));
+      const rowLabel = String.fromCharCode(65 + (targetGridY % 26));
       const seatNo = `${rowLabel}${targetGridX + 1}`;
 
       // If a seat already exists at target coordinate, return that old seat to pool
@@ -310,12 +310,12 @@ export const App: React.FC = () => {
           // If all current seats are occupied, find next open grid coordinate
           const occupied = new Set(updatedSeats.map((s) => `${s.gridX},${s.gridY}`));
           let placed = false;
-          for (let r = 1; r < prev.rows; r++) {
+          for (let r = 0; r < prev.rows; r++) {
             for (let c = 0; c < prev.cols; c++) {
               const key = `${c},${r}`;
               if (!occupied.has(key)) {
                 occupied.add(key);
-                const rowLabel = String.fromCharCode(65 + ((r - 1) % 26));
+                const rowLabel = String.fromCharCode(65 + (r % 26));
                 updatedSeats.push({
                   ...dev,
                   gridX: c,
@@ -347,10 +347,10 @@ export const App: React.FC = () => {
     setLayout((prev) => {
       const occupiedCoords = new Set(prev.seats.map((s) => `${s.gridX},${s.gridY}`));
       let targetX = 0;
-      let targetY = 1;
+      let targetY = 0;
       let found = false;
 
-      for (let r = 1; r < prev.rows; r++) {
+      for (let r = 0; r < prev.rows; r++) {
         for (let c = 0; c < prev.cols; c++) {
           if (!occupiedCoords.has(`${c},${r}`)) {
             targetX = c;
@@ -369,7 +369,7 @@ export const App: React.FC = () => {
 
       setUnassignedDevices((pool) => pool.filter((d) => d.id !== device.id));
 
-      const rowLabel = String.fromCharCode(65 + ((targetY - 1) % 26));
+      const rowLabel = String.fromCharCode(65 + (targetY % 26));
       const newSeat: StudentDevice = {
         ...device,
         gridX: targetX,
@@ -407,7 +407,7 @@ export const App: React.FC = () => {
       const outOfBounds: StudentDevice[] = [];
 
       layout.seats.forEach((seat) => {
-        if (seat.gridX < cols && seat.gridY <= rows) {
+        if (seat.gridX < cols && seat.gridY < rows) {
           withinBounds.push(seat);
         } else {
           if (seat.status === 'online' || seat.mac) {
@@ -430,17 +430,17 @@ export const App: React.FC = () => {
       for (let r = 0; r < rows; r++) {
         const rowLabel = String.fromCharCode(65 + (r % 26));
         for (let c = 0; c < cols; c++) {
-          const key = `${c},${r + 1}`;
+          const key = `${c},${r}`;
           if (!existingCoordSet.has(key)) {
             withinBounds.push({
-              id: `PC-Slot-${c}-${r + 1}`,
+              id: `PC-Slot-${c}-${r}`,
               hostname: `PC-${String(count).padStart(2, '0')}`,
               ip: `192.168.1.${100 + count}`,
               mac: `00:1A:2B:3C:4D:${String(count).padStart(2, '0')}`,
               username: `Student${String(count).padStart(2, '0')}`,
               seatNo: `${rowLabel}${c + 1}`,
               gridX: c,
-              gridY: r + 1,
+              gridY: r,
               status: 'offline',
               latencyMs: 0,
               lastSeen: 0,
@@ -450,27 +450,14 @@ export const App: React.FC = () => {
         }
       }
 
-      const podiumWidth = Math.min(cols, Math.max(2, Math.floor(cols * 0.4)));
-      const podiumX = Math.max(0, Math.floor((cols - podiumWidth) / 2));
-
       const newLayout: ClassroomLayout = {
         id: `layout-matrix-${cols}x${rows}-${Date.now()}`,
         name: name || `標準矩陣 (${cols}×${rows}, ${cols * rows}台)`,
         cols: Math.max(cols, 4),
-        rows: rows + 1,
+        rows,
         seats: withinBounds,
         aisles: [],
-        obstacles: [
-          {
-            id: 'obs-podium',
-            gridX: podiumX,
-            gridY: 0,
-            width: podiumWidth,
-            height: 1,
-            label: '教師講台 / 黑板',
-            type: 'podium',
-          },
-        ],
+        obstacles: [],
       };
 
       setLayout(newLayout);

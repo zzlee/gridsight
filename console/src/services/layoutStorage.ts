@@ -1,7 +1,7 @@
 import { ClassroomLayout, StudentDevice } from '../types';
 import { AuthService } from './authService';
 
-const STORAGE_KEY = 'gridsight_layouts_v8';
+const STORAGE_KEY = 'gridsight_layouts_v9';
 
 export const LayoutStorage = {
   /**
@@ -38,6 +38,17 @@ export const LayoutStorage = {
       if (resp.ok) {
         const data = await resp.json();
         if (data.layout && Array.isArray(data.layout.seats)) {
+          // Normalize: if seats start at gridY=1, shift to start at gridY=0
+          const minGridY = Math.min(...data.layout.seats.map((s: any) => s.gridY));
+          if (minGridY === 1) {
+            data.layout.seats = data.layout.seats.map((s: any) => ({
+              ...s,
+              gridY: s.gridY - 1,
+            }));
+            data.layout.rows = Math.max(...data.layout.seats.map((s: any) => s.gridY)) + 1;
+            data.layout.obstacles = [];
+            this.saveLayout(data.layout);
+          }
           localStorage.setItem(STORAGE_KEY, JSON.stringify(data.layout));
           return data.layout;
         }
@@ -52,7 +63,17 @@ export const LayoutStorage = {
     const data = localStorage.getItem(STORAGE_KEY);
     if (!data) return this.createMatrixLayout(8, 6, '電腦教室 (8×6, 48台)');
     try {
-      return JSON.parse(data);
+      const parsed = JSON.parse(data);
+      if (parsed && Array.isArray(parsed.seats)) {
+        const minGridY = Math.min(...parsed.seats.map((s: any) => s.gridY));
+        if (minGridY === 1) {
+          parsed.seats = parsed.seats.map((s: any) => ({ ...s, gridY: s.gridY - 1 }));
+          parsed.rows = Math.max(...parsed.seats.map((s: any) => s.gridY)) + 1;
+          parsed.obstacles = [];
+        }
+        return parsed;
+      }
+      return this.createMatrixLayout(8, 6, '電腦教室 (8×6, 48台)');
     } catch {
       return this.createMatrixLayout(8, 6, '電腦教室 (8×6, 48台)');
     }
@@ -80,7 +101,7 @@ export const LayoutStorage = {
           username: `Student${String(count).padStart(2, '0')}`,
           seatNo,
           gridX: c,
-          gridY: r + 1, // Row 0 is reserved for podium/blackboard
+          gridY: r, // Row A starts directly at Y=0 (no blank top margin)
           status: 'offline' as const,
           latencyMs: 0,
           lastSeen: 0,
@@ -89,27 +110,14 @@ export const LayoutStorage = {
       }
     }
 
-    const podiumWidth = Math.min(cols, Math.max(2, Math.floor(cols * 0.4)));
-    const podiumX = Math.max(0, Math.floor((cols - podiumWidth) / 2));
-
     return {
       id: `layout-matrix-${cols}x${rows}-${Date.now()}`,
       name: name || `標準矩陣 (${cols}×${rows}, ${cols * rows}台)`,
-      rows: rows + 1, // +1 for teacher podium row
+      rows,
       cols: Math.max(cols, 4),
       seats,
       aisles: [],
-      obstacles: [
-        {
-          id: 'obs-podium',
-          gridX: podiumX,
-          gridY: 0,
-          width: podiumWidth,
-          height: 1,
-          label: '教師講台 / 黑板',
-          type: 'podium',
-        },
-      ],
+      obstacles: [],
     };
   },
 };

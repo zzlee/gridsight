@@ -248,7 +248,7 @@ const getDefaultSeatsLayout = () => {
         username: `Student${String(count).padStart(2, '0')}`,
         seatNo,
         gridX: c,
-        gridY: r + 1,
+        gridY: r,
         status: 'offline',
         latencyMs: 0,
         lastSeen: 0,
@@ -257,27 +257,14 @@ const getDefaultSeatsLayout = () => {
     }
   }
 
-  const podiumWidth = Math.min(cols, Math.max(2, Math.floor(cols * 0.4)));
-  const podiumX = Math.max(0, Math.floor((cols - podiumWidth) / 2));
-
   return {
     id: `layout-matrix-${cols}x${rows}`,
     name: `電腦教室 (${cols}×${rows}, ${cols * rows}台)`,
     cols: Math.max(cols, 4),
-    rows: rows + 1,
+    rows,
     seats,
     aisles: [],
-    obstacles: [
-      {
-        id: 'obs-podium',
-        gridX: podiumX,
-        gridY: 0,
-        width: podiumWidth,
-        height: 1,
-        label: '教師講台 / 黑板',
-        type: 'podium',
-      },
-    ],
+    obstacles: [],
   };
 };
 
@@ -300,6 +287,13 @@ const loadSeatsLayout = () => {
       const content = fs.readFileSync(SEATS_FILE, 'utf-8');
       const parsed = JSON.parse(content);
       if (parsed && Array.isArray(parsed.seats)) {
+        const minGridY = Math.min(...parsed.seats.map((s: any) => s.gridY));
+        if (minGridY === 1) {
+          parsed.seats = parsed.seats.map((s: any) => ({ ...s, gridY: s.gridY - 1 }));
+          parsed.rows = Math.max(...parsed.seats.map((s: any) => s.gridY)) + 1;
+          parsed.obstacles = [];
+          saveSeatsLayout(parsed);
+        }
         return parsed;
       }
     }

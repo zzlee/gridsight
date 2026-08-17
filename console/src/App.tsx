@@ -71,11 +71,14 @@ export const App: React.FC = () => {
               const assignedIps = new Set<string>();
               const updatedSeats = [...prev.seats];
 
-              // 1. First pass: Match exact IP or MAC
+              // Update status and telemetry for devices currently assigned to seats
               discovered.forEach((dev) => {
-                const idx = updatedSeats.findIndex((s) => s.ip === dev.ip || (s.mac && s.mac === dev.mac));
+                const idx = updatedSeats.findIndex(
+                  (s) => (s.mac && s.mac === dev.mac) || (s.ip && s.ip === dev.ip)
+                );
                 if (idx !== -1) {
                   assignedIps.add(dev.ip);
+                  if (dev.mac) assignedIps.add(dev.mac);
                   updatedSeats[idx] = {
                     ...updatedSeats[idx],
                     hostname: dev.hostname || updatedSeats[idx].hostname,
@@ -87,29 +90,11 @@ export const App: React.FC = () => {
                 }
               });
 
-              // 2. Second pass: Auto-bind any remaining online discovered devices to dummy/offline default seats (192.168.1.x)
-              const unassigned = discovered.filter((d) => !assignedIps.has(d.ip));
-              unassigned.forEach((dev) => {
-                const dummyIdx = updatedSeats.findIndex(
-                  (s) => (s.ip.startsWith('192.168.1.') || s.status === 'offline') && !assignedIps.has(s.ip)
-                );
-                if (dummyIdx !== -1) {
-                  assignedIps.add(dev.ip);
-                  updatedSeats[dummyIdx] = {
-                    ...updatedSeats[dummyIdx],
-                    id: dev.id,
-                    hostname: dev.hostname,
-                    ip: dev.ip,
-                    mac: dev.mac,
-                    token: dev.token,
-                    specs: dev.specs,
-                    status: 'online',
-                  };
-                }
-              });
-
-              const remainingUnassigned = discovered.filter((d) => !assignedIps.has(d.ip));
-              setUnassignedDevices(remainingUnassigned);
+              // Discovered online agents NOT placed in the matrix stay in the Device Pool
+              const unassigned = discovered.filter(
+                (d) => !assignedIps.has(d.ip) && (!d.mac || !assignedIps.has(d.mac))
+              );
+              setUnassignedDevices(unassigned);
 
               return { ...prev, seats: updatedSeats };
             });

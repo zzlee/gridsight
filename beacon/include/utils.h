@@ -12,9 +12,26 @@ struct NetworkInfo {
     std::string username;
 };
 
+struct SystemHardwareInfo {
+    std::string hostname;
+    std::string os_name;
+    std::string cpu_model;
+    int cpu_cores = 0;
+    double cpu_usage_percent = 0.0;
+    uint64_t ram_total_mb = 0;
+    uint64_t ram_avail_mb = 0;
+    double ram_usage_percent = 0.0;
+    std::string disk_drive = "C:";
+    uint64_t disk_total_gb = 0;
+    uint64_t disk_free_gb = 0;
+    double disk_usage_percent = 0.0;
+    uint64_t uptime_seconds = 0;
+};
+
 class Utils {
 public:
     static NetworkInfo GetSystemNetworkInfo();
+    static SystemHardwareInfo GetSystemHardwareInfo();
     static uint64_t GetCurrentTimestampMs();
     static void EnableDPIAwareness();
     static void SleepMs(uint32_t ms);

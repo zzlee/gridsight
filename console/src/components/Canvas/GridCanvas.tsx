@@ -13,6 +13,7 @@ interface GridCanvasProps {
   onFocusStudent: (device: StudentDevice) => void;
   onRefreshAuth: (device: StudentDevice) => void;
   onUnbindSeat: (id: string) => void;
+  onOpenSpecs?: (device: StudentDevice) => void;
 }
 
 export const GridCanvas: React.FC<GridCanvasProps> = ({
@@ -23,6 +24,7 @@ export const GridCanvas: React.FC<GridCanvasProps> = ({
   onFocusStudent,
   onRefreshAuth,
   onUnbindSeat,
+  onOpenSpecs,
 }) => {
   const containerRef = useRef<HTMLDivElement>(null);
   const [pan, setPan] = useState({ x: 0, y: 0 });
@@ -131,6 +133,7 @@ export const GridCanvas: React.FC<GridCanvasProps> = ({
               onDoubleClick={onFocusStudent}
               onRefreshAuth={onRefreshAuth}
               onUnbind={onUnbindSeat}
+              onOpenSpecs={onOpenSpecs}
             />
           </div>
         ))}

@@ -45,6 +45,37 @@ for (let i = 1; i <= NUM_AGENTS; i++) {
         'Expires': '0'
       });
       res.end(MOCK_IMAGE_BUFFER);
+    } else if (req.url.startsWith('/status') || req.url.startsWith('/api/status')) {
+      const cpuUsage = Math.round((10 + Math.random() * 25) * 10) / 10;
+      const ramUsage = Math.round((25 + (i % 30) + Math.random() * 5) * 10) / 10;
+      const statusPayload = JSON.stringify({
+        status: 'ok',
+        service: 'GridSight Beacon',
+        hostname,
+        os: 'Windows 11 Pro (x64)',
+        uptime: 7200 + i * 60,
+        cpu: {
+          model: '12th Gen Intel(R) Core(TM) i5-12400',
+          cores: 12,
+          usage_percent: cpuUsage
+        },
+        ram: {
+          total_mb: 16384,
+          avail_mb: Math.round(16384 * (1 - ramUsage / 100)),
+          usage_percent: ramUsage
+        },
+        disk: {
+          drive: 'C:',
+          total_gb: 512,
+          free_gb: 320 - (i % 50),
+          usage_percent: Math.round(((192 + (i % 50)) / 512) * 1000) / 10
+        }
+      });
+      res.writeHead(200, { 'Content-Type': 'application/json' });
+      res.end(statusPayload);
+    } else if (req.url === '/ping') {
+      res.writeHead(200, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({ status: 'ok', service: 'GridSight Beacon' }));
     } else {
       res.writeHead(404);
       res.end('Not Found');

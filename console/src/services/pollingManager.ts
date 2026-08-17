@@ -5,6 +5,7 @@ export class PollingManager {
   private circuitBreaker = new AbortableRequestCircuitBreaker(800); // 800ms circuit breaker timeout
   private intervalId: number | null = null;
   private isPolling = false;
+  private pollCount = 0;
   private activeThumbUrls = new Map<string, string>(); // deviceId -> blob URL
 
   startPolling(
@@ -17,9 +18,11 @@ export class PollingManager {
     this.intervalId = window.setInterval(async () => {
       if (this.isPolling) return;
       this.isPolling = true;
+      this.pollCount++;
 
       const devices = getDevices();
       const onlineOrDegraded = devices.filter((d) => d.ip && d.status !== 'offline');
+      const shouldPollStatus = this.pollCount % 5 === 0; // Poll hardware status every 5 seconds
 
       // Batch poll in parallel batches of 10 to protect teacher client socket pool
       const batchSize = 10;
@@ -30,9 +33,9 @@ export class PollingManager {
             const start = performance.now();
             try {
               const url = `http://${device.ip}:8080/snapshot?t=${Date.now()}`;
-              const resp = await this.circuitBreaker.fetchWithTimeout(url, {
-                headers: device.token ? { 'X-Auth-Token': device.token } : {},
-              });
+              const headers: Record<string, string> = device.token ? { 'X-Auth-Token': device.token } : {};
+              
+              const resp = await this.circuitBreaker.fetchWithTimeout(url, { headers });
 
               if (resp.ok) {
                 const blob = await resp.blob();
@@ -59,6 +62,23 @@ export class PollingManager {
                   status: 'degraded',
                   latencyMs: 800,
                 });
+              }
+
+              // Periodic /status polling for CPU/RAM/Disk hardware specs
+              if (shouldPollStatus || !device.specs) {
+                try {
+                  const statusUrl = `http://${device.ip}:8080/status`;
+                  const statusResp = await this.circuitBreaker.fetchWithTimeout(statusUrl, { headers });
+                  if (statusResp.ok) {
+                    const specs = await statusResp.json();
+                    onUpdateDevice({
+                      id: device.id,
+                      specs,
+                    });
+                  }
+                } catch {
+                  // Non-fatal telemetry poll error
+                }
               }
             } catch (err) {
               onUpdateDevice({

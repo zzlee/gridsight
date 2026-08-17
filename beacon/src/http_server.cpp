@@ -193,7 +193,35 @@ void HttpServer::HandleClient(uintptr_t client_socket) {
                 SendResponse(client_socket, 500, "application/json", std::vector<uint8_t>(err.begin(), err.end()));
             }
         }
-    } else if (path == "/ping" || path == "/status") {
+    } else if (path == "/status" || path == "/api/status") {
+        SystemHardwareInfo hw = Utils::GetSystemHardwareInfo();
+        std::ostringstream json;
+        json << "{"
+             << "\"status\":\"ok\","
+             << "\"service\":\"GridSight Beacon\","
+             << "\"hostname\":\"" << hw.hostname << "\","
+             << "\"os\":\"" << hw.os_name << "\","
+             << "\"uptime\":" << hw.uptime_seconds << ","
+             << "\"cpu\":{"
+             <<   "\"model\":\"" << hw.cpu_model << "\","
+             <<   "\"cores\":" << hw.cpu_cores << ","
+             <<   "\"usage_percent\":" << hw.cpu_usage_percent
+             << "},"
+             << "\"ram\":{"
+             <<   "\"total_mb\":" << hw.ram_total_mb << ","
+             <<   "\"avail_mb\":" << hw.ram_avail_mb << ","
+             <<   "\"usage_percent\":" << hw.ram_usage_percent
+             << "},"
+             << "\"disk\":{"
+             <<   "\"drive\":\"" << hw.disk_drive << "\","
+             <<   "\"total_gb\":" << hw.disk_total_gb << ","
+             <<   "\"free_gb\":" << hw.disk_free_gb << ","
+             <<   "\"usage_percent\":" << hw.disk_usage_percent
+             << "}"
+             << "}";
+        std::string json_str = json.str();
+        SendResponse(client_socket, 200, "application/json", std::vector<uint8_t>(json_str.begin(), json_str.end()));
+    } else if (path == "/ping") {
         std::string json = "{\"status\":\"ok\",\"service\":\"GridSight Beacon\"}";
         SendResponse(client_socket, 200, "application/json", std::vector<uint8_t>(json.begin(), json.end()));
     } else {

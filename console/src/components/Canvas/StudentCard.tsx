@@ -1,6 +1,6 @@
 import React from 'react';
 import { StudentDevice } from '../../types';
-import { Monitor, Maximize2, RefreshCw, Unlink } from 'lucide-react';
+import { Monitor, Maximize2, RefreshCw, Cpu, Activity } from 'lucide-react';
 
 interface StudentCardProps {
   device: StudentDevice;
@@ -9,6 +9,7 @@ interface StudentCardProps {
   onDoubleClick: (device: StudentDevice) => void;
   onRefreshAuth: (device: StudentDevice) => void;
   onUnbind: (id: string) => void;
+  onOpenSpecs?: (device: StudentDevice) => void;
 }
 
 export const StudentCard: React.FC<StudentCardProps> = ({
@@ -18,18 +19,21 @@ export const StudentCard: React.FC<StudentCardProps> = ({
   onDoubleClick,
   onRefreshAuth,
   onUnbind,
+  onOpenSpecs,
 }) => {
   const getStatusBadge = () => {
     switch (device.status) {
       case 'online':
-        return <span className="inline-block w-2.5 h-2.5 rounded-full bg-emerald-500 shadow-sm shadow-emerald-500/50" title="在線 (正常)" />;
+        return <span className="inline-block w-2 h-2 rounded-full bg-emerald-500 shadow-sm shadow-emerald-500/50" title="在線 (正常)" />;
       case 'degraded':
-        return <span className="inline-block w-2.5 h-2.5 rounded-full bg-amber-500 shadow-sm shadow-amber-500/50" title="延遲偏高 / 封包遺失" />;
+        return <span className="inline-block w-2 h-2 rounded-full bg-amber-500 shadow-sm shadow-amber-500/50" title="延遲偏高 / 封包遺失" />;
       case 'offline':
       default:
-        return <span className="inline-block w-2.5 h-2.5 rounded-full bg-rose-500 shadow-sm shadow-rose-500/50" title="離線 / 連線逾時" />;
+        return <span className="inline-block w-2 h-2 rounded-full bg-rose-500 shadow-sm shadow-rose-500/50" title="離線 / 連線逾時" />;
     }
   };
+
+  const specs = device.specs;
 
   return (
     <div
@@ -43,12 +47,12 @@ export const StudentCard: React.FC<StudentCardProps> = ({
       style={{ width: '100%', height: '100%' }}
     >
       {/* Header Info Bar */}
-      <div className="flex items-center justify-between px-2.5 py-1.5 bg-slate-950/60 border-b border-slate-800/80 text-xs">
+      <div className="flex items-center justify-between px-2.5 py-1 bg-slate-950/70 border-b border-slate-800/80 text-xs">
         <div className="flex items-center space-x-1.5 font-semibold text-slate-200">
           <span className="px-1.5 py-0.5 rounded bg-slate-800 text-sky-400 font-mono text-[11px]">
             {device.seatNo || '未分配'}
           </span>
-          <span className="truncate max-w-[80px]" title={device.hostname}>
+          <span className="truncate max-w-[75px]" title={device.hostname}>
             {device.hostname}
           </span>
         </div>
@@ -73,16 +77,16 @@ export const StudentCard: React.FC<StudentCardProps> = ({
           />
         ) : (
           <div className="flex flex-col items-center justify-center text-slate-600 space-y-1">
-            <Monitor className="w-8 h-8 opacity-40" />
-            <span className="text-[11px] font-mono">
-              {device.status === 'offline' ? '無訊號 (未連線)' : '等待影像輪詢...'}
+            <Monitor className="w-7 h-7 opacity-40" />
+            <span className="text-[10px] font-mono">
+              {device.status === 'offline' ? '無訊號 (未連線)' : '等待影像...'}
             </span>
           </div>
         )}
 
         {/* Hover Quick Actions */}
         {!isEditMode && (
-          <div className="absolute inset-0 bg-slate-950/70 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center space-x-2 backdrop-blur-[2px]">
+          <div className="absolute inset-0 bg-slate-950/75 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center space-x-1.5 backdrop-blur-[2px]">
             <button
               onClick={(e) => {
                 e.stopPropagation();
@@ -91,7 +95,17 @@ export const StudentCard: React.FC<StudentCardProps> = ({
               className="p-1.5 rounded-md bg-sky-600 hover:bg-sky-500 text-white shadow"
               title="焦點 30 FPS 實時監看"
             >
-              <Maximize2 className="w-4 h-4" />
+              <Maximize2 className="w-3.5 h-3.5" />
+            </button>
+            <button
+              onClick={(e) => {
+                e.stopPropagation();
+                onOpenSpecs?.(device);
+              }}
+              className="p-1.5 rounded-md bg-indigo-600 hover:bg-indigo-500 text-white shadow"
+              title="檢視電腦硬體狀態 (CPU/RAM/Disk)"
+            >
+              <Cpu className="w-3.5 h-3.5" />
             </button>
             <button
               onClick={(e) => {
@@ -101,18 +115,32 @@ export const StudentCard: React.FC<StudentCardProps> = ({
               className="p-1.5 rounded-md bg-slate-800 hover:bg-slate-700 text-slate-200 shadow"
               title="重新配發 RAM 鑑權 Token"
             >
-              <RefreshCw className="w-4 h-4" />
+              <RefreshCw className="w-3.5 h-3.5" />
             </button>
           </div>
         )}
       </div>
 
-      {/* Footer Info Bar */}
-      <div className="flex items-center justify-between px-2.5 py-1 bg-slate-950/40 text-[10px] text-slate-400 border-t border-slate-800/40">
-        <span className="truncate max-w-[90px]" title={device.username}>
-          {device.username || '無登入者'}
-        </span>
-        <span className="font-mono text-slate-500">{device.ip}</span>
+      {/* Footer Info Bar with Live Hardware Meters */}
+      <div className="flex items-center justify-between px-2 py-0.5 bg-slate-950/60 text-[10px] border-t border-slate-800/50 font-mono">
+        {specs ? (
+          <div className="flex items-center space-x-2 text-slate-400">
+            <span className={specs.cpu.usage_percent > 80 ? 'text-rose-400' : 'text-slate-400'}>
+              C:{specs.cpu.usage_percent.toFixed(0)}%
+            </span>
+            <span className={specs.ram.usage_percent > 85 ? 'text-amber-400' : 'text-slate-400'}>
+              R:{specs.ram.usage_percent.toFixed(0)}%
+            </span>
+            <span className="text-slate-500 truncate max-w-[55px]" title={`磁碟可用 ${specs.disk.free_gb} GB`}>
+              D:{specs.disk.free_gb}G
+            </span>
+          </div>
+        ) : (
+          <span className="truncate max-w-[85px] text-slate-400" title={device.username}>
+            {device.username || '無登入者'}
+          </span>
+        )}
+        <span className="text-slate-500 text-[9px]">{device.ip.split('.').slice(2).join('.')}</span>
       </div>
     </div>
   );

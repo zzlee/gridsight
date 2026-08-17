@@ -3,6 +3,7 @@ import { ClassroomLayout, StudentDevice, AppMode, BroadcastConfig } from './type
 import { TopNav } from './components/Toolbar/TopNav';
 import { GridCanvas } from './components/Canvas/GridCanvas';
 import { FocusModal } from './components/Viewer/FocusModal';
+import { DeviceSpecsModal } from './components/Viewer/DeviceSpecsModal';
 import { PresetsModal } from './components/Toolbar/PresetsModal';
 import { DevicePool } from './components/Toolbar/DevicePool';
 import { PollingManager } from './services/pollingManager';
@@ -14,6 +15,7 @@ export const App: React.FC = () => {
   const [mode, setMode] = useState<AppMode>('MONITOR');
   const [layout, setLayout] = useState<ClassroomLayout>(() => LayoutStorage.getDefaultPreset('aisle'));
   const [focusDevice, setFocusDevice] = useState<StudentDevice | null>(null);
+  const [specsDevice, setSpecsDevice] = useState<StudentDevice | null>(null);
   const [isPresetsOpen, setIsPresetsOpen] = useState(false);
   const [isDevicePoolOpen, setIsDevicePoolOpen] = useState(false);
   const [zoom, setZoom] = useState(0.85);
@@ -67,7 +69,7 @@ export const App: React.FC = () => {
             });
           }
         }
-      } catch (e) {
+      } catch {
         // Backend not running, default layout remains active
       }
     };
@@ -77,7 +79,7 @@ export const App: React.FC = () => {
     return () => clearInterval(timer);
   }, []);
 
-  // 1 FPS Snapshot Polling with AbortController 800ms Circuit Breaker
+  // 1 FPS Snapshot Polling & Periodic /status Telemetry with Circuit Breaker
   useEffect(() => {
     if (mode === 'MONITOR') {
       pollingManager.startPolling(
@@ -87,6 +89,10 @@ export const App: React.FC = () => {
             ...prev,
             seats: prev.seats.map((s) => (s.id === updated.id ? { ...s, ...updated } : s)),
           }));
+
+          // Keep active modal device state up-to-date
+          setFocusDevice((prev) => (prev && prev.id === updated.id ? { ...prev, ...updated } : prev));
+          setSpecsDevice((prev) => (prev && prev.id === updated.id ? { ...prev, ...updated } : prev));
         },
         1000
       );
@@ -128,7 +134,7 @@ export const App: React.FC = () => {
       } else {
         await fetch('http://localhost:3001/api/broadcast/stop', { method: 'POST' });
       }
-    } catch (e) {
+    } catch {
       // Backend not reached, local broadcast toggle state remains
     }
   };
@@ -181,12 +187,19 @@ export const App: React.FC = () => {
         onFocusStudent={setFocusDevice}
         onRefreshAuth={handleRefreshAuth}
         onUnbindSeat={handleUnbindSeat}
+        onOpenSpecs={setSpecsDevice}
       />
 
       {/* Focus 30FPS WebCodecs Viewer Modal */}
       <FocusModal
         device={focusDevice}
         onClose={() => setFocusDevice(null)}
+      />
+
+      {/* Hardware Specs & Telemetry Modal */}
+      <DeviceSpecsModal
+        device={specsDevice}
+        onClose={() => setSpecsDevice(null)}
       />
 
       {/* Layout Presets Modal */}

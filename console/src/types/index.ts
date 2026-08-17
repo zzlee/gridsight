@@ -1,5 +1,29 @@
 export type ConnectionStatus = 'online' | 'degraded' | 'offline';
 
+export interface DeviceSystemInfo {
+  status?: string;
+  service?: string;
+  hostname?: string;
+  os?: string;
+  uptime?: number;
+  cpu: {
+    model: string;
+    cores: number;
+    usage_percent: number;
+  };
+  ram: {
+    total_mb: number;
+    avail_mb: number;
+    usage_percent: number;
+  };
+  disk: {
+    drive: string;
+    total_gb: number;
+    free_gb: number;
+    usage_percent: number;
+  };
+}
+
 export interface StudentDevice {
   id: string;             // Unique MAC or UUID
   hostname: string;       // e.g. PC-01 to PC-70
@@ -15,6 +39,7 @@ export interface StudentDevice {
   token?: string;
   thumbnailUrl?: string;
   selected?: boolean;
+  specs?: DeviceSystemInfo;
 }
 
 export interface GridAisle {

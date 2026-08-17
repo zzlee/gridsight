@@ -1,5 +1,6 @@
 import dgram from 'dgram';
 import { TokenAuthority } from './tokenAuthority.js';
+import { logger } from './logger.js';
 
 export class MulticastDiscoveryService {
   private server: dgram.Socket | null = null;
@@ -18,7 +19,7 @@ export class MulticastDiscoveryService {
 
     this.server.on('listening', () => {
       this.server?.addMembership(this.multicastAddress);
-      console.log(`[Discovery] Multicast listener joined ${this.multicastAddress}:${this.port}`);
+      logger.info(`[Discovery] Multicast listener joined ${this.multicastAddress}:${this.port}`);
     });
 
     this.server.on('message', (msg, rinfo) => {
@@ -50,7 +51,7 @@ export class MulticastDiscoveryService {
           }
         }
       } catch (err) {
-        console.error('[Discovery] Error processing beacon packet:', err);
+        logger.error('[Discovery] Error processing beacon packet:', err);
       }
     });
 

@@ -15,3 +15,5 @@ services:
       - API_HOST=0.0.0.0
       - MULTICAST_IP=239.255.42.99
       - BROADCAST_MULTICAST_IP=239.255.42.100
+    volumes:
+      - ./beacon/gs-agent.exe:/app/downloads/gs-agent.exe:ro

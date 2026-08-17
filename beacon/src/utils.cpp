@@ -130,6 +130,14 @@ void Utils::Log(const std::string& level, const std::string& message) {
     if (g_log_file.is_open()) {
         g_log_file << ss.str() << std::endl;
         g_log_file.flush();
+
+        // Log Rotation (e.g., 5MB limit)
+        if (g_log_file.tellp() > 5 * 1024 * 1024) {
+            g_log_file.close();
+            std::remove("gs-agent.log.1");
+            std::rename("gs-agent.log", "gs-agent.log.1");
+            g_log_file.open("gs-agent.log", std::ios::app);
+        }
     }
 }
 
@@ -186,6 +194,30 @@ int Utils::GetEnvInt(const std::string& key, int default_value) {
     } catch (...) {
         return default_value;
     }
+}
+
+void Utils::UpdateHeartbeat() {
+    std::ofstream hb_file("gs-heartbeat.txt", std::ios::trunc);
+    if (hb_file.is_open()) {
+        hb_file << GetCurrentTimestampMs();
+        hb_file.close();
+    }
+}
+
+uint64_t Utils::GetLastHeartbeat() {
+    std::ifstream hb_file("gs-heartbeat.txt");
+    if (!hb_file.is_open()) {
+        return 0;
+    }
+    std::string line;
+    if (std::getline(hb_file, line)) {
+        try {
+            return std::stoull(line);
+        } catch (...) {
+            return 0;
+        }
+    }
+    return 0;
 }
 
 } // namespace GridSight

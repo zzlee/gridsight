@@ -23,6 +23,9 @@ public:
     static void LoadEnv(const std::string& filepath);
     static std::string GetEnv(const std::string& key, const std::string& default_value = "");
     static int GetEnvInt(const std::string& key, int default_value = 0);
+
+    static void UpdateHeartbeat();
+    static uint64_t GetLastHeartbeat();
 };
 
 } // namespace GridSight

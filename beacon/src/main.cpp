@@ -62,10 +62,29 @@ void RunWatchdog(const char* exe_path) {
         g_child_process = pi.hProcess;
         GridSight::Utils::Log("INFO", "Watchdog spawned worker process (PID: " + std::to_string(pi.dwProcessId) + ")");
 
-        // Wait until child process exits
-        WaitForSingleObject(pi.hProcess, INFINITE);
-
+        // Wait until child process exits or timeout
+        uint64_t start_time = GridSight::Utils::GetCurrentTimestampMs();
         DWORD exit_code = 0;
+        bool crashed = false;
+
+        while (g_keep_running) {
+            DWORD wait_res = WaitForSingleObject(pi.hProcess, 5000);
+            if (wait_res == WAIT_OBJECT_0) {
+                // Process exited
+                break;
+            } else if (wait_res == WAIT_TIMEOUT) {
+                // Check heartbeat
+                uint64_t now = GridSight::Utils::GetCurrentTimestampMs();
+                uint64_t last_hb = GridSight::Utils::GetLastHeartbeat();
+                if ((now - start_time > 60000) && (now - last_hb > 60000)) {
+                    GridSight::Utils::Log("ERROR", "Watchdog: Worker process deadlocked (no heartbeat for 60s). Terminating...");
+                    TerminateProcess(pi.hProcess, 1);
+                    crashed = true;
+                    break;
+                }
+            }
+        }
+
         GetExitCodeProcess(pi.hProcess, &exit_code);
 
         CloseHandle(pi.hProcess);
@@ -74,7 +93,7 @@ void RunWatchdog(const char* exe_path) {
 
         if (!g_keep_running) break;
 
-        GridSight::Utils::Log("WARNING", "Worker process exited with code " + std::to_string(exit_code) + ". Restarting...");
+        GridSight::Utils::Log("WARNING", "Worker process exited with code " + std::to_string(exit_code) + (crashed ? " (Killed)" : "") + ". Restarting...");
         GridSight::Utils::SleepMs(1000); // Backoff before restart
 #else
         pid_t pid = fork();
@@ -96,12 +115,35 @@ void RunWatchdog(const char* exe_path) {
             GridSight::Utils::Log("INFO", "Watchdog spawned worker process (PID: " + std::to_string(pid) + ")");
 
             int status;
-            waitpid(pid, &status, 0);
+            uint64_t start_time = GridSight::Utils::GetCurrentTimestampMs();
+            bool crashed = false;
+
+            while (g_keep_running) {
+                pid_t wpid = waitpid(pid, &status, WNOHANG);
+                if (wpid == pid) {
+                    break; // Exited
+                } else if (wpid == 0) {
+                    // Still running, check heartbeat
+                    uint64_t now = GridSight::Utils::GetCurrentTimestampMs();
+                    uint64_t last_hb = GridSight::Utils::GetLastHeartbeat();
+                    if ((now - start_time > 60000) && (now - last_hb > 60000)) {
+                        GridSight::Utils::Log("ERROR", "Watchdog: Worker process deadlocked (no heartbeat for 60s). Terminating...");
+                        kill(pid, SIGKILL);
+                        crashed = true;
+                        waitpid(pid, &status, 0); // Cleanup
+                        break;
+                    }
+                    GridSight::Utils::SleepMs(5000);
+                }
+            }
+
             g_child_pid = -1;
 
             if (!g_keep_running) break;
 
-            if (WIFEXITED(status)) {
+            if (crashed) {
+                GridSight::Utils::Log("WARNING", "Worker process killed due to heartbeat timeout. Restarting...");
+            } else if (WIFEXITED(status)) {
                 GridSight::Utils::Log("WARNING", "Worker process exited with code " + std::to_string(WEXITSTATUS(status)) + ". Restarting...");
             } else if (WIFSIGNALED(status)) {
                 GridSight::Utils::Log("WARNING", "Worker process killed by signal " + std::to_string(WTERMSIG(status)) + ". Restarting...");

@@ -68,6 +68,9 @@ void BeaconClient::DiscoveryLoop() {
         }
 #endif
 
+        // Update heartbeat immediately after announcement
+        Utils::UpdateHeartbeat();
+
         // Random jitter to prevent network broadcast storms from 70 PCs
         int sleep_time = jitter_dist(gen);
         Utils::SleepMs(sleep_time + 3000);

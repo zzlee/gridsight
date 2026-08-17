@@ -72,7 +72,7 @@ export const WebCodecsPlayer: React.FC<WebCodecsPlayerProps> = ({ device }) => {
     }
 
     // 3. Connect to Student Agent WebSocket stream (Port 8081)
-    const wsUrl = `ws://${device.ip}:8081`;
+    const wsUrl = `ws://${device.ip}:8081/?token=${device.token || ''}`;
     try {
       ws = new WebSocket(wsUrl);
       ws.binaryType = 'arraybuffer';

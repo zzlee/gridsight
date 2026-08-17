@@ -1,10 +1,16 @@
 import 'dotenv/config';
 import express from 'express';
 import cors from 'cors';
+import path from 'path';
+import { fileURLToPath } from 'url';
+import fs from 'fs';
 import { TokenAuthority } from './tokenAuthority.js';
 import { MulticastDiscoveryService } from './multicastDiscovery.js';
 import { TeacherBroadcastStreamer } from './broadcastStreamer.js';
 import { logger } from './logger.js';
+
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
 
 const app = express();
 const PORT = process.env.API_PORT ? parseInt(process.env.API_PORT, 10) : 3001;
@@ -52,6 +58,17 @@ app.post('/api/broadcast/stop', (req, res) => {
 app.get('/api/broadcast/status', (req, res) => {
   res.json({ active: broadcastStreamer.isActive() });
 });
+
+// Serve frontend dist assets if present
+const staticDistPath = process.env.STATIC_DIR || path.resolve(__dirname, '../dist');
+if (fs.existsSync(staticDistPath)) {
+  app.use(express.static(staticDistPath));
+  app.get('*', (req, res, next) => {
+    if (req.path.startsWith('/api/')) return next();
+    res.sendFile(path.join(staticDistPath, 'index.html'));
+  });
+  logger.info(`[GridSight Server] Serving web console UI from ${staticDistPath}`);
+}
 
 app.listen(PORT, HOST, () => {
   logger.info(`[GridSight Server] Coordinator API running on http://${HOST}:${PORT}`);

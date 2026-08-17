@@ -1,0 +1,51 @@
+# ========================================================
+# GridSight Teacher Console - Multi-Stage Docker Builder
+# Stage 1: Build React Frontend with reproducible Node 20
+# Stage 2: Production Server with FFmpeg + Express API + Static Assets
+# ========================================================
+
+# --- Stage 1: Frontend Builder ---
+FROM node:20-alpine AS frontend-builder
+WORKDIR /app/console
+
+# Install frontend dependencies
+COPY console/package.json console/package-lock.json* ./
+RUN npm install
+
+# Copy source and build production bundle
+COPY console/ ./
+RUN npm run build
+
+# --- Stage 2: Production Runtime ---
+FROM node:20-alpine AS runner
+WORKDIR /app
+
+# Install runtime dependencies: FFmpeg for teacher screen broadcast, bash, tzdata
+RUN apk add --no-cache ffmpeg bash tzdata
+
+# Set environment
+ENV NODE_ENV=production
+ENV API_PORT=3000
+ENV API_HOST=0.0.0.0
+ENV STATIC_DIR=/app/console/dist
+
+# Install server dependencies
+WORKDIR /app/console/server
+COPY console/server/package.json console/server/package-lock.json* ./
+RUN npm install --omit=dev
+
+# Copy server code
+COPY console/server/ ./
+
+# Copy built frontend assets from Stage 1
+COPY --from=frontend-builder /app/console/dist /app/console/dist
+
+# Expose Web Console / API port (3000) and UDP Discovery Multicast (9001) / RTP Broadcast (9000)
+EXPOSE 3000 9001/udp 9000/udp
+
+# Healthcheck
+HEALTHCHECK --interval=30s --timeout=5s --start-period=5s --retries=3 \
+  CMD wget --no-verbose --tries=1 --spider http://localhost:3000/api/health || exit 1
+
+# Start the unified teacher server
+CMD ["node", "node_modules/tsx/dist/cli.mjs", "server.ts"]

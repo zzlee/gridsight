@@ -101,20 +101,28 @@ gridsight/
 ## 🚀 快速上手 (Quick Start)
 
 ### 1. 教師端管理介面 (GridSight Console)
+
+**方式 A：使用標準 Docker 一鍵啟動 (推薦，免安裝 Node.js 與 FFmpeg)**
 ```bash
-# 進入 Console 目錄
-cd console
+# 一鍵透過 Docker Builder 編譯並啟動教師端完整服務 (包含前端 Web UI 與後端協調器)
+docker compose up -d
 
-# 安裝依賴套件
-npm install
-
-# 啟動 Web 介面
-npm run dev
-
-# 啟動後端協調器 (Discovery & Token Authority)
-npm run server
+# 或執行一鍵 Docker Builder 腳本生成映像檔與一致性前端產物：
+./scripts/build-console-docker.sh
 ```
 開啟瀏覽器訪問 `http://localhost:3000`。
+
+**方式 B：本地開發模式 (Local Dev Mode)**
+```bash
+# 進入 Console 目錄並安裝相依套件
+cd console && npm install
+
+# 啟動 Web 介面 (Port 3000)
+npm run dev
+
+# 另開終端啟動後端協調器 (Discovery & Token Authority, Port 3001)
+npm run server
+```
 
 ### 2. 學生端輕量代理 (GridSight Beacon) 交叉編譯 (標準 Docker Builder)
 為確保不同作業系統與開發環境具備一致的 MinGW-w64 工具鏈與靜態相依性，**專案標準採用 Docker Builder 容器化編譯**：

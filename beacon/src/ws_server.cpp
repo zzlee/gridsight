@@ -1,5 +1,6 @@
 #include "../include/ws_server.h"
 #include "../include/utils.h"
+#include "../include/token_manager.h"
 #include <iostream>
 #include <sstream>
 #include <cstring>
@@ -118,8 +119,52 @@ void WebSocketStreamer::AcceptLoop() {
             continue;
         }
 
-        std::string req(buffer, bytes);
-        size_t key_pos = req.find("Sec-WebSocket-Key:");
+        std::string req_str(buffer, bytes);
+        std::istringstream stream(req_str);
+        std::string method, path, proto;
+        stream >> method >> path >> proto;
+
+        std::string token_value;
+
+        // Extract token from query parameter ?token=...
+        size_t q_pos = path.find("?token=");
+        if (q_pos != std::string::npos) {
+            token_value = path.substr(q_pos + 7);
+            size_t end_q = token_value.find('&');
+            if (end_q != std::string::npos) {
+                token_value = token_value.substr(0, end_q);
+            }
+        }
+
+        // Check header if not in query
+        if (token_value.empty()) {
+            std::istringstream req_stream(req_str);
+            std::string line;
+            while (std::getline(req_stream, line) && line != "\r" && line != "") {
+                if (line.find("X-Auth-Token:") == 0 || line.find("x-auth-token:") == 0) {
+                    size_t colon = line.find(':');
+                    if (colon != std::string::npos) {
+                        token_value = line.substr(colon + 1);
+                        while (!token_value.empty() && (token_value.front() == ' ' || token_value.front() == '\t'))
+                            token_value.erase(0, 1);
+                        while (!token_value.empty() && (token_value.back() == '\r' || token_value.back() == '\n' || token_value.back() == ' '))
+                            token_value.pop_back();
+                    }
+                }
+            }
+        }
+
+        if (TokenManager::Instance().HasValidToken()) {
+            if (!TokenManager::Instance().ValidateToken(token_value)) {
+                std::string err_response = "HTTP/1.1 401 Unauthorized\r\nConnection: close\r\n\r\n";
+                send(client_fd, err_response.c_str(), (int)err_response.length(), 0);
+                closesocket(client_fd);
+                Utils::Log("WARN", "WebSocket client unauthorized");
+                continue;
+            }
+        }
+
+        size_t key_pos = req_str.find("Sec-WebSocket-Key:");
         if (key_pos == std::string::npos) {
             // Not a valid WebSocket handshake
             closesocket(client_fd);
@@ -127,15 +172,15 @@ void WebSocketStreamer::AcceptLoop() {
         }
 
         key_pos += 18;
-        while (key_pos < req.size() && (req[key_pos] == ' ' || req[key_pos] == '\t')) key_pos++;
-        size_t end_pos = req.find("\r\n", key_pos);
-        if (end_pos == std::string::npos) end_pos = req.find('\n', key_pos);
+        while (key_pos < req_str.size() && (req_str[key_pos] == ' ' || req_str[key_pos] == '\t')) key_pos++;
+        size_t end_pos = req_str.find("\r\n", key_pos);
+        if (end_pos == std::string::npos) end_pos = req_str.find('\n', key_pos);
         if (end_pos == std::string::npos) {
             closesocket(client_fd);
             continue;
         }
 
-        std::string client_key = req.substr(key_pos, end_pos - key_pos);
+        std::string client_key = req_str.substr(key_pos, end_pos - key_pos);
         std::string accept_key = Utils::ComputeWebSocketAcceptKey(client_key);
 
         std::string response = 

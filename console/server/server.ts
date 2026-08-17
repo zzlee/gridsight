@@ -4,6 +4,8 @@ import cors from 'cors';
 import path from 'path';
 import { fileURLToPath } from 'url';
 import fs from 'fs';
+import { createServer } from 'http';
+import { WebSocketServer, WebSocket } from 'ws';
 import { TokenAuthority } from './tokenAuthority.js';
 import { MulticastDiscoveryService } from './multicastDiscovery.js';
 import { TeacherBroadcastStreamer } from './broadcastStreamer.js';
@@ -13,6 +15,9 @@ const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
 const app = express();
+const server = createServer(app);
+const wss = new WebSocketServer({ server });
+
 const PORT = process.env.API_PORT ? parseInt(process.env.API_PORT, 10) : 3001;
 const HOST = process.env.API_HOST || '0.0.0.0';
 
@@ -29,6 +34,69 @@ discoveryService.start();
 
 // In-memory JPEG snapshot cache for outbound student pushes
 const snapshotCache = new Map<string, { buffer: Buffer; timestamp: number }>();
+
+// Maps for WebSocket reverse relay
+const agentSockets = new Map<string, WebSocket>();
+const viewerSockets = new Map<string, Set<WebSocket>>();
+
+wss.on('connection', (ws, req) => {
+  const host = req.headers.host || `localhost:${PORT}`;
+  const parsedUrl = new URL(req.url || '', `http://${host}`);
+  const pathname = parsedUrl.pathname;
+
+  if (pathname === '/ws/agent') {
+    const mac = parsedUrl.searchParams.get('mac') || req.socket.remoteAddress?.replace(/^.*:/, '') || 'unknown';
+    agentSockets.set(mac, ws);
+    logger.info(`[WS Relay] Student Agent connected outbound: ${mac}`);
+
+    ws.on('message', (data, isBinary) => {
+      if (isBinary) {
+        // Forward H.264 video NALU frames directly to active teacher viewers
+        const viewers = viewerSockets.get(mac);
+        if (viewers && viewers.size > 0) {
+          viewers.forEach((v) => {
+            if (v.readyState === WebSocket.OPEN) {
+              v.send(data, { binary: true });
+            }
+          });
+        }
+      }
+    });
+
+    ws.on('close', () => {
+      agentSockets.delete(mac);
+      logger.info(`[WS Relay] Student Agent disconnected: ${mac}`);
+    });
+  } else if (pathname.startsWith('/ws/stream/')) {
+    const mac = pathname.replace('/ws/stream/', '');
+    if (!viewerSockets.has(mac)) {
+      viewerSockets.set(mac, new Set());
+    }
+    viewerSockets.get(mac)!.add(ws);
+    logger.info(`[WS Relay] Teacher Viewer opened stream for: ${mac}`);
+
+    // Tell student agent to start H.264 30 FPS encoder
+    const agentWs = agentSockets.get(mac);
+    if (agentWs && agentWs.readyState === WebSocket.OPEN) {
+      agentWs.send(JSON.stringify({ action: 'START_STREAM', fps: 30, bitrate: 2500 }));
+    }
+
+    ws.on('close', () => {
+      const viewers = viewerSockets.get(mac);
+      if (viewers) {
+        viewers.delete(ws);
+        if (viewers.size === 0) {
+          viewerSockets.delete(mac);
+          // Tell student agent to stop streaming to save GPU/bandwidth
+          const agentWs = agentSockets.get(mac);
+          if (agentWs && agentWs.readyState === WebSocket.OPEN) {
+            agentWs.send(JSON.stringify({ action: 'STOP_STREAM' }));
+          }
+        }
+      }
+    });
+  }
+});
 
 app.get('/api/health', (req, res) => {
   res.json({ status: 'ok', time: Date.now() });
@@ -183,6 +251,6 @@ if (fs.existsSync(staticDistPath)) {
   logger.info(`[GridSight Server] Serving web console UI from ${staticDistPath}`);
 }
 
-app.listen(PORT, HOST, () => {
-  logger.info(`[GridSight Server] Coordinator API running on http://${HOST}:${PORT}`);
+server.listen(PORT, HOST, () => {
+  logger.info(`[GridSight Server] Coordinator API & WebSocket Relay running on http://${HOST}:${PORT}`);
 });

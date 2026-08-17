@@ -71,8 +71,10 @@ export const WebCodecsPlayer: React.FC<WebCodecsPlayerProps> = ({ device }) => {
       setDecoderMode('Canvas Fallback');
     }
 
-    // 3. Connect to Student Agent WebSocket stream (Port 8081)
-    const wsUrl = `ws://${device.ip}:8081/?token=${device.token || ''}`;
+    // 3. Connect to Teacher Console WebSocket stream relay (Port 3000)
+    const wsProtocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+    const streamTarget = device.mac || device.ip;
+    const wsUrl = `${wsProtocol}//${window.location.host}/ws/stream/${encodeURIComponent(streamTarget)}?token=${device.token || ''}`;
     try {
       ws = new WebSocket(wsUrl);
       ws.binaryType = 'arraybuffer';

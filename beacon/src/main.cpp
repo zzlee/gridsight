@@ -207,9 +207,10 @@ int main(int argc, char* argv[]) {
     GridSight::BeaconClient beacon_client(multicast_ip, multicast_port, http_server);
     beacon_client.Start();
 
-    // 3. Start WebSocket Server for On-demand 30 FPS Stream
-    GridSight::WebSocketStreamer ws_streamer(ws_port, capturer);
-    ws_streamer.Start();
+    // 3. Start WebSocket Server for On-demand 30 FPS Stream (with Outbound Reverse Streaming)
+    auto ws_streamer = std::make_shared<GridSight::WebSocketStreamer>(ws_port, capturer);
+    ws_streamer->SetTeacherHost(default_teacher, 3000);
+    ws_streamer->Start();
 
     // 4. Start RTP Receiver for Teacher Multicast Broadcast
     GridSight::RTPReceiver rtp_receiver(rtp_ip, rtp_port);
@@ -223,7 +224,7 @@ int main(int argc, char* argv[]) {
 
     GridSight::Utils::Log("INFO", "GridSight Beacon shutting down...");
     rtp_receiver.Stop();
-    ws_streamer.Stop();
+    ws_streamer->Stop();
     http_server->Stop();
     beacon_client.Stop();
     capturer->Release();

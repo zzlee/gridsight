@@ -210,46 +210,40 @@ app.get(['/api/snapshot/:id', '/api/snapshot'], (req, res) => {
 app.get('/install-agent.ps1', (req, res) => {
   const host = req.headers.host || `${req.hostname}:${PORT}`;
   const script = `# ========================================================
-# GridSight Agent One-Click Pull & Launch Script
+# GridSight Agent One-Click Pull & Launch Script (v5.3.0)
 # ========================================================
-$ErrorActionPreference = "Stop"
+$ErrorActionPreference = "SilentlyContinue"
 $serverHost = "${host}"
 $exeUrl = "http://$serverHost/download/gs-agent.exe"
 $destDir = "$env:TEMP"
 $destPath = "$destDir\\gs-agent.exe"
 
-Write-Host "[GridSight] 正在從 $exeUrl 下載學生端 gs-agent.exe..." -ForegroundColor Cyan
+Write-Host "=======================================================" -ForegroundColor Cyan
+Write-Host "  GridSight Student Agent v5.3.0 部署與啟動程序" -ForegroundColor Cyan
+Write-Host "=======================================================" -ForegroundColor Cyan
+Write-Host "[GridSight] 正在終止舊版 gs-agent 行程..." -ForegroundColor Yellow
 
-# Check if already running, kill existing if needed
-$running = Get-Process -Name "gs-agent" -ErrorAction SilentlyContinue
-if ($running) {
-    Write-Host "[GridSight] 偵測到舊版 gs-agent 正在執行，正在結束舊行程 (PID: $($running.Id))..." -ForegroundColor Yellow
-    Stop-Process -Name "gs-agent" -Force -ErrorAction SilentlyContinue
-    Start-Sleep -Milliseconds 500
-}
+# Kill all previous gs-agent instances completely
+taskkill /F /IM gs-agent.exe /T 2>$null | Out-Null
+Start-Sleep -Milliseconds 500
 
-# Download latest binary
+Write-Host "[GridSight] 正在從 $exeUrl 下載最新版 gs-agent.exe..." -ForegroundColor Cyan
 [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12 -bor [Net.SecurityProtocolType]::Tls11 -bor [Net.SecurityProtocolType]::Tls
 Invoke-WebRequest -Uri $exeUrl -OutFile $destPath -UseBasicParsing
 
-# Configure Windows Defender Firewall Rules (allow inbound HTTP 8080, WS 8081, RTP 9000)
+# Configure Firewall
 try {
     netsh advfirewall firewall delete rule name="GridSight Agent" 2>$null | Out-Null
     netsh advfirewall firewall add rule name="GridSight Agent" dir=in action=allow program="$destPath" enable=yes profile=any protocol=TCP 2>$null | Out-Null
-    netsh advfirewall firewall add rule name="GridSight Agent HTTP" dir=in action=allow protocol=TCP localport=8080 enable=yes profile=any 2>$null | Out-Null
-    netsh advfirewall firewall add rule name="GridSight Agent WS" dir=in action=allow protocol=TCP localport=8081 enable=yes profile=any 2>$null | Out-Null
-    netsh advfirewall firewall add rule name="GridSight Agent RTP" dir=in action=allow protocol=UDP localport=9000 enable=yes profile=any 2>$null | Out-Null
-} catch {
-    # Non-admin execution
-}
+} catch {}
 
-Write-Host "[GridSight] 正在背景啟動 gs-agent.exe..." -ForegroundColor Green
+Write-Host "[GridSight] 正在啟動最新版 gs-agent.exe (v5.3.0)..." -ForegroundColor Green
 Start-Process -FilePath $destPath -WindowStyle Hidden
 
 Start-Sleep -Seconds 1
 $proc = Get-Process -Name "gs-agent" -ErrorAction SilentlyContinue
 if ($proc) {
-    Write-Host "[GridSight] ✅ 學生端代理程式已成功在背景啟動！ (PID: $($proc.Id))" -ForegroundColor Green
+    Write-Host "[GridSight] ✅ 學生端代理程式 (v5.3.0) 已成功在背景啟動！ (PID: $($proc[0].Id))" -ForegroundColor Green
 } else {
     Write-Host "[GridSight] ⚠️ 警告：無法確認背景行程狀態，請檢查防毒軟體或權限設定。" -ForegroundColor Yellow
 }

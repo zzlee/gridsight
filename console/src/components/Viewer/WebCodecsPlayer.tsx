@@ -105,7 +105,28 @@ export const WebCodecsPlayer: React.FC<WebCodecsPlayerProps> = ({ device }) => {
         packetCount++;
         totalBytes += bytes.length;
 
-        // Detect NAL unit type (IDR keyframe is type 5, SPS is 7, PPS is 8)
+        // 1. Check if frame is MJPEG (starts with 0xFF, 0xD8)
+        if (bytes[0] === 0xff && bytes[1] === 0xd8) {
+          const blob = new Blob([buffer], { type: 'image/jpeg' });
+          createImageBitmap(blob).then((bitmap) => {
+            if (isSubscribed && ctx) {
+              ctx.drawImage(bitmap, 0, 0, canvas.width, canvas.height);
+              bitmap.close();
+              renderCount++;
+              setDecoderMode('Canvas Fallback');
+              setDebugStats((prev) => ({
+                ...prev,
+                packets: packetCount,
+                kbReceived: Math.round(totalBytes / 1024),
+                rendered: prev.rendered + 1,
+                lastNalType: 'MJPEG Live (0xFFD8)',
+              }));
+            }
+          });
+          return;
+        }
+
+        // 2. Otherwise process as H.264 NALU frame
         let isKeyFrame = false;
         let nalTypeName = 'Delta (1)';
         for (let i = 0; i < Math.min(bytes.length - 4, 32); i++) {

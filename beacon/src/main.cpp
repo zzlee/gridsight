@@ -180,7 +180,9 @@ int main(int argc, char* argv[]) {
         return 0;
     }
 
-    GridSight::Utils::Log("INFO", "GridSight Beacon (gs-agent) starting in Session 1...");
+    GridSight::Utils::Log("INFO", "=======================================================");
+    GridSight::Utils::Log("INFO", " GridSight Beacon Agent v5.3.0 (Outbound Relay + GDI+)");
+    GridSight::Utils::Log("INFO", "=======================================================");
 
     // Load .env configuration
     GridSight::Utils::LoadEnv(".env");

@@ -311,15 +311,24 @@ void WebSocketStreamer::StreamLoop() {
                     force_idr = true;
                 }
 
-                std::vector<uint8_t> nalu;
+                std::vector<uint8_t> payload;
+                bool is_h264 = false;
                 bool is_keyframe = force_idr || (frame_count % 30 == 0);
-                if (encoder_->EncodeFrame(frame.bgra_buffer.data(), is_keyframe, nalu) && !nalu.empty()) {
+
+                if (encoder_->EncodeFrame(frame.bgra_buffer.data(), is_keyframe, payload) && !payload.empty()) {
+                    is_h264 = true;
                     force_idr = false;
+                } else {
+                    // Fallback to high-speed GDI+ JPEG streaming
+                    ImageEncoder::EncodeToJPEG(frame.bgra_buffer.data(), frame.width, frame.height, 1280, 720, 75, payload);
+                }
+
+                if (!payload.empty()) {
                     frame_count++;
 
                     if (frame_count == 1 || frame_count % 60 == 0) {
-                        Utils::Log("INFO", "[StreamLoop] Encoded H.264 frame #" + std::to_string(frame_count) + 
-                                   " (" + std::to_string(nalu.size()) + " bytes, keyframe=" + (is_keyframe ? "true" : "false") + 
+                        Utils::Log("INFO", "[StreamLoop] Encoded " + std::string(is_h264 ? "H.264" : "MJPEG") + " frame #" + std::to_string(frame_count) + 
+                                   " (" + std::to_string(payload.size()) + " bytes, keyframe=" + (is_keyframe ? "true" : "false") + 
                                    "), sending outbound to Teacher Console");
                     }
 
@@ -327,14 +336,14 @@ void WebSocketStreamer::StreamLoop() {
 
                     // 1. Send to Outbound Teacher Relay (Firewall Bypassing)
                     if (outbound_sock_ != 0) {
-                        SendWsClientBinary(outbound_sock_, nalu.data(), nalu.size());
+                        SendWsClientBinary(outbound_sock_, payload.data(), payload.size());
                     }
 
                     // 2. Send to Inbound Client (if connected directly)
                     if (active_client_fd_ != 0) {
                         std::vector<uint8_t> ws_frame;
                         ws_frame.push_back(0x82); // FIN = 1, Opcode = 2
-                        size_t payload_len = nalu.size();
+                        size_t payload_len = payload.size();
                         if (payload_len < 126) {
                             ws_frame.push_back((uint8_t)payload_len);
                         } else if (payload_len <= 65535) {
@@ -347,7 +356,7 @@ void WebSocketStreamer::StreamLoop() {
                                 ws_frame.push_back((uint8_t)((payload_len >> (i * 8)) & 0xFF));
                             }
                         }
-                        ws_frame.insert(ws_frame.end(), nalu.begin(), nalu.end());
+                        ws_frame.insert(ws_frame.end(), payload.begin(), payload.end());
 
                         SOCKET client_sock = (SOCKET)active_client_fd_;
                         int sent = send(client_sock, (const char*)ws_frame.data(), (int)ws_frame.size(), 0);

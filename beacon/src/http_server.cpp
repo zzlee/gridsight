@@ -146,6 +146,13 @@ void HttpServer::HandleClient(uintptr_t client_socket) {
     std::string method, path, proto;
     stream >> method >> path >> proto;
 
+    // Handle HTTP OPTIONS CORS preflight
+    if (method == "OPTIONS") {
+        SendResponse(client_socket, 200, "text/plain", {});
+        closesocket(s);
+        return;
+    }
+
     // Check token authentication header if token set
     std::string token_header;
     std::string line;
@@ -239,7 +246,9 @@ void HttpServer::SendResponse(uintptr_t client_socket, int status_code,
     std::ostringstream oss;
     oss << "HTTP/1.1 " << status_msg << "\r\n"
         << "Access-Control-Allow-Origin: *\r\n"
+        << "Access-Control-Allow-Methods: GET, POST, OPTIONS\r\n"
         << "Access-Control-Allow-Headers: X-Auth-Token, Content-Type\r\n"
+        << "Access-Control-Max-Age: 86400\r\n"
         << "Cache-Control: no-cache, no-store, must-revalidate\r\n"
         << "Content-Type: " << content_type << "\r\n"
         << "Content-Length: " << body.size() << "\r\n"

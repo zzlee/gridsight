@@ -1,6 +1,6 @@
-import React from 'react';
-import { StudentDevice } from '../../types';
-import { X, Cpu, HardDrive, MemoryStick, Activity, Clock, Laptop, ShieldCheck } from 'lucide-react';
+import React, { useState, useEffect, useCallback } from 'react';
+import { StudentDevice, DeviceSystemInfo } from '../../types';
+import { X, Cpu, HardDrive, MemoryStick, Activity, Clock, Laptop, ShieldCheck, RefreshCw, AlertTriangle } from 'lucide-react';
 
 interface DeviceSpecsModalProps {
   device: StudentDevice | null;
@@ -8,9 +8,56 @@ interface DeviceSpecsModalProps {
 }
 
 export const DeviceSpecsModal: React.FC<DeviceSpecsModalProps> = ({ device, onClose }) => {
+  const [liveSpecs, setLiveSpecs] = useState<DeviceSystemInfo | null>(device?.specs || null);
+  const [loading, setLoading] = useState(false);
+  const [errorMsg, setErrorMsg] = useState<string | null>(null);
+
+  const fetchStatus = useCallback(async () => {
+    if (!device || !device.ip) return;
+    setLoading(true);
+    setErrorMsg(null);
+
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), 3000);
+
+    try {
+      const res = await fetch(`http://${device.ip}:8080/status?t=${Date.now()}`, {
+        headers: device.token ? { 'X-Auth-Token': device.token } : {},
+        signal: controller.signal,
+      });
+      clearTimeout(timeoutId);
+
+      if (res.ok) {
+        const data = await res.json();
+        setLiveSpecs(data);
+      } else {
+        setErrorMsg(`學生端回應 HTTP ${res.status}: ${res.statusText}`);
+      }
+    } catch (err: any) {
+      clearTimeout(timeoutId);
+      if (err.name === 'AbortError') {
+        setErrorMsg('連線逾時 (3秒無回應)：學生端 Windows 防火牆可能阻擋了 8080 端口。');
+      } else {
+        setErrorMsg(`連線失敗 (${err.message})：請確認學生端代理是否正在執行並放行防火牆。`);
+      }
+    } finally {
+      setLoading(false);
+    }
+  }, [device]);
+
+  useEffect(() => {
+    if (device) {
+      if (device.specs) {
+        setLiveSpecs(device.specs);
+      } else {
+        fetchStatus();
+      }
+    }
+  }, [device, fetchStatus]);
+
   if (!device) return null;
 
-  const specs = device.specs;
+  const specs = liveSpecs || device.specs;
 
   const formatUptime = (seconds?: number) => {
     if (!seconds) return '未知';
@@ -44,13 +91,23 @@ export const DeviceSpecsModal: React.FC<DeviceSpecsModalProps> = ({ device, onCl
               </p>
             </div>
           </div>
-          <button
-            onClick={onClose}
-            className="p-1.5 rounded-lg bg-slate-800/80 hover:bg-slate-700 text-slate-400 hover:text-slate-200 transition-colors"
-            title="關閉"
-          >
-            <X className="w-5 h-5" />
-          </button>
+          <div className="flex items-center space-x-2">
+            <button
+              onClick={fetchStatus}
+              disabled={loading}
+              className={`p-1.5 rounded-lg bg-slate-800/80 hover:bg-slate-700 text-slate-300 transition-colors ${loading ? 'animate-spin text-sky-400' : ''}`}
+              title="手動重新整理硬體狀態"
+            >
+              <RefreshCw className="w-4 h-4" />
+            </button>
+            <button
+              onClick={onClose}
+              className="p-1.5 rounded-lg bg-slate-800/80 hover:bg-slate-700 text-slate-400 hover:text-slate-200 transition-colors"
+              title="關閉"
+            >
+              <X className="w-5 h-5" />
+            </button>
+          </div>
         </div>
 
         {/* Modal Body */}
@@ -152,6 +209,29 @@ export const DeviceSpecsModal: React.FC<DeviceSpecsModalProps> = ({ device, onCl
                 </div>
               </div>
             </>
+          ) : errorMsg ? (
+            <div className="p-6 bg-rose-950/20 border border-rose-900/50 rounded-lg text-center space-y-3">
+              <div className="p-3 bg-rose-500/10 rounded-full w-12 h-12 flex items-center justify-center mx-auto text-rose-400">
+                <AlertTriangle className="w-6 h-6" />
+              </div>
+              <h4 className="text-sm font-bold text-rose-300">硬體資訊讀取失敗</h4>
+              <p className="text-xs text-slate-400 max-w-md mx-auto">{errorMsg}</p>
+              
+              <div className="p-3 bg-slate-950/80 rounded border border-slate-800 text-left text-xs text-slate-300 space-y-1.5 font-mono">
+                <p className="text-sky-400 font-semibold">排查建議：</p>
+                <p>1. 請在學生端以「系統管理員身分 (Administrator)」執行 PowerShell 安裝指令。</p>
+                <p>2. 或手動放行防火牆：<code className="text-emerald-400">netsh advfirewall firewall add rule name="GS" dir=in action=allow protocol=TCP localport=8080</code></p>
+              </div>
+
+              <button
+                onClick={fetchStatus}
+                disabled={loading}
+                className="px-4 py-2 rounded-lg bg-sky-600 hover:bg-sky-500 text-white text-xs font-semibold shadow flex items-center space-x-2 mx-auto"
+              >
+                <RefreshCw className={`w-3.5 h-3.5 ${loading ? 'animate-spin' : ''}`} />
+                <span>重新檢測連線</span>
+              </button>
+            </div>
           ) : (
             <div className="p-8 text-center text-slate-400 space-y-3">
               <Activity className="w-8 h-8 mx-auto text-slate-600 animate-pulse" />

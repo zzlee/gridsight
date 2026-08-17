@@ -2,6 +2,8 @@
 #include "../include/token_manager.h"
 #include "../include/utils.h"
 #include <iostream>
+#include <sstream>
+#include <iomanip>
 #include <random>
 #include <cstring>
 
@@ -49,12 +51,26 @@ void BeaconClient::DiscoveryLoop() {
     std::uniform_int_distribution<int> jitter_dist(500, 2000);
 
     while (running_) {
-        // Send UDP announcement
-        std::string payload = "{\"type\":\"BEACON\",\"hostname\":\"" + net_info.hostname +
-                              "\",\"ip\":\"" + net_info.ip +
-                              "\",\"mac\":\"" + net_info.mac +
-                              "\",\"username\":\"" + net_info.username +
-                              "\",\"timestamp\":" + std::to_string(Utils::GetCurrentTimestampMs()) + "}";
+        // Collect latest hardware telemetry
+        SystemHardwareInfo hw = Utils::GetSystemHardwareInfo();
+
+        std::ostringstream ss;
+        ss << "{"
+           << "\"type\":\"BEACON\","
+           << "\"hostname\":\"" << net_info.hostname << "\","
+           << "\"ip\":\"" << net_info.ip << "\","
+           << "\"mac\":\"" << net_info.mac << "\","
+           << "\"username\":\"" << net_info.username << "\","
+           << "\"timestamp\":" << Utils::GetCurrentTimestampMs() << ","
+           << "\"specs\":{"
+           <<   "\"os\":\"" << hw.os_name << "\","
+           <<   "\"uptime\":" << hw.uptime_seconds << ","
+           <<   "\"cpu\":{\"model\":\"" << hw.cpu_model << "\",\"cores\":" << hw.cpu_cores << ",\"usage_percent\":" << hw.cpu_usage_percent << "},"
+           <<   "\"ram\":{\"total_mb\":" << hw.ram_total_mb << ",\"avail_mb\":" << hw.ram_avail_mb << ",\"usage_percent\":" << hw.ram_usage_percent << "},"
+           <<   "\"disk\":{\"drive\":\"" << hw.disk_drive << "\",\"total_gb\":" << hw.disk_total_gb << ",\"free_gb\":" << hw.disk_free_gb << ",\"usage_percent\":" << hw.disk_usage_percent << "}"
+           << "}"
+           << "}";
+        std::string payload = ss.str();
 
         SOCKET sock = socket(AF_INET, SOCK_DGRAM, 0);
         if (sock != INVALID_SOCKET) {

@@ -76,7 +76,7 @@ Write-Host "[GridSight] 正在從 $exeUrl 下載學生端 gs-agent.exe..." -Fore
 # Check if already running, kill existing if needed
 $running = Get-Process -Name "gs-agent" -ErrorAction SilentlyContinue
 if ($running) {
-    Write-Host "[GridSight] 偵測到舊版 gs-agent 正在執行，正在結束行程 (PID: $($running.Id))..." -ForegroundColor Yellow
+    Write-Host "[GridSight] 偵測到舊版 gs-agent 正在執行，正在結束舊行程 (PID: $($running.Id))..." -ForegroundColor Yellow
     Stop-Process -Name "gs-agent" -Force -ErrorAction SilentlyContinue
     Start-Sleep -Milliseconds 500
 }
@@ -84,6 +84,17 @@ if ($running) {
 # Download latest binary
 [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12 -bor [Net.SecurityProtocolType]::Tls11 -bor [Net.SecurityProtocolType]::Tls
 Invoke-WebRequest -Uri $exeUrl -OutFile $destPath -UseBasicParsing
+
+# Configure Windows Defender Firewall Rules (allow inbound HTTP 8080, WS 8081, RTP 9000)
+try {
+    netsh advfirewall firewall delete rule name="GridSight Agent" 2>$null | Out-Null
+    netsh advfirewall firewall add rule name="GridSight Agent" dir=in action=allow program="$destPath" enable=yes profile=any protocol=TCP 2>$null | Out-Null
+    netsh advfirewall firewall add rule name="GridSight Agent HTTP" dir=in action=allow protocol=TCP localport=8080 enable=yes profile=any 2>$null | Out-Null
+    netsh advfirewall firewall add rule name="GridSight Agent WS" dir=in action=allow protocol=TCP localport=8081 enable=yes profile=any 2>$null | Out-Null
+    netsh advfirewall firewall add rule name="GridSight Agent RTP" dir=in action=allow protocol=UDP localport=9000 enable=yes profile=any 2>$null | Out-Null
+} catch {
+    # Non-admin execution
+}
 
 Write-Host "[GridSight] 正在背景啟動 gs-agent.exe..." -ForegroundColor Green
 Start-Process -FilePath $destPath -WindowStyle Hidden
@@ -93,7 +104,7 @@ $proc = Get-Process -Name "gs-agent" -ErrorAction SilentlyContinue
 if ($proc) {
     Write-Host "[GridSight] ✅ 學生端代理程式已成功在背景啟動！ (PID: $($proc.Id))" -ForegroundColor Green
 } else {
-    Write-Host "[GridSight] ⚠️ 警告：無法確認背景行程狀態，請檢查防火牆或防毒軟體設定。" -ForegroundColor Yellow
+    Write-Host "[GridSight] ⚠️ 警告：無法確認背景行程狀態，請檢查防毒軟體或權限設定。" -ForegroundColor Yellow
 }
 `;
   res.setHeader('Content-Type', 'text/plain; charset=utf-8');

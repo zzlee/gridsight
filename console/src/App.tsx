@@ -46,6 +46,7 @@ export const App: React.FC = () => {
               mac: a.mac,
               status: 'online',
               token: a.token,
+              specs: a.specs,
               gridX: 0,
               gridY: 0,
             }));
@@ -65,6 +66,7 @@ export const App: React.FC = () => {
                     hostname: dev.hostname || updatedSeats[idx].hostname,
                     token: dev.token || updatedSeats[idx].token,
                     mac: dev.mac || updatedSeats[idx].mac,
+                    specs: dev.specs || updatedSeats[idx].specs,
                     status: 'online',
                   };
                 }
@@ -85,6 +87,7 @@ export const App: React.FC = () => {
                     ip: dev.ip,
                     mac: dev.mac,
                     token: dev.token,
+                    specs: dev.specs,
                     status: 'online',
                   };
                 }

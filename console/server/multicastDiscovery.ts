@@ -2,12 +2,38 @@ import dgram from 'dgram';
 import { TokenAuthority } from './tokenAuthority.js';
 import { logger } from './logger.js';
 
+export interface DeviceSystemInfo {
+  status?: string;
+  service?: string;
+  hostname?: string;
+  os?: string;
+  uptime?: number;
+  cpu: {
+    model: string;
+    cores: number;
+    usage_percent: number;
+  };
+  ram: {
+    total_mb: number;
+    avail_mb: number;
+    usage_percent: number;
+  };
+  disk: {
+    drive: string;
+    total_gb: number;
+    free_gb: number;
+    usage_percent: number;
+  };
+}
+
 export interface DiscoveredAgent {
   hostname: string;
   ip: string;
   mac: string;
   username?: string;
   token?: string;
+  specs?: DeviceSystemInfo;
+  thumbnailBase64?: string;
   lastSeen: number;
 }
 
@@ -60,6 +86,7 @@ export class MulticastDiscoveryService {
             mac,
             username: payload.username || 'Student',
             token,
+            specs: payload.specs,
             lastSeen: Date.now(),
           };
 

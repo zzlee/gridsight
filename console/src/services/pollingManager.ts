@@ -10,7 +10,8 @@ export class PollingManager {
   startPolling(
     getDevices: () => StudentDevice[],
     onUpdateDevice: (device: Partial<StudentDevice> & { id: string }) => void,
-    intervalMs = 1000
+    intervalMs = 1000,
+    getVisibleDeviceIds?: () => Set<string> | null
   ) {
     if (this.intervalId) return;
 
@@ -21,10 +22,16 @@ export class PollingManager {
       const devices = getDevices();
       const onlineDevices = devices.filter((d) => d.ip && d.status !== 'offline');
 
-      // Batch poll in parallel batches of 10
+      // Viewport-aware culling: ONLY poll devices currently visible in the teacher's viewport
+      const visibleIds = getVisibleDeviceIds ? getVisibleDeviceIds() : null;
+      const targetDevices = visibleIds && visibleIds.size > 0
+        ? onlineDevices.filter((d) => visibleIds.has(d.id) || (d.mac && visibleIds.has(d.mac)))
+        : onlineDevices;
+
+      // Batch poll visible devices in parallel chunks of 10
       const batchSize = 10;
-      for (let i = 0; i < onlineDevices.length; i += batchSize) {
-        const batch = onlineDevices.slice(i, i + batchSize);
+      for (let i = 0; i < targetDevices.length; i += batchSize) {
+        const batch = targetDevices.slice(i, i + batchSize);
         await Promise.allSettled(
           batch.map(async (device) => {
             const start = performance.now();

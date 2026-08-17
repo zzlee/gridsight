@@ -1,6 +1,5 @@
 import React, { useRef } from 'react';
-import { AppMode, BroadcastConfig, ClassroomLayout } from '../../types';
-import { BroadcastControl } from '../Broadcast/BroadcastControl';
+import { AppMode, ClassroomLayout } from '../../types';
 import { LayoutStorage } from '../../services/layoutStorage';
 import {
   Layers,
@@ -20,8 +19,6 @@ interface TopNavProps {
   setMode: (m: AppMode) => void;
   layout: ClassroomLayout;
   onLayoutChange: (l: ClassroomLayout) => void;
-  broadcastConfig: BroadcastConfig;
-  onToggleBroadcast: () => void;
   onOpenPresets: () => void;
   onOpenDevicePool: () => void;
   zoom: number;
@@ -36,8 +33,6 @@ export const TopNav: React.FC<TopNavProps> = ({
   setMode,
   layout,
   onLayoutChange,
-  broadcastConfig,
-  onToggleBroadcast,
   onOpenPresets,
   onOpenDevicePool,
   zoom,
@@ -84,7 +79,7 @@ export const TopNav: React.FC<TopNavProps> = ({
           </div>
           <div>
             <div className="font-bold text-slate-100 text-sm tracking-wide">GridSight</div>
-            <div className="text-[10px] text-slate-400 font-medium">70人電腦教室螢幕監控與實時廣播</div>
+            <div className="text-[10px] text-slate-400 font-medium">70人電腦教室螢幕即時監控系統</div>
           </div>
         </div>
 
@@ -113,23 +108,25 @@ export const TopNav: React.FC<TopNavProps> = ({
             onClick={() => setMode('EDIT_LAYOUT')}
             className={`flex items-center space-x-1.5 px-3 py-1 rounded-md text-xs font-semibold transition-colors ${
               mode === 'EDIT_LAYOUT'
-                ? 'bg-amber-600 text-white shadow'
+                ? 'bg-sky-600 text-white shadow'
                 : 'text-slate-400 hover:text-slate-200'
             }`}
           >
             <Edit3 className="w-3.5 h-3.5" />
-            <span>排版模式</span>
+            <span>佈局編輯</span>
           </button>
         </div>
 
-        {/* Layout tools (available in edit mode or always) */}
+        <div className="h-5 w-px bg-slate-800" />
+
+        {/* Layout Presets */}
         <button
           onClick={onOpenPresets}
           className="flex items-center space-x-1 px-2.5 py-1 rounded bg-slate-900 hover:bg-slate-800 border border-slate-800 text-xs text-slate-300"
-          title="切換版型模板"
+          title="切換預設佈局"
         >
           <LayoutGrid className="w-3.5 h-3.5" />
-          <span>模板</span>
+          <span>預設排位</span>
         </button>
 
         <button
@@ -193,21 +190,15 @@ export const TopNav: React.FC<TopNavProps> = ({
         />
       </div>
 
-      {/* Right: UDP Multicast Broadcast Controller & Security Lock */}
+      {/* Right: Security PIN settings & Lock Console */}
       <div className="flex items-center space-x-2.5">
-        <BroadcastControl
-          config={broadcastConfig}
-          onToggleBroadcast={onToggleBroadcast}
-        />
-
-        <div className="h-5 w-px bg-slate-800" />
-
         <button
           onClick={onOpenChangePin}
-          className="p-2 rounded-lg bg-slate-900 hover:bg-slate-800 border border-slate-800 text-slate-300 hover:text-white transition-colors"
-          title="修改教師 PIN 碼"
+          className="flex items-center space-x-1.5 px-2.5 py-1.5 rounded-lg bg-slate-900 hover:bg-slate-800 border border-slate-800 text-slate-300 hover:text-white transition-colors text-xs font-semibold"
+          title="修改教師安全 PIN 碼"
         >
-          <span className="text-xs">🔑</span>
+          <span>🔑</span>
+          <span>PIN 碼設定</span>
         </button>
 
         <button
@@ -216,7 +207,7 @@ export const TopNav: React.FC<TopNavProps> = ({
           title="離開座位鎖定控制台"
         >
           <span>🔒</span>
-          <span>鎖定</span>
+          <span>鎖定控制台</span>
         </button>
       </div>
     </header>

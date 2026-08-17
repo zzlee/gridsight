@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useState, useRef } from 'react';
 import { ClassroomLayout, StudentDevice, AppMode, BroadcastConfig } from './types';
 import { TopNav } from './components/Toolbar/TopNav';
 import { GridCanvas } from './components/Canvas/GridCanvas';
@@ -15,6 +15,7 @@ import { AuthService } from './services/authService';
 const pollingManager = new PollingManager();
 
 export const App: React.FC = () => {
+  const visibleDeviceIdsRef = useRef<Set<string>>(new Set());
   const [isLocked, setIsLocked] = useState(true);
   const [isChangePinOpen, setIsChangePinOpen] = useState(false);
   const [mode, setMode] = useState<AppMode>('MONITOR');
@@ -24,15 +25,6 @@ export const App: React.FC = () => {
   const [isPresetsOpen, setIsPresetsOpen] = useState(false);
   const [isDevicePoolOpen, setIsDevicePoolOpen] = useState(false);
   const [zoom, setZoom] = useState(0.85);
-
-  const [broadcastConfig, setBroadcastConfig] = useState<BroadcastConfig>({
-    active: false,
-    multicastIp: '239.255.42.100',
-    port: 9000,
-    fps: 30,
-    bitrateKbps: 5000,
-    screenSource: 'primary',
-  });
 
   const [unassignedDevices, setUnassignedDevices] = useState<StudentDevice[]>([]);
 
@@ -124,9 +116,9 @@ export const App: React.FC = () => {
     return () => clearInterval(timer);
   }, [isLocked]);
 
-  // 1 FPS Snapshot Polling & Periodic /status Telemetry with Circuit Breaker
+  // 1 FPS Snapshot Polling & Periodic /status Telemetry with Viewport Culling & Circuit Breaker
   useEffect(() => {
-    if (mode === 'MONITOR') {
+    if (mode === 'MONITOR' && !isLocked) {
       pollingManager.startPolling(
         () => layout.seats,
         (updated) => {
@@ -139,14 +131,15 @@ export const App: React.FC = () => {
           setFocusDevice((prev) => (prev && prev.id === updated.id ? { ...prev, ...updated } : prev));
           setSpecsDevice((prev) => (prev && prev.id === updated.id ? { ...prev, ...updated } : prev));
         },
-        1000
+        1000,
+        () => visibleDeviceIdsRef.current
       );
     } else {
       pollingManager.stopPolling();
     }
 
     return () => pollingManager.stopPolling();
-  }, [mode, layout.seats]);
+  }, [mode, isLocked]);
 
   const handleSelectStudent = (id: string, multi: boolean) => {
     setLayout((prev) => ({
@@ -158,30 +151,6 @@ export const App: React.FC = () => {
         return multi ? s : { ...s, selected: false };
       }),
     }));
-  };
-
-  const handleToggleBroadcast = async () => {
-    const nextActive = !broadcastConfig.active;
-    setBroadcastConfig((prev) => ({ ...prev, active: nextActive }));
-
-    try {
-      if (nextActive) {
-        await fetch('/api/broadcast/start', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            multicastIp: broadcastConfig.multicastIp,
-            port: broadcastConfig.port,
-            fps: broadcastConfig.fps,
-            bitrateKbps: broadcastConfig.bitrateKbps,
-          }),
-        });
-      } else {
-        await fetch('/api/broadcast/stop', { method: 'POST' });
-      }
-    } catch {
-      // Backend not reached, local broadcast toggle state remains
-    }
   };
 
   const handleRefreshAuth = (device: StudentDevice) => {
@@ -234,8 +203,6 @@ export const App: React.FC = () => {
         setMode={setMode}
         layout={layout}
         onLayoutChange={setLayout}
-        broadcastConfig={broadcastConfig}
-        onToggleBroadcast={handleToggleBroadcast}
         onOpenPresets={() => setIsPresetsOpen(true)}
         onOpenDevicePool={() => setIsDevicePoolOpen(true)}
         zoom={zoom}
@@ -254,6 +221,9 @@ export const App: React.FC = () => {
         onRefreshAuth={handleRefreshAuth}
         onUnbindSeat={handleUnbindSeat}
         onOpenSpecs={setSpecsDevice}
+        onVisibleSeatsChange={(ids) => {
+          visibleDeviceIdsRef.current = ids;
+        }}
       />
 
       {/* Focus 30FPS WebCodecs Viewer Modal */}

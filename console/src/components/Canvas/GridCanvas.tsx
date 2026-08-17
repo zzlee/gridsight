@@ -1,4 +1,4 @@
-import React, { useRef, useState } from 'react';
+import React, { useRef, useState, useEffect, useCallback } from 'react';
 import { ClassroomLayout, StudentDevice, AppMode } from '../../types';
 import { StudentCard } from './StudentCard';
 import { AisleMarker } from './AisleMarker';
@@ -14,6 +14,7 @@ interface GridCanvasProps {
   onRefreshAuth: (device: StudentDevice) => void;
   onUnbindSeat: (id: string) => void;
   onOpenSpecs?: (device: StudentDevice) => void;
+  onVisibleSeatsChange?: (visibleIds: Set<string>) => void;
 }
 
 export const GridCanvas: React.FC<GridCanvasProps> = ({
@@ -25,6 +26,7 @@ export const GridCanvas: React.FC<GridCanvasProps> = ({
   onRefreshAuth,
   onUnbindSeat,
   onOpenSpecs,
+  onVisibleSeatsChange,
 }) => {
   const containerRef = useRef<HTMLDivElement>(null);
   const [pan, setPan] = useState({ x: 0, y: 0 });
@@ -52,6 +54,51 @@ export const GridCanvas: React.FC<GridCanvasProps> = ({
   const cardWidth = 190;
   const cardHeight = 150;
   const gap = 14;
+
+  // Viewport calculation: determine which seats are inside the visible canvas viewport
+  const calculateVisibleSeats = useCallback(() => {
+    if (!containerRef.current || !onVisibleSeatsChange) return;
+
+    const container = containerRef.current;
+    const viewportWidth = container.clientWidth || window.innerWidth;
+    const viewportHeight = container.clientHeight || window.innerHeight;
+
+    const visibleSet = new Set<string>();
+    const margin = 100; // Buffer margin in screen pixels for pre-fetching ahead of scrolling
+
+    layout.seats.forEach((seat) => {
+      const cardLeft = seat.gridX * (cardWidth + gap);
+      const cardTop = seat.gridY * (cardHeight + gap);
+      const cardRight = cardLeft + cardWidth;
+      const cardBottom = cardTop + cardHeight;
+
+      // Project world coordinates to screen coordinates
+      const screenLeft = cardLeft * zoom + (pan.x + 30);
+      const screenTop = cardTop * zoom + (pan.y + 20);
+      const screenRight = cardRight * zoom + (pan.x + 30);
+      const screenBottom = cardBottom * zoom + (pan.y + 20);
+
+      // Check if card bounding box intersects with viewport bounding box
+      const isVisible =
+        screenRight >= -margin &&
+        screenLeft <= viewportWidth + margin &&
+        screenBottom >= -margin &&
+        screenTop <= viewportHeight + margin;
+
+      if (isVisible) {
+        visibleSet.add(seat.id);
+        if (seat.mac) visibleSet.add(seat.mac);
+      }
+    });
+
+    onVisibleSeatsChange(visibleSet);
+  }, [layout.seats, pan, zoom, onVisibleSeatsChange]);
+
+  useEffect(() => {
+    calculateVisibleSeats();
+    window.addEventListener('resize', calculateVisibleSeats);
+    return () => window.removeEventListener('resize', calculateVisibleSeats);
+  }, [calculateVisibleSeats]);
 
   return (
     <div

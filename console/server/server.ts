@@ -39,15 +39,22 @@ const snapshotCache = new Map<string, { buffer: Buffer; timestamp: number }>();
 const agentSockets = new Map<string, WebSocket>();
 const viewerSockets = new Map<string, Set<WebSocket>>();
 
+// Normalizes MAC addresses and targets by decoding URL characters and standardizing case
+const normalizeTarget = (raw: string) => {
+  if (!raw) return '';
+  return decodeURIComponent(raw).replace(/%3A/gi, ':').trim().toUpperCase();
+};
+
 wss.on('connection', (ws, req) => {
   const host = req.headers.host || `localhost:${PORT}`;
   const parsedUrl = new URL(req.url || '', `http://${host}`);
   const pathname = parsedUrl.pathname;
 
   if (pathname === '/ws/agent') {
-    const mac = parsedUrl.searchParams.get('mac') || req.socket.remoteAddress?.replace(/^.*:/, '') || 'unknown';
+    const rawMac = parsedUrl.searchParams.get('mac') || req.socket.remoteAddress?.replace(/^.*:/, '') || 'unknown';
+    const mac = normalizeTarget(rawMac);
     agentSockets.set(mac, ws);
-    logger.info(`[WS Relay] Student Agent connected outbound: ${mac}`);
+    logger.info(`[WS Relay] Student Agent registered outbound: ${mac}`);
 
     ws.on('message', (data, isBinary) => {
       if (isBinary) {
@@ -68,7 +75,8 @@ wss.on('connection', (ws, req) => {
       logger.info(`[WS Relay] Student Agent disconnected: ${mac}`);
     });
   } else if (pathname.startsWith('/ws/stream/')) {
-    const mac = pathname.replace('/ws/stream/', '');
+    const rawTarget = pathname.replace('/ws/stream/', '');
+    const mac = normalizeTarget(rawTarget);
     if (!viewerSockets.has(mac)) {
       viewerSockets.set(mac, new Set());
     }
@@ -79,6 +87,9 @@ wss.on('connection', (ws, req) => {
     const agentWs = agentSockets.get(mac);
     if (agentWs && agentWs.readyState === WebSocket.OPEN) {
       agentWs.send(JSON.stringify({ action: 'START_STREAM', fps: 30, bitrate: 2500 }));
+      logger.info(`[WS Relay] Sent START_STREAM command to agent: ${mac}`);
+    } else {
+      logger.warn(`[WS Relay] Agent not found for target ${mac}. Available agents: ${Array.from(agentSockets.keys()).join(', ')}`);
     }
 
     ws.on('close', () => {
@@ -91,6 +102,7 @@ wss.on('connection', (ws, req) => {
           const agentWs = agentSockets.get(mac);
           if (agentWs && agentWs.readyState === WebSocket.OPEN) {
             agentWs.send(JSON.stringify({ action: 'STOP_STREAM' }));
+            logger.info(`[WS Relay] Sent STOP_STREAM command to agent: ${mac}`);
           }
         }
       }
@@ -135,8 +147,9 @@ app.post(
   '/api/agent/snapshot',
   express.raw({ type: ['image/jpeg', 'application/octet-stream', '*/*'], limit: '2mb' }),
   (req, res) => {
-    const mac = (req.headers['x-agent-mac'] as string) || '';
+    const rawMac = (req.headers['x-agent-mac'] as string) || '';
     const ip = (req.headers['x-agent-ip'] as string) || req.ip?.replace(/^.*:/, '') || '';
+    const mac = normalizeTarget(rawMac);
     const buffer = req.body as Buffer;
 
     if (buffer && buffer.length > 0) {
@@ -151,8 +164,9 @@ app.post(
 
 // Route: Serve cached JPEG snapshots to Teacher Browser UI
 app.get(['/api/snapshot/:id', '/api/snapshot'], (req, res) => {
-  const id = req.params.id || (req.query.id as string) || (req.query.mac as string) || (req.query.ip as string) || '';
-  const entry = snapshotCache.get(id);
+  const rawId = req.params.id || (req.query.id as string) || (req.query.mac as string) || (req.query.ip as string) || '';
+  const normalizedId = normalizeTarget(rawId);
+  const entry = snapshotCache.get(normalizedId) || snapshotCache.get(rawId);
   if (entry && Date.now() - entry.timestamp < 15000) {
     res.setHeader('Content-Type', 'image/jpeg');
     res.setHeader('Cache-Control', 'no-cache, no-store, must-revalidate');

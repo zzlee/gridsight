@@ -203,7 +203,12 @@ void WebSocketStreamer::SendWsClientBinary(uintptr_t sock_fd, const uint8_t* dat
         frame[header_size + i] = data[i] ^ mask_key[i % 4];
     }
 
-    send(sock, (const char*)frame.data(), (int)frame.size(), 0);
+    size_t total_sent = 0;
+    while (total_sent < frame.size()) {
+        int sent = send(sock, (const char*)frame.data() + total_sent, (int)(frame.size() - total_sent), 0);
+        if (sent <= 0) break;
+        total_sent += sent;
+    }
 }
 
 void WebSocketStreamer::AcceptLoop() {

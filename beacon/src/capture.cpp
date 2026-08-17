@@ -160,16 +160,16 @@ bool ScreenCapturer::CaptureFrame(FrameData& out_frame) {
     DXGI_OUTDUPL_FRAME_INFO frame_info;
     IDXGIResource* desktop_resource = nullptr;
 
-    HRESULT hr = dup->AcquireNextFrame(100, &frame_info, &desktop_resource);
+    HRESULT hr = dup->AcquireNextFrame(33, &frame_info, &desktop_resource);
     if (FAILED(hr)) {
-        if (hr != DXGI_ERROR_WAIT_TIMEOUT) {
+        if (hr == DXGI_ERROR_WAIT_TIMEOUT) {
+            // Screen is static; reuse previous staging texture frame
+        } else {
             Utils::Log("ERROR", "DXGI AcquireNextFrame failed with HR: " + std::to_string(hr) + ". Reacquiring...");
             ReacquireDuplication();
+            return false;
         }
-        return false;
-    }
-
-    if (hr == S_OK && desktop_resource) {
+    } else if (hr == S_OK && desktop_resource) {
         ID3D11Texture2D* desktop_tex = nullptr;
         hr = desktop_resource->QueryInterface(__uuidof(ID3D11Texture2D), (void**)&desktop_tex);
         if (SUCCEEDED(hr)) {

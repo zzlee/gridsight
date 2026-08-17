@@ -32,6 +32,38 @@ const discoveryService = new MulticastDiscoveryService(tokenAuth, (device) => {
 
 discoveryService.start();
 
+// Teacher PIN authentication state
+let teacherPin = process.env.TEACHER_PIN || '888888';
+const teacherSessions = new Map<string, number>(); // token -> expiresAt
+
+const generateTeacherToken = () => {
+  const token = Math.random().toString(36).substring(2) + Date.now().toString(36) + Math.random().toString(36).substring(2);
+  const expiresAt = Date.now() + 1000 * 60 * 60 * 24 * 7; // 7 days valid
+  teacherSessions.set(token, expiresAt);
+  return { token, expiresAt };
+};
+
+const isValidTeacherToken = (token: string | null | undefined): boolean => {
+  if (!token) return false;
+  const expiresAt = teacherSessions.get(token);
+  if (!expiresAt) return false;
+  if (Date.now() > expiresAt) {
+    teacherSessions.delete(token);
+    return false;
+  }
+  return true;
+};
+
+// Middleware: Protect teacher control & discovery routes from unauthorized student browsers
+const requireTeacherAuth: express.RequestHandler = (req, res, next) => {
+  const authHeader = req.headers.authorization;
+  const token = authHeader?.startsWith('Bearer ') ? authHeader.substring(7) : (req.query.token as string);
+  if (isValidTeacherToken(token)) {
+    return next();
+  }
+  res.status(401).json({ error: 'Unauthorized: Teacher PIN required', code: 'AUTH_REQUIRED' });
+};
+
 // In-memory JPEG snapshot cache for outbound student pushes
 const snapshotCache = new Map<string, { buffer: Buffer; timestamp: number }>();
 
@@ -122,7 +154,39 @@ wss.on('connection', (ws, req) => {
   }
 });
 
-app.get('/api/stream/debug', (req, res) => {
+// Auth Routes: Teacher PIN Login and Verification
+app.post('/api/auth/login', (req, res) => {
+  const { pin } = req.body;
+  if (typeof pin === 'string' && pin.trim() === teacherPin.trim()) {
+    const { token, expiresAt } = generateTeacherToken();
+    logger.info(`[Auth] Teacher logged in successfully from IP: ${req.ip}`);
+    res.json({ success: true, token, expiresAt });
+  } else {
+    logger.warn(`[Auth] Failed PIN attempt from IP: ${req.ip}`);
+    res.status(401).json({ success: false, error: 'PIN 碼錯誤，請重新輸入' });
+  }
+});
+
+app.get('/api/auth/verify', (req, res) => {
+  const authHeader = req.headers.authorization;
+  const token = authHeader?.startsWith('Bearer ') ? authHeader.substring(7) : (req.query.token as string);
+  res.json({ authenticated: isValidTeacherToken(token) });
+});
+
+app.post('/api/auth/change-pin', requireTeacherAuth, (req, res) => {
+  const { currentPin, newPin } = req.body;
+  if (currentPin !== teacherPin) {
+    return res.status(400).json({ error: '原 PIN 碼不正確' });
+  }
+  if (!newPin || newPin.length < 4) {
+    return res.status(400).json({ error: '新 PIN 碼至少需要 4 位數' });
+  }
+  teacherPin = newPin;
+  logger.info(`[Auth] Teacher changed PIN successfully`);
+  res.json({ success: true, message: 'PIN 碼已成功修改' });
+});
+
+app.get('/api/stream/debug', requireTeacherAuth, (req, res) => {
   res.json({
     connectedAgents: Array.from(agentSockets.keys()),
     activeViewers: Array.from(viewerSockets.entries()).map(([k, v]) => ({
@@ -144,31 +208,31 @@ app.get('/api/health', (req, res) => {
   res.json({ status: 'ok', time: Date.now() });
 });
 
-app.get('/api/agents', (req, res) => {
+app.get('/api/agents', requireTeacherAuth, (req, res) => {
   res.json({
     agents: discoveryService.getDevices(),
     count: discoveryService.getDevices().length,
   });
 });
 
-app.get('/api/devices', (req, res) => {
+app.get('/api/devices', requireTeacherAuth, (req, res) => {
   res.json({
     devices: discoveryService.getDevices(),
     count: discoveryService.getDevices().length,
   });
 });
 
-app.post('/api/broadcast/start', (req, res) => {
+app.post('/api/broadcast/start', requireTeacherAuth, (req, res) => {
   broadcastStreamer.startStream(req.body);
   res.json({ status: 'streaming', active: true });
 });
 
-app.post('/api/broadcast/stop', (req, res) => {
+app.post('/api/broadcast/stop', requireTeacherAuth, (req, res) => {
   broadcastStreamer.stopStream();
   res.json({ status: 'stopped', active: false });
 });
 
-app.get('/api/broadcast/status', (req, res) => {
+app.get('/api/broadcast/status', requireTeacherAuth, (req, res) => {
   res.json({ active: broadcastStreamer.isActive() });
 });
 

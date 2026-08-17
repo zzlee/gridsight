@@ -27,6 +27,8 @@ interface TopNavProps {
   zoom: number;
   setZoom: React.Dispatch<React.SetStateAction<number>>;
   onResetView: () => void;
+  onLock: () => void;
+  onOpenChangePin: () => void;
 }
 
 export const TopNav: React.FC<TopNavProps> = ({
@@ -41,6 +43,8 @@ export const TopNav: React.FC<TopNavProps> = ({
   zoom,
   setZoom,
   onResetView,
+  onLock,
+  onOpenChangePin,
 }) => {
   const fileInputRef = useRef<HTMLInputElement>(null);
 
@@ -189,11 +193,32 @@ export const TopNav: React.FC<TopNavProps> = ({
         />
       </div>
 
-      {/* Right: UDP Multicast Broadcast Controller */}
-      <BroadcastControl
-        config={broadcastConfig}
-        onToggleBroadcast={onToggleBroadcast}
-      />
+      {/* Right: UDP Multicast Broadcast Controller & Security Lock */}
+      <div className="flex items-center space-x-2.5">
+        <BroadcastControl
+          config={broadcastConfig}
+          onToggleBroadcast={onToggleBroadcast}
+        />
+
+        <div className="h-5 w-px bg-slate-800" />
+
+        <button
+          onClick={onOpenChangePin}
+          className="p-2 rounded-lg bg-slate-900 hover:bg-slate-800 border border-slate-800 text-slate-300 hover:text-white transition-colors"
+          title="修改教師 PIN 碼"
+        >
+          <span className="text-xs">🔑</span>
+        </button>
+
+        <button
+          onClick={onLock}
+          className="flex items-center space-x-1.5 px-3 py-1.5 rounded-lg bg-rose-950/40 hover:bg-rose-900/60 border border-rose-800/60 text-rose-300 text-xs font-semibold transition-all shadow-sm"
+          title="離開座位鎖定控制台"
+        >
+          <span>🔒</span>
+          <span>鎖定</span>
+        </button>
+      </div>
     </header>
   );
 };

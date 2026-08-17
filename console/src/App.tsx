@@ -6,12 +6,17 @@ import { FocusModal } from './components/Viewer/FocusModal';
 import { DeviceSpecsModal } from './components/Viewer/DeviceSpecsModal';
 import { PresetsModal } from './components/Toolbar/PresetsModal';
 import { DevicePool } from './components/Toolbar/DevicePool';
+import { AuthLockModal } from './components/Auth/AuthLockModal';
+import { ChangePinModal } from './components/Auth/ChangePinModal';
 import { PollingManager } from './services/pollingManager';
 import { LayoutStorage } from './services/layoutStorage';
+import { AuthService } from './services/authService';
 
 const pollingManager = new PollingManager();
 
 export const App: React.FC = () => {
+  const [isLocked, setIsLocked] = useState(true);
+  const [isChangePinOpen, setIsChangePinOpen] = useState(false);
   const [mode, setMode] = useState<AppMode>('MONITOR');
   const [layout, setLayout] = useState<ClassroomLayout>(() => LayoutStorage.getDefaultPreset('aisle'));
   const [focusDevice, setFocusDevice] = useState<StudentDevice | null>(null);
@@ -31,11 +36,20 @@ export const App: React.FC = () => {
 
   const [unassignedDevices, setUnassignedDevices] = useState<StudentDevice[]>([]);
 
-  // Fetch discovered devices from backend /api/agents (relative path for Docker & remote access)
+  // Check auth session on startup
   useEffect(() => {
+    AuthService.verify().then((authed) => {
+      setIsLocked(!authed);
+    });
+  }, []);
+
+  // Fetch discovered devices from backend /api/agents (relative path with auth)
+  useEffect(() => {
+    if (isLocked) return;
+
     const fetchAgents = async () => {
       try {
-        const resp = await fetch('/api/agents');
+        const resp = await AuthService.fetchWithAuth('/api/agents');
         if (resp.ok) {
           const data = await resp.json();
           if (data.agents && Array.isArray(data.agents)) {
@@ -227,6 +241,8 @@ export const App: React.FC = () => {
         zoom={zoom}
         setZoom={setZoom}
         onResetView={() => setZoom(0.85)}
+        onLock={() => setIsLocked(true)}
+        onOpenChangePin={() => setIsChangePinOpen(true)}
       />
 
       <GridCanvas
@@ -269,6 +285,17 @@ export const App: React.FC = () => {
         unassignedDevices={unassignedDevices}
         onAutoAssign={handleAutoAssign}
       />
+
+      {/* Change Teacher PIN Modal */}
+      <ChangePinModal
+        isOpen={isChangePinOpen}
+        onClose={() => setIsChangePinOpen(false)}
+      />
+
+      {/* Security Auth Lock Modal (PIN Entry) */}
+      {isLocked && (
+        <AuthLockModal onUnlock={() => setIsLocked(false)} />
+      )}
     </div>
   );
 };

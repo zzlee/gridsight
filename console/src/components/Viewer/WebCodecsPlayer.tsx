@@ -166,7 +166,7 @@ export const WebCodecsPlayer: React.FC<WebCodecsPlayerProps> = ({ device }) => {
         } catch (e) {}
       }
     };
-  }, [device]);
+  }, [device.id, device.mac, device.ip, device.token]);
 
   return (
     <div className="relative w-full h-full flex flex-col items-center justify-center bg-black">

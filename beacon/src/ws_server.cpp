@@ -290,13 +290,22 @@ void WebSocketStreamer::AcceptLoop() {
 void WebSocketStreamer::StreamLoop() {
     bool force_idr = true;
     int frame_count = 0;
+    int current_enc_w = 0;
+    int current_enc_h = 0;
 
     while (running_) {
         bool should_stream = streaming_active_ || client_connected_;
 
         if (should_stream) {
             FrameData frame;
-            if (capturer_->CaptureFrame(frame)) {
+            if (capturer_->CaptureFrame(frame) && !frame.bgra_buffer.empty()) {
+                if (current_enc_w != frame.width || current_enc_h != frame.height) {
+                    encoder_->Initialize(frame.width, frame.height, 30, 3000);
+                    current_enc_w = frame.width;
+                    current_enc_h = frame.height;
+                    force_idr = true;
+                }
+
                 std::vector<uint8_t> nalu;
                 bool is_keyframe = force_idr || (frame_count % 30 == 0);
                 if (encoder_->EncodeFrame(frame.bgra_buffer.data(), is_keyframe, nalu) && !nalu.empty()) {

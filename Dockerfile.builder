@@ -18,6 +18,10 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     ca-certificates \
     && rm -rf /var/lib/apt/lists/*
 
+# Set default MinGW-w64 compiler to POSIX thread model for C++11 std::thread / std::mutex support
+RUN update-alternatives --set x86_64-w64-mingw32-gcc /usr/bin/x86_64-w64-mingw32-gcc-posix && \
+    update-alternatives --set x86_64-w64-mingw32-g++ /usr/bin/x86_64-w64-mingw32-g++-posix
+
 WORKDIR /workspace
 
 # Default command compiles gs-agent.exe for Windows x64

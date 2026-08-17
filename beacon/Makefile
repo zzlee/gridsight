@@ -1,7 +1,7 @@
 CXX ?= x86_64-w64-mingw32-g++
 
 ifeq ($(findstring mingw,$(CXX)),mingw)
-    CXXFLAGS = -std=c++17 -O3 -Wall -Iinclude -mwindows
+    CXXFLAGS = -std=c++17 -O3 -Wall -Iinclude -mwindows -D_WIN32_WINNT=0x0602
     LDFLAGS = -static -static-libgcc -static-libstdc++ -lws2_32 -liphlpapi -ld3d11 -ldxgi -lgdi32 -luser32 -lmfplat -lmfuuid -lwmcodecdspuuid -lole32 -lwindowscodecs -loleaut32
     TARGET = gs-agent.exe
 else

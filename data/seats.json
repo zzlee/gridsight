@@ -15,7 +15,8 @@
       "gridY": 1,
       "status": "offline",
       "latencyMs": 0,
-      "lastSeen": 0
+      "lastSeen": 0,
+      "selected": false
     },
     {
       "id": "PC-02",
@@ -28,7 +29,8 @@
       "gridY": 1,
       "status": "offline",
       "latencyMs": 0,
-      "lastSeen": 0
+      "lastSeen": 0,
+      "selected": false
     },
     {
       "id": "PC-04",
@@ -41,7 +43,8 @@
       "gridY": 1,
       "status": "offline",
       "latencyMs": 0,
-      "lastSeen": 0
+      "lastSeen": 0,
+      "selected": false
     },
     {
       "id": "PC-05",
@@ -54,7 +57,8 @@
       "gridY": 1,
       "status": "offline",
       "latencyMs": 0,
-      "lastSeen": 0
+      "lastSeen": 0,
+      "selected": false
     },
     {
       "id": "PC-06",
@@ -67,7 +71,8 @@
       "gridY": 1,
       "status": "offline",
       "latencyMs": 0,
-      "lastSeen": 0
+      "lastSeen": 0,
+      "selected": false
     },
     {
       "id": "PC-07",
@@ -80,7 +85,8 @@
       "gridY": 1,
       "status": "offline",
       "latencyMs": 0,
-      "lastSeen": 0
+      "lastSeen": 0,
+      "selected": false
     },
     {
       "id": "PC-08",
@@ -93,7 +99,8 @@
       "gridY": 1,
       "status": "offline",
       "latencyMs": 0,
-      "lastSeen": 0
+      "lastSeen": 0,
+      "selected": false
     },
     {
       "id": "PC-09",
@@ -106,7 +113,8 @@
       "gridY": 2,
       "status": "offline",
       "latencyMs": 0,
-      "lastSeen": 0
+      "lastSeen": 0,
+      "selected": false
     },
     {
       "id": "PC-10",
@@ -119,7 +127,8 @@
       "gridY": 2,
       "status": "offline",
       "latencyMs": 0,
-      "lastSeen": 0
+      "lastSeen": 0,
+      "selected": false
     },
     {
       "id": "PC-11",
@@ -132,7 +141,8 @@
       "gridY": 2,
       "status": "offline",
       "latencyMs": 0,
-      "lastSeen": 0
+      "lastSeen": 0,
+      "selected": false
     },
     {
       "id": "PC-12",
@@ -145,7 +155,8 @@
       "gridY": 2,
       "status": "offline",
       "latencyMs": 0,
-      "lastSeen": 0
+      "lastSeen": 0,
+      "selected": false
     },
     {
       "id": "PC-13",
@@ -158,7 +169,8 @@
       "gridY": 2,
       "status": "offline",
       "latencyMs": 0,
-      "lastSeen": 0
+      "lastSeen": 0,
+      "selected": false
     },
     {
       "id": "PC-14",
@@ -171,7 +183,8 @@
       "gridY": 2,
       "status": "offline",
       "latencyMs": 0,
-      "lastSeen": 0
+      "lastSeen": 0,
+      "selected": false
     },
     {
       "id": "PC-15",
@@ -184,7 +197,8 @@
       "gridY": 2,
       "status": "offline",
       "latencyMs": 0,
-      "lastSeen": 0
+      "lastSeen": 0,
+      "selected": false
     },
     {
       "id": "PC-16",
@@ -197,7 +211,8 @@
       "gridY": 2,
       "status": "offline",
       "latencyMs": 0,
-      "lastSeen": 0
+      "lastSeen": 0,
+      "selected": false
     },
     {
       "id": "PC-17",
@@ -210,7 +225,8 @@
       "gridY": 3,
       "status": "offline",
       "latencyMs": 0,
-      "lastSeen": 0
+      "lastSeen": 0,
+      "selected": false
     },
     {
       "id": "PC-18",
@@ -223,7 +239,8 @@
       "gridY": 3,
       "status": "offline",
       "latencyMs": 0,
-      "lastSeen": 0
+      "lastSeen": 0,
+      "selected": false
     },
     {
       "id": "PC-19",
@@ -236,7 +253,8 @@
       "gridY": 3,
       "status": "offline",
       "latencyMs": 0,
-      "lastSeen": 0
+      "lastSeen": 0,
+      "selected": false
     },
     {
       "id": "PC-20",
@@ -249,7 +267,8 @@
       "gridY": 3,
       "status": "offline",
       "latencyMs": 0,
-      "lastSeen": 0
+      "lastSeen": 0,
+      "selected": false
     },
     {
       "id": "PC-21",
@@ -262,7 +281,8 @@
       "gridY": 3,
       "status": "offline",
       "latencyMs": 0,
-      "lastSeen": 0
+      "lastSeen": 0,
+      "selected": false
     },
     {
       "id": "PC-22",
@@ -275,7 +295,8 @@
       "gridY": 3,
       "status": "offline",
       "latencyMs": 0,
-      "lastSeen": 0
+      "lastSeen": 0,
+      "selected": false
     },
     {
       "id": "PC-23",
@@ -288,7 +309,8 @@
       "gridY": 3,
       "status": "offline",
       "latencyMs": 0,
-      "lastSeen": 0
+      "lastSeen": 0,
+      "selected": false
     },
     {
       "id": "PC-24",
@@ -301,7 +323,8 @@
       "gridY": 3,
       "status": "offline",
       "latencyMs": 0,
-      "lastSeen": 0
+      "lastSeen": 0,
+      "selected": false
     },
     {
       "id": "PC-25",
@@ -314,7 +337,8 @@
       "gridY": 4,
       "status": "offline",
       "latencyMs": 0,
-      "lastSeen": 0
+      "lastSeen": 0,
+      "selected": false
     },
     {
       "id": "PC-26",
@@ -327,7 +351,8 @@
       "gridY": 4,
       "status": "offline",
       "latencyMs": 0,
-      "lastSeen": 0
+      "lastSeen": 0,
+      "selected": false
     },
     {
       "id": "PC-27",
@@ -340,7 +365,8 @@
       "gridY": 4,
       "status": "offline",
       "latencyMs": 0,
-      "lastSeen": 0
+      "lastSeen": 0,
+      "selected": false
     },
     {
       "id": "PC-28",
@@ -353,7 +379,8 @@
       "gridY": 4,
       "status": "offline",
       "latencyMs": 0,
-      "lastSeen": 0
+      "lastSeen": 0,
+      "selected": false
     },
     {
       "id": "PC-29",
@@ -366,7 +393,8 @@
       "gridY": 4,
       "status": "offline",
       "latencyMs": 0,
-      "lastSeen": 0
+      "lastSeen": 0,
+      "selected": false
     },
     {
       "id": "PC-30",
@@ -379,7 +407,8 @@
       "gridY": 4,
       "status": "offline",
       "latencyMs": 0,
-      "lastSeen": 0
+      "lastSeen": 0,
+      "selected": false
     },
     {
       "id": "PC-31",
@@ -392,7 +421,8 @@
       "gridY": 4,
       "status": "offline",
       "latencyMs": 0,
-      "lastSeen": 0
+      "lastSeen": 0,
+      "selected": false
     },
     {
       "id": "PC-32",
@@ -405,7 +435,8 @@
       "gridY": 4,
       "status": "offline",
       "latencyMs": 0,
-      "lastSeen": 0
+      "lastSeen": 0,
+      "selected": false
     },
     {
       "id": "PC-33",
@@ -418,7 +449,8 @@
       "gridY": 5,
       "status": "offline",
       "latencyMs": 0,
-      "lastSeen": 0
+      "lastSeen": 0,
+      "selected": false
     },
     {
       "id": "PC-34",
@@ -431,7 +463,8 @@
       "gridY": 5,
       "status": "offline",
       "latencyMs": 0,
-      "lastSeen": 0
+      "lastSeen": 0,
+      "selected": false
     },
     {
       "id": "PC-35",
@@ -444,7 +477,8 @@
       "gridY": 5,
       "status": "offline",
       "latencyMs": 0,
-      "lastSeen": 0
+      "lastSeen": 0,
+      "selected": false
     },
     {
       "id": "PC-36",
@@ -457,7 +491,8 @@
       "gridY": 5,
       "status": "offline",
       "latencyMs": 0,
-      "lastSeen": 0
+      "lastSeen": 0,
+      "selected": false
     },
     {
       "id": "PC-37",
@@ -470,7 +505,8 @@
       "gridY": 5,
       "status": "offline",
       "latencyMs": 0,
-      "lastSeen": 0
+      "lastSeen": 0,
+      "selected": false
     },
     {
       "id": "PC-38",
@@ -483,7 +519,8 @@
       "gridY": 5,
       "status": "offline",
       "latencyMs": 0,
-      "lastSeen": 0
+      "lastSeen": 0,
+      "selected": false
     },
     {
       "id": "PC-39",
@@ -496,7 +533,8 @@
       "gridY": 5,
       "status": "offline",
       "latencyMs": 0,
-      "lastSeen": 0
+      "lastSeen": 0,
+      "selected": false
     },
     {
       "id": "PC-40",
@@ -509,7 +547,8 @@
       "gridY": 5,
       "status": "offline",
       "latencyMs": 0,
-      "lastSeen": 0
+      "lastSeen": 0,
+      "selected": false
     },
     {
       "id": "PC-41",
@@ -522,7 +561,8 @@
       "gridY": 6,
       "status": "offline",
       "latencyMs": 0,
-      "lastSeen": 0
+      "lastSeen": 0,
+      "selected": false
     },
     {
       "id": "PC-42",
@@ -535,7 +575,8 @@
       "gridY": 6,
       "status": "offline",
       "latencyMs": 0,
-      "lastSeen": 0
+      "lastSeen": 0,
+      "selected": false
     },
     {
       "id": "PC-43",
@@ -548,7 +589,8 @@
       "gridY": 6,
       "status": "offline",
       "latencyMs": 0,
-      "lastSeen": 0
+      "lastSeen": 0,
+      "selected": false
     },
     {
       "id": "PC-44",
@@ -561,7 +603,8 @@
       "gridY": 6,
       "status": "offline",
       "latencyMs": 0,
-      "lastSeen": 0
+      "lastSeen": 0,
+      "selected": false
     },
     {
       "id": "PC-45",
@@ -574,7 +617,8 @@
       "gridY": 6,
       "status": "offline",
       "latencyMs": 0,
-      "lastSeen": 0
+      "lastSeen": 0,
+      "selected": false
     },
     {
       "id": "PC-46",
@@ -587,7 +631,8 @@
       "gridY": 6,
       "status": "offline",
       "latencyMs": 0,
-      "lastSeen": 0
+      "lastSeen": 0,
+      "selected": false
     },
     {
       "id": "PC-47",
@@ -600,7 +645,8 @@
       "gridY": 6,
       "status": "offline",
       "latencyMs": 0,
-      "lastSeen": 0
+      "lastSeen": 0,
+      "selected": false
     },
     {
       "id": "PC-48",
@@ -613,7 +659,8 @@
       "gridY": 6,
       "status": "offline",
       "latencyMs": 0,
-      "lastSeen": 0
+      "lastSeen": 0,
+      "selected": false
     },
     {
       "id": "E0:D5:5E:66:22:B7",
@@ -621,20 +668,20 @@
       "ip": "192.168.190.101",
       "mac": "E0:D5:5E:66:22:B7",
       "status": "online",
-      "token": "db63f117069d6ccb3bc681a488d66cb629e37a0f490fe701",
+      "token": "91d99d5cabeb7ccc15b99c50f61656ac78d61cec5b44becc",
       "specs": {
         "agent_version": "5.3.0",
         "os": "Windows (x64)",
-        "uptime": 428190,
+        "uptime": 428840,
         "cpu": {
           "model": "Intel(R) Core(TM) i7-8700K CPU @ 3.70GHz",
           "cores": 12,
-          "usage_percent": 11.668
+          "usage_percent": 1.65975
         },
         "ram": {
           "total_mb": 16232,
-          "avail_mb": 8255,
-          "usage_percent": 49
+          "avail_mb": 8936,
+          "usage_percent": 44
         },
         "disk": {
           "drive": "C:",
@@ -645,10 +692,7 @@
       },
       "gridX": 3,
       "gridY": 1,
-      "seatNo": "A4",
-      "thumbnailUrl": "blob:http://localhost:3000/41830028-cb5d-40f8-99a7-b75dd46409c2",
-      "latencyMs": 12,
-      "lastSeen": 1786959314624
+      "seatNo": "A4"
     }
   ],
   "aisles": [],

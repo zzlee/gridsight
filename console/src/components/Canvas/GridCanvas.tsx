@@ -113,6 +113,22 @@ export const GridCanvas: React.FC<GridCanvasProps> = ({
     return () => window.removeEventListener('resize', calculateVisibleSeats);
   }, [calculateVisibleSeats]);
 
+  // Reset any residual drag state globally when drag ends or drops anywhere
+  useEffect(() => {
+    const handleGlobalDragEnd = () => {
+      setDraggedSeatId(null);
+      setDragOverSeatId(null);
+      setDragOverCell(null);
+    };
+
+    window.addEventListener('dragend', handleGlobalDragEnd);
+    window.addEventListener('drop', handleGlobalDragEnd);
+    return () => {
+      window.removeEventListener('dragend', handleGlobalDragEnd);
+      window.removeEventListener('drop', handleGlobalDragEnd);
+    };
+  }, []);
+
   // Handle Drag Events for Cards
   const handleCardDragStart = (e: React.DragEvent, id: string) => {
     e.dataTransfer.setData('text/plain', id);

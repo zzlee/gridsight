@@ -283,42 +283,61 @@ export const App: React.FC = () => {
     });
   };
 
-  // Auto assign all unassigned pool devices sequentially into empty seats
+  // Auto assign all unassigned pool devices sequentially into empty/offline seats
   const handleAutoAssign = () => {
     setLayout((prev) => {
-      const occupiedCoords = new Set(prev.seats.map((s) => `${s.gridX},${s.gridY}`));
-      const newSeats = [...prev.seats];
+      const updatedSeats = [...prev.seats];
       const remainingPool: StudentDevice[] = [];
 
       unassignedDevices.forEach((dev) => {
-        let assigned = false;
-        for (let r = 1; r < prev.rows; r++) {
-          for (let c = 0; c < prev.cols; c++) {
-            const key = `${c},${r}`;
-            if (!occupiedCoords.has(key)) {
-              occupiedCoords.add(key);
-              const rowLabel = String.fromCharCode(65 + ((r - 1) % 26));
-              newSeats.push({
-                ...dev,
-                gridX: c,
-                gridY: r,
-                seatNo: `${rowLabel}${c + 1}`,
-                status: 'online',
-              });
-              assigned = true;
-              break;
-            }
-          }
-          if (assigned) break;
+        // 1. Find the first empty coordinate or first offline dummy slot
+        let targetIdx = updatedSeats.findIndex((s) => s.status === 'offline' && s.id.startsWith('PC-Slot-'));
+        if (targetIdx === -1) {
+          targetIdx = updatedSeats.findIndex((s) => s.status === 'offline');
         }
 
-        if (!assigned) {
-          remainingPool.push(dev);
+        if (targetIdx !== -1) {
+          const oldSeat = updatedSeats[targetIdx];
+          updatedSeats[targetIdx] = {
+            ...dev,
+            gridX: oldSeat.gridX,
+            gridY: oldSeat.gridY,
+            seatNo: oldSeat.seatNo,
+            status: 'online',
+            selected: false,
+          };
+        } else {
+          // If all current seats are occupied, find next open grid coordinate
+          const occupied = new Set(updatedSeats.map((s) => `${s.gridX},${s.gridY}`));
+          let placed = false;
+          for (let r = 1; r < prev.rows; r++) {
+            for (let c = 0; c < prev.cols; c++) {
+              const key = `${c},${r}`;
+              if (!occupied.has(key)) {
+                occupied.add(key);
+                const rowLabel = String.fromCharCode(65 + ((r - 1) % 26));
+                updatedSeats.push({
+                  ...dev,
+                  gridX: c,
+                  gridY: r,
+                  seatNo: `${rowLabel}${c + 1}`,
+                  status: 'online',
+                  selected: false,
+                });
+                placed = true;
+                break;
+              }
+            }
+            if (placed) break;
+          }
+          if (!placed) {
+            remainingPool.push(dev);
+          }
         }
       });
 
       setUnassignedDevices(remainingPool);
-      const newLayout = { ...prev, seats: newSeats };
+      const newLayout = { ...prev, seats: updatedSeats };
       LayoutStorage.saveLayout(newLayout);
       return newLayout;
     });

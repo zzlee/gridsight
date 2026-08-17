@@ -296,7 +296,16 @@ bool H264Encoder::EncodeFrame(const uint8_t* bgra_data, bool force_idr, std::vec
     pBuffer->Release();
     pSample->Release();
 
-    if (FAILED(hr)) return false;
+    if (FAILED(hr)) {
+        static int input_err_count = 0;
+        if (input_err_count++ % 30 == 0) {
+            Utils::Log("ERROR", "[H264Encoder] ProcessInput failed with HR: " + std::to_string(hr));
+        }
+        return false;
+    }
+
+    MFT_OUTPUT_STREAM_INFO streamInfo = {0};
+    pEncoder->GetOutputStreamInfo(0, &streamInfo);
 
     bool encoded_something = false;
     while (true) {
@@ -304,10 +313,22 @@ bool H264Encoder::EncodeFrame(const uint8_t* bgra_data, bool force_idr, std::vec
         memset(&outputDataBuffer, 0, sizeof(outputDataBuffer));
         outputDataBuffer.dwStreamID = 0;
 
+        IMFSample* pOutSample = nullptr;
+        IMFMediaBuffer* pOutMemBuffer = nullptr;
+        if (!(streamInfo.dwFlags & MFT_OUTPUT_STREAM_PROVIDES_SAMPLES)) {
+            MFCreateSample(&pOutSample);
+            DWORD bufSize = streamInfo.cbSize ? streamInfo.cbSize : (1024 * 1024);
+            MFCreateMemoryBuffer(bufSize, &pOutMemBuffer);
+            pOutSample->AddBuffer(pOutMemBuffer);
+            outputDataBuffer.pSample = pOutSample;
+        }
+
         DWORD status = 0;
         hr = pEncoder->ProcessOutput(0, 1, &outputDataBuffer, &status);
 
         if (hr == MF_E_TRANSFORM_NEED_MORE_INPUT) {
+            if (pOutMemBuffer) pOutMemBuffer->Release();
+            if (pOutSample) pOutSample->Release();
             break;
         } else if (SUCCEEDED(hr) && outputDataBuffer.pSample) {
             IMFMediaBuffer* pOutBuffer = nullptr;
@@ -316,14 +337,19 @@ bool H264Encoder::EncodeFrame(const uint8_t* bgra_data, bool force_idr, std::vec
                 BYTE* pOutData = nullptr;
                 DWORD outLen = 0;
                 pOutBuffer->Lock(&pOutData, nullptr, &outLen);
-                out_h264_nalu.insert(out_h264_nalu.end(), pOutData, pOutData + outLen);
+                if (outLen > 0) {
+                    out_h264_nalu.insert(out_h264_nalu.end(), pOutData, pOutData + outLen);
+                    encoded_something = true;
+                }
                 pOutBuffer->Unlock();
                 pOutBuffer->Release();
-                encoded_something = true;
             }
             outputDataBuffer.pSample->Release();
             if (outputDataBuffer.pEvents) outputDataBuffer.pEvents->Release();
+            if (pOutMemBuffer) pOutMemBuffer->Release();
         } else {
+            if (pOutMemBuffer) pOutMemBuffer->Release();
+            if (pOutSample) pOutSample->Release();
             break;
         }
     }

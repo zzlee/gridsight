@@ -162,10 +162,10 @@ void WebSocketStreamer::ReceiveCommands(uintptr_t sock_fd) {
         // Parse text or binary frame
         std::string msg(buffer, bytes);
         if (msg.find("START_STREAM") != std::string::npos) {
-            Utils::Log("INFO", "Received START_STREAM command from Teacher Console");
+            Utils::Log("INFO", "🎯 [Stream Command] Received START_STREAM from Teacher Console, activating 30 FPS H.264 stream");
             streaming_active_ = true;
         } else if (msg.find("STOP_STREAM") != std::string::npos) {
-            Utils::Log("INFO", "Received STOP_STREAM command from Teacher Console");
+            Utils::Log("INFO", "🛑 [Stream Command] Received STOP_STREAM from Teacher Console, pausing stream");
             streaming_active_ = false;
         }
     }
@@ -311,6 +311,12 @@ void WebSocketStreamer::StreamLoop() {
                 if (encoder_->EncodeFrame(frame.bgra_buffer.data(), is_keyframe, nalu) && !nalu.empty()) {
                     force_idr = false;
                     frame_count++;
+
+                    if (frame_count == 1 || frame_count % 60 == 0) {
+                        Utils::Log("INFO", "[StreamLoop] Encoded H.264 frame #" + std::to_string(frame_count) + 
+                                   " (" + std::to_string(nalu.size()) + " bytes, keyframe=" + (is_keyframe ? "true" : "false") + 
+                                   "), sending outbound to Teacher Console");
+                    }
 
                     std::lock_guard<std::mutex> lock(client_mutex_);
 

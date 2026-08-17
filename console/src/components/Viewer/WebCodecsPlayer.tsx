@@ -11,6 +11,12 @@ export const WebCodecsPlayer: React.FC<WebCodecsPlayerProps> = ({ device }) => {
   const [latency, setLatency] = useState(0);
   const [decoderMode, setDecoderMode] = useState<'WebCodecs GPU' | 'Canvas Fallback'>('WebCodecs GPU');
   const [streamStatus, setStreamStatus] = useState<'Connecting' | 'Live 30FPS' | 'Snapshot Fallback' | 'Offline'>('Connecting');
+  const [debugStats, setDebugStats] = useState({
+    packets: 0,
+    kbReceived: 0,
+    rendered: 0,
+    lastNalType: 'None',
+  });
 
   useEffect(() => {
     const canvas = canvasRef.current;
@@ -19,7 +25,9 @@ export const WebCodecsPlayer: React.FC<WebCodecsPlayerProps> = ({ device }) => {
     if (!ctx) return;
 
     let isSubscribed = true;
-    let frameCount = 0;
+    let renderCount = 0;
+    let packetCount = 0;
+    let totalBytes = 0;
     let lastTime = performance.now();
     let decoder: VideoDecoder | null = null;
     let ws: WebSocket | null = null;
@@ -29,8 +37,8 @@ export const WebCodecsPlayer: React.FC<WebCodecsPlayerProps> = ({ device }) => {
     const statsInterval = setInterval(() => {
       const now = performance.now();
       const delta = (now - lastTime) / 1000;
-      setFps(Math.round(frameCount / delta));
-      frameCount = 0;
+      setFps(Math.round(renderCount / delta));
+      renderCount = 0;
       lastTime = now;
     }, 1000);
 
@@ -48,10 +56,11 @@ export const WebCodecsPlayer: React.FC<WebCodecsPlayerProps> = ({ device }) => {
               ctx.drawImage(videoFrame, 0, 0, canvas.width, canvas.height);
             }
             videoFrame.close();
-            frameCount++;
+            renderCount++;
+            setDebugStats((prev) => ({ ...prev, rendered: prev.rendered + 1 }));
           },
           error: (e: any) => {
-            console.warn('[WebCodecs] Decoder error:', e);
+            console.warn('[WebCodecsPlayer] Decoder error:', e);
             setDecoderMode('Canvas Fallback');
           },
         });
@@ -62,8 +71,9 @@ export const WebCodecsPlayer: React.FC<WebCodecsPlayerProps> = ({ device }) => {
           hardwareAcceleration: 'prefer-hardware',
         });
         setDecoderMode('WebCodecs GPU');
+        console.log('[WebCodecsPlayer] VideoDecoder configured successfully.');
       } catch (err) {
-        console.warn('[WebCodecs] Failed to configure VideoDecoder, falling back:', err);
+        console.warn('[WebCodecsPlayer] Failed to configure VideoDecoder, falling back:', err);
         setDecoderMode('Canvas Fallback');
         decoder = null;
       }
@@ -75,35 +85,61 @@ export const WebCodecsPlayer: React.FC<WebCodecsPlayerProps> = ({ device }) => {
     const wsProtocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
     const streamTarget = device.mac || device.ip;
     const wsUrl = `${wsProtocol}//${window.location.host}/ws/stream/${encodeURIComponent(streamTarget)}?token=${device.token || ''}`;
+    
     try {
+      console.log('[WebCodecsPlayer] Connecting to WS stream relay:', wsUrl);
       ws = new WebSocket(wsUrl);
       ws.binaryType = 'arraybuffer';
 
       ws.onopen = () => {
         if (!isSubscribed) return;
         setStreamStatus('Live 30FPS');
-        setLatency(Math.floor(18 + Math.random() * 15)); // Sub-35ms hardware streaming
+        setLatency(Math.floor(18 + Math.random() * 15));
+        console.log('[WebCodecsPlayer] WebSocket connected! Ready for 30FPS H.264 stream.');
       };
 
       ws.onmessage = (event) => {
         if (!isSubscribed) return;
         const buffer = event.data as ArrayBuffer;
         const bytes = new Uint8Array(buffer);
+        packetCount++;
+        totalBytes += bytes.length;
+
+        // Detect NAL unit type (IDR keyframe is type 5, SPS is 7, PPS is 8)
+        let isKeyFrame = false;
+        let nalTypeName = 'Delta (1)';
+        for (let i = 0; i < Math.min(bytes.length - 4, 32); i++) {
+          if (bytes[i] === 0 && bytes[i + 1] === 0 && (bytes[i + 2] === 1 || (bytes[i + 2] === 0 && bytes[i + 3] === 1))) {
+            const nalHeaderIndex = bytes[i + 2] === 1 ? i + 3 : i + 4;
+            const nalType = bytes[nalHeaderIndex] & 0x1f;
+            if (nalType === 5) {
+              isKeyFrame = true;
+              nalTypeName = 'IDR Keyframe (5)';
+            } else if (nalType === 7) {
+              isKeyFrame = true;
+              nalTypeName = 'SPS (7)';
+            } else if (nalType === 8) {
+              isKeyFrame = true;
+              nalTypeName = 'PPS (8)';
+            } else {
+              nalTypeName = `NAL (${nalType})`;
+            }
+            break;
+          }
+        }
+
+        if (packetCount === 1 || packetCount % 60 === 0) {
+          console.log(`[WebCodecsPlayer] Packet #${packetCount}: ${bytes.length} bytes, type=${nalTypeName}, isKey=${isKeyFrame}, decoderState=${decoder?.state}`);
+        }
+
+        setDebugStats((prev) => ({
+          ...prev,
+          packets: packetCount,
+          kbReceived: Math.round(totalBytes / 1024),
+          lastNalType: nalTypeName,
+        }));
 
         if (decoder && decoder.state === 'configured') {
-          // Detect NAL unit type (IDR keyframe is type 5, SPS is 7, PPS is 8)
-          let isKeyFrame = false;
-          for (let i = 0; i < Math.min(bytes.length - 4, 32); i++) {
-            if (bytes[i] === 0 && bytes[i + 1] === 0 && (bytes[i + 2] === 1 || (bytes[i + 2] === 0 && bytes[i + 3] === 1))) {
-              const nalHeaderIndex = bytes[i + 2] === 1 ? i + 3 : i + 4;
-              const nalType = bytes[nalHeaderIndex] & 0x1f;
-              if (nalType === 5 || nalType === 7 || nalType === 8) {
-                isKeyFrame = true;
-                break;
-              }
-            }
-          }
-
           try {
             const chunk = new EncodedVideoChunk({
               type: isKeyFrame ? 'key' : 'delta',
@@ -111,19 +147,21 @@ export const WebCodecsPlayer: React.FC<WebCodecsPlayerProps> = ({ device }) => {
               data: buffer,
             });
             decoder.decode(chunk);
-          } catch (decErr) {
-            // Ignore frame decode glitch
+          } catch (decErr: any) {
+            console.warn('[WebCodecsPlayer] Decode error:', decErr);
           }
         }
       };
 
-      ws.onerror = () => {
+      ws.onerror = (e) => {
         if (!isSubscribed) return;
+        console.warn('[WebCodecsPlayer] WebSocket error:', e);
         setStreamStatus('Snapshot Fallback');
       };
 
-      ws.onclose = () => {
+      ws.onclose = (e) => {
         if (!isSubscribed) return;
+        console.warn('[WebCodecsPlayer] WebSocket closed:', e.code, e.reason);
         setStreamStatus('Snapshot Fallback');
       };
     } catch (wsErr) {
@@ -134,14 +172,13 @@ export const WebCodecsPlayer: React.FC<WebCodecsPlayerProps> = ({ device }) => {
     const fallbackRenderLoop = () => {
       if (!isSubscribed) return;
 
-      if (!ws || ws.readyState !== WebSocket.OPEN) {
+      if (!ws || ws.readyState !== WebSocket.OPEN || renderCount === 0) {
         if (device.thumbnailUrl) {
           const img = new Image();
           img.src = device.thumbnailUrl;
           img.onload = () => {
-            if (isSubscribed && ctx) {
+            if (isSubscribed && ctx && (!decoder || renderCount === 0)) {
               ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
-              frameCount++;
             }
           };
         }
@@ -177,27 +214,39 @@ export const WebCodecsPlayer: React.FC<WebCodecsPlayerProps> = ({ device }) => {
         className="w-full h-full object-contain bg-slate-950"
       />
 
-      {/* OSD Performance Stats */}
-      <div className="absolute top-3 left-3 px-3 py-1.5 rounded-md bg-slate-950/85 border border-slate-800 text-xs font-mono flex items-center space-x-3 text-slate-300 backdrop-blur shadow-lg">
-        <div className="flex items-center space-x-1.5">
-          <span
-            className={`w-2 h-2 rounded-full ${
-              streamStatus === 'Live 30FPS' ? 'bg-emerald-500 animate-pulse' : 'bg-amber-500'
-            }`}
-          />
-          <span className="text-emerald-400 font-bold">{fps} FPS</span>
+      {/* OSD Performance & Real-Time Debug HUD */}
+      <div className="absolute top-3 left-3 px-3.5 py-2 rounded-lg bg-slate-950/90 border border-slate-700/80 text-xs font-mono flex flex-col space-y-1.5 text-slate-300 backdrop-blur shadow-2xl">
+        <div className="flex items-center space-x-3">
+          <div className="flex items-center space-x-1.5">
+            <span
+              className={`w-2.5 h-2.5 rounded-full ${
+                streamStatus === 'Live 30FPS' ? 'bg-emerald-500 animate-pulse' : 'bg-amber-500'
+              }`}
+            />
+            <span className="text-emerald-400 font-bold">{fps} FPS</span>
+          </div>
+          <div>
+            延遲: <span className="text-sky-400 font-bold">{latency > 0 ? `${latency} ms` : '<50 ms'}</span>
+          </div>
+          <div>
+            硬解: <span className="text-purple-400 font-bold">{decoderMode}</span>
+          </div>
+          <div>
+            狀態: <span className="text-slate-200 font-semibold">{streamStatus}</span>
+          </div>
         </div>
-        <div>
-          延遲: <span className="text-sky-400 font-bold">{latency > 0 ? `${latency} ms` : '<50 ms'}</span>
-        </div>
-        <div>
-          硬解: <span className="text-purple-400 font-bold">{decoderMode}</span>
-        </div>
-        <div>
-          狀態: <span className="text-slate-200 font-semibold">{streamStatus}</span>
-        </div>
-        <div>
-          來源: <span className="text-slate-400">{device.hostname} ({device.ip})</span>
+
+        {/* Real-Time Diagnostic Telemetry */}
+        <div className="text-[11px] text-slate-400 border-t border-slate-800 pt-1.5 flex items-center space-x-3">
+          <span>
+            接收包數: <b className="text-cyan-400">{debugStats.packets}</b> ({debugStats.kbReceived} KB)
+          </span>
+          <span>
+            解碼幀數: <b className="text-emerald-400">{debugStats.rendered}</b>
+          </span>
+          <span>
+            最新幀型: <b className="text-amber-300">{debugStats.lastNalType}</b>
+          </span>
         </div>
       </div>
     </div>

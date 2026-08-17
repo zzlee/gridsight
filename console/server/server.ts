@@ -56,7 +56,18 @@ wss.on('connection', (ws, req) => {
     agentSockets.set(mac, ws);
     logger.info(`[WS Relay] Student Agent registered outbound: ${mac}`);
 
+    let frameCount = 0;
+    let totalBytes = 0;
+
     ws.on('message', (data, isBinary) => {
+      frameCount++;
+      const len = (data as Buffer)?.length || 0;
+      totalBytes += len;
+
+      if (frameCount === 1 || frameCount % 60 === 0) {
+        logger.info(`[WS Relay] Agent ${mac} sent ${isBinary ? 'BINARY H.264' : 'TEXT'} frame #${frameCount} (${len} bytes, total ${Math.round(totalBytes / 1024)} KB). Relaying to ${viewerSockets.get(mac)?.size || 0} viewers`);
+      }
+
       if (isBinary) {
         // Forward H.264 video NALU frames directly to active teacher viewers
         const viewers = viewerSockets.get(mac);
@@ -81,7 +92,7 @@ wss.on('connection', (ws, req) => {
       viewerSockets.set(mac, new Set());
     }
     viewerSockets.get(mac)!.add(ws);
-    logger.info(`[WS Relay] Teacher Viewer opened stream for: ${mac}`);
+    logger.info(`[WS Relay] Teacher Viewer opened stream for: ${mac} (total viewers: ${viewerSockets.get(mac)!.size})`);
 
     // Tell student agent to start H.264 30 FPS encoder
     const agentWs = agentSockets.get(mac);
@@ -89,13 +100,14 @@ wss.on('connection', (ws, req) => {
       agentWs.send(JSON.stringify({ action: 'START_STREAM', fps: 30, bitrate: 2500 }));
       logger.info(`[WS Relay] Sent START_STREAM command to agent: ${mac}`);
     } else {
-      logger.warn(`[WS Relay] Agent not found for target ${mac}. Available agents: ${Array.from(agentSockets.keys()).join(', ')}`);
+      logger.warn(`[WS Relay] Agent not found for target ${mac}. Available agents: [${Array.from(agentSockets.keys()).join(', ')}]`);
     }
 
     ws.on('close', () => {
       const viewers = viewerSockets.get(mac);
       if (viewers) {
         viewers.delete(ws);
+        logger.info(`[WS Relay] Teacher Viewer closed stream for: ${mac} (remaining viewers: ${viewers.size})`);
         if (viewers.size === 0) {
           viewerSockets.delete(mac);
           // Tell student agent to stop streaming to save GPU/bandwidth
@@ -108,6 +120,24 @@ wss.on('connection', (ws, req) => {
       }
     });
   }
+});
+
+app.get('/api/stream/debug', (req, res) => {
+  res.json({
+    connectedAgents: Array.from(agentSockets.keys()),
+    activeViewers: Array.from(viewerSockets.entries()).map(([k, v]) => ({
+      mac: k,
+      viewerCount: v.size,
+    })),
+    discoveredAgents: discoveryService.getDevices().map((d) => ({
+      id: d.id,
+      mac: d.mac,
+      ip: d.ip,
+      hostname: d.hostname,
+      status: d.status,
+    })),
+    serverTime: new Date().toISOString(),
+  });
 });
 
 app.get('/api/health', (req, res) => {

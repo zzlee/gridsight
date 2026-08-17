@@ -28,12 +28,13 @@ export const WebCodecsPlayer: React.FC<WebCodecsPlayerProps> = ({ device }) => {
     let renderCount = 0;
     let packetCount = 0;
     let totalBytes = 0;
+    let hasReceivedKeyFrame = false;
     let lastTime = performance.now();
     let decoder: VideoDecoder | null = null;
     let ws: WebSocket | null = null;
     let animId: number | null = null;
 
-    // 1. Setup FPS and latency counter interval
+    // 1. Setup FPS counter interval
     const statsInterval = setInterval(() => {
       const now = performance.now();
       const delta = (now - lastTime) / 1000;
@@ -42,44 +43,52 @@ export const WebCodecsPlayer: React.FC<WebCodecsPlayerProps> = ({ device }) => {
       lastTime = now;
     }, 1000);
 
-    // 2. Initialize WebCodecs VideoDecoder if supported
-    const hasWebCodecs = typeof window !== 'undefined' && 'VideoDecoder' in window;
-    if (hasWebCodecs) {
-      try {
-        decoder = new VideoDecoder({
-          output: (videoFrame: VideoFrame) => {
-            if (!isSubscribed) {
+    // 2. Initialize WebCodecs VideoDecoder with Level 4.2 High Profile (1080p 60fps support)
+    const initDecoder = () => {
+      const hasWebCodecs = typeof window !== 'undefined' && 'VideoDecoder' in window;
+      if (hasWebCodecs) {
+        try {
+          decoder = new VideoDecoder({
+            output: (videoFrame: VideoFrame) => {
+              if (!isSubscribed) {
+                videoFrame.close();
+                return;
+              }
+              if (ctx) {
+                if (canvas.width !== videoFrame.displayWidth || canvas.height !== videoFrame.displayHeight) {
+                  canvas.width = videoFrame.displayWidth;
+                  canvas.height = videoFrame.displayHeight;
+                }
+                ctx.drawImage(videoFrame, 0, 0, canvas.width, canvas.height);
+              }
               videoFrame.close();
-              return;
-            }
-            if (ctx) {
-              ctx.drawImage(videoFrame, 0, 0, canvas.width, canvas.height);
-            }
-            videoFrame.close();
-            renderCount++;
-            setDebugStats((prev) => ({ ...prev, rendered: prev.rendered + 1 }));
-          },
-          error: (e: any) => {
-            console.warn('[WebCodecsPlayer] Decoder error:', e);
-            setDecoderMode('Canvas Fallback');
-          },
-        });
+              renderCount++;
+              setDebugStats((prev) => ({ ...prev, rendered: prev.rendered + 1 }));
+            },
+            error: (e: any) => {
+              console.warn('[WebCodecsPlayer] Decoder error:', e);
+              setDecoderMode('Canvas Fallback');
+            },
+          });
 
-        decoder.configure({
-          codec: 'avc1.42E01F', // H.264 Baseline Level 3.1
-          optimizeForLatency: true,
-          hardwareAcceleration: 'prefer-hardware',
-        });
-        setDecoderMode('WebCodecs GPU');
-        console.log('[WebCodecsPlayer] VideoDecoder configured successfully.');
-      } catch (err) {
-        console.warn('[WebCodecsPlayer] Failed to configure VideoDecoder, falling back:', err);
+          decoder.configure({
+            codec: 'avc1.64002A', // H.264 High Profile Level 4.2 (1080p 60FPS)
+            optimizeForLatency: true,
+            hardwareAcceleration: 'prefer-hardware',
+          });
+          setDecoderMode('WebCodecs GPU');
+          console.log('[WebCodecsPlayer] VideoDecoder configured (avc1.64002A).');
+        } catch (err) {
+          console.warn('[WebCodecsPlayer] Failed to configure VideoDecoder, falling back:', err);
+          setDecoderMode('Canvas Fallback');
+          decoder = null;
+        }
+      } else {
         setDecoderMode('Canvas Fallback');
-        decoder = null;
       }
-    } else {
-      setDecoderMode('Canvas Fallback');
-    }
+    };
+
+    initDecoder();
 
     // 3. Connect to Teacher Console WebSocket stream relay (Port 3000)
     const wsProtocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
@@ -95,7 +104,7 @@ export const WebCodecsPlayer: React.FC<WebCodecsPlayerProps> = ({ device }) => {
         if (!isSubscribed) return;
         setStreamStatus('Live 30FPS');
         setLatency(Math.floor(18 + Math.random() * 15));
-        console.log('[WebCodecsPlayer] WebSocket connected! Ready for 30FPS H.264 stream.');
+        console.log('[WebCodecsPlayer] WebSocket connected! Ready for 30FPS stream.');
       };
 
       ws.onmessage = (event) => {
@@ -110,6 +119,10 @@ export const WebCodecsPlayer: React.FC<WebCodecsPlayerProps> = ({ device }) => {
           const blob = new Blob([buffer], { type: 'image/jpeg' });
           createImageBitmap(blob).then((bitmap) => {
             if (isSubscribed && ctx) {
+              if (canvas.width !== bitmap.width || canvas.height !== bitmap.height) {
+                canvas.width = bitmap.width;
+                canvas.height = bitmap.height;
+              }
               ctx.drawImage(bitmap, 0, 0, canvas.width, canvas.height);
               bitmap.close();
               renderCount++;
@@ -126,10 +139,10 @@ export const WebCodecsPlayer: React.FC<WebCodecsPlayerProps> = ({ device }) => {
           return;
         }
 
-        // 2. Otherwise process as H.264 NALU frame
+        // 2. Scan entire chunk for NAL unit start codes (0x00 0x00 0x01 or 0x00 0x00 0x00 0x01)
         let isKeyFrame = false;
         let nalTypeName = 'Delta (1)';
-        for (let i = 0; i < Math.min(bytes.length - 4, 32); i++) {
+        for (let i = 0; i < Math.min(bytes.length - 4, 128); i++) {
           if (bytes[i] === 0 && bytes[i + 1] === 0 && (bytes[i + 2] === 1 || (bytes[i + 2] === 0 && bytes[i + 3] === 1))) {
             const nalHeaderIndex = bytes[i + 2] === 1 ? i + 3 : i + 4;
             const nalType = bytes[nalHeaderIndex] & 0x1f;
@@ -142,15 +155,17 @@ export const WebCodecsPlayer: React.FC<WebCodecsPlayerProps> = ({ device }) => {
             } else if (nalType === 8) {
               isKeyFrame = true;
               nalTypeName = 'PPS (8)';
-            } else {
-              nalTypeName = `NAL (${nalType})`;
             }
-            break;
+            if (isKeyFrame) break;
           }
         }
 
+        if (isKeyFrame) {
+          hasReceivedKeyFrame = true;
+        }
+
         if (packetCount === 1 || packetCount % 60 === 0) {
-          console.log(`[WebCodecsPlayer] Packet #${packetCount}: ${bytes.length} bytes, type=${nalTypeName}, isKey=${isKeyFrame}, decoderState=${decoder?.state}`);
+          console.log(`[WebCodecsPlayer] Packet #${packetCount}: ${bytes.length} bytes, type=${nalTypeName}, isKey=${isKeyFrame}, hasKey=${hasReceivedKeyFrame}, decoderState=${decoder?.state}`);
         }
 
         setDebugStats((prev) => ({
@@ -160,7 +175,8 @@ export const WebCodecsPlayer: React.FC<WebCodecsPlayerProps> = ({ device }) => {
           lastNalType: nalTypeName,
         }));
 
-        if (decoder && decoder.state === 'configured') {
+        // 3. Decode H.264 chunk (only if first keyframe has been received)
+        if (hasReceivedKeyFrame && decoder && decoder.state === 'configured') {
           try {
             const chunk = new EncodedVideoChunk({
               type: isKeyFrame ? 'key' : 'delta',
@@ -189,26 +205,16 @@ export const WebCodecsPlayer: React.FC<WebCodecsPlayerProps> = ({ device }) => {
       setStreamStatus('Snapshot Fallback');
     }
 
-    // 4. Fallback rendering loop for snapshot display when WebSocket / WebCodecs is offline
-    const fallbackRenderLoop = () => {
-      if (!isSubscribed) return;
-
-      if (!ws || ws.readyState !== WebSocket.OPEN || renderCount === 0) {
-        if (device.thumbnailUrl) {
-          const img = new Image();
-          img.src = device.thumbnailUrl;
-          img.onload = () => {
-            if (isSubscribed && ctx && (!decoder || renderCount === 0)) {
-              ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
-            }
-          };
+    // 4. Initial placeholder snapshot while waiting for live stream
+    if (device.thumbnailUrl) {
+      const img = new Image();
+      img.src = device.thumbnailUrl;
+      img.onload = () => {
+        if (isSubscribed && ctx && packetCount === 0) {
+          ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
         }
-      }
-
-      animId = requestAnimationFrame(fallbackRenderLoop);
-    };
-
-    animId = requestAnimationFrame(fallbackRenderLoop);
+      };
+    }
 
     return () => {
       isSubscribed = false;

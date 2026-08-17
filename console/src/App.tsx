@@ -5,6 +5,7 @@ import { GridCanvas } from './components/Canvas/GridCanvas';
 import { FocusModal } from './components/Viewer/FocusModal';
 import { DeviceSpecsModal } from './components/Viewer/DeviceSpecsModal';
 import { MatrixConfigModal } from './components/Toolbar/MatrixConfigModal';
+import { EditSeatModal } from './components/Toolbar/EditSeatModal';
 import { DevicePool } from './components/Toolbar/DevicePool';
 import { AuthLockModal } from './components/Auth/AuthLockModal';
 import { ChangePinModal } from './components/Auth/ChangePinModal';
@@ -28,6 +29,7 @@ export const App: React.FC = () => {
 
   const [focusDevice, setFocusDevice] = useState<StudentDevice | null>(null);
   const [specsDevice, setSpecsDevice] = useState<StudentDevice | null>(null);
+  const [editingSeat, setEditingSeat] = useState<StudentDevice | null>(null);
   const [isMatrixConfigOpen, setIsMatrixConfigOpen] = useState(false);
   const [isDevicePoolOpen, setIsDevicePoolOpen] = useState(false);
   const [zoom, setZoom] = useState(0.85);
@@ -172,6 +174,16 @@ export const App: React.FC = () => {
 
   const handleUnbindSeat = (id: string) => {
     handleReturnToPool(id);
+  };
+
+  // Save edited seat information (SeatNo, Hostname, Username, MAC, IP)
+  const handleSaveSeatInfo = (updatedSeat: StudentDevice) => {
+    setLayout((prev) => {
+      const updatedSeats = prev.seats.map((s) => (s.id === updatedSeat.id ? updatedSeat : s));
+      const newLayout = { ...prev, seats: updatedSeats };
+      LayoutStorage.saveLayout(newLayout);
+      return newLayout;
+    });
   };
 
   // Drag & Drop: Swap two seats on the grid
@@ -473,12 +485,23 @@ export const App: React.FC = () => {
         onRefreshAuth={handleRefreshAuth}
         onUnbindSeat={handleUnbindSeat}
         onOpenSpecs={setSpecsDevice}
+        onEditSeat={(device) => setEditingSeat(device)}
         onVisibleSeatsChange={(ids) => {
           visibleDeviceIdsRef.current = ids;
         }}
         onSwapSeats={handleSwapSeats}
         onMoveSeat={handleMoveSeat}
         onAssignFromPool={handleAssignFromPool}
+      />
+
+      {/* Edit Seat Information Modal (SeatNo, Hostname, Username, MAC) */}
+      <EditSeatModal
+        isOpen={!!editingSeat}
+        seat={editingSeat}
+        unassignedDevices={unassignedDevices}
+        onClose={() => setEditingSeat(null)}
+        onSaveSeat={handleSaveSeatInfo}
+        onUnbindSeat={handleUnbindSeat}
       />
 
       {/* Focus 30FPS WebCodecs Viewer Modal */}

@@ -1,6 +1,6 @@
 import React from 'react';
 import { StudentDevice } from '../../types';
-import { Monitor, Maximize2, RefreshCw, Cpu, Move } from 'lucide-react';
+import { Monitor, Maximize2, RefreshCw, Cpu, Move, Edit2 } from 'lucide-react';
 
 interface StudentCardProps {
   device: StudentDevice;
@@ -10,6 +10,7 @@ interface StudentCardProps {
   onRefreshAuth: (device: StudentDevice) => void;
   onUnbind: (id: string) => void;
   onOpenSpecs?: (device: StudentDevice) => void;
+  onEditSeat?: (device: StudentDevice) => void;
   onDragStart?: (e: React.DragEvent, id: string) => void;
   onDragEnd?: (e: React.DragEvent) => void;
   onDragOver?: (e: React.DragEvent, id: string) => void;
@@ -27,6 +28,7 @@ export const StudentCard: React.FC<StudentCardProps> = ({
   onRefreshAuth,
   onUnbind,
   onOpenSpecs,
+  onEditSeat,
   onDragStart,
   onDragEnd,
   onDragOver,
@@ -58,7 +60,7 @@ export const StudentCard: React.FC<StudentCardProps> = ({
       onDragLeave={(e) => isEditMode && onDragLeave?.(e)}
       onDrop={(e) => isEditMode && onDrop?.(e, device.id)}
       onClick={(e) => onSelect(device.id, e.ctrlKey || e.metaKey)}
-      onDoubleClick={() => !isEditMode && onDoubleClick(device)}
+      onDoubleClick={() => (isEditMode ? onEditSeat?.(device) : onDoubleClick(device))}
       className={`group relative flex flex-col rounded-lg border bg-slate-900/90 backdrop-blur transition-all duration-150 overflow-hidden select-none ${
         isDragging
           ? 'opacity-40 scale-95 border-dashed border-sky-400'
@@ -82,10 +84,22 @@ export const StudentCard: React.FC<StudentCardProps> = ({
         </div>
         <div className="flex items-center space-x-1.5">
           {isEditMode ? (
-            <span className="text-[10px] text-sky-400/80 flex items-center space-x-0.5 font-sans">
-              <Move className="w-3 h-3" />
-              <span>拖曳</span>
-            </span>
+            <div className="flex items-center space-x-1">
+              <button
+                type="button"
+                onClick={(e) => {
+                  e.stopPropagation();
+                  onEditSeat?.(device);
+                }}
+                className="p-1 rounded bg-sky-600/30 hover:bg-sky-500 text-sky-300 hover:text-white transition-colors"
+                title="編輯此座位資訊"
+              >
+                <Edit2 className="w-3 h-3" />
+              </button>
+              <span className="text-[10px] text-sky-400/80 flex items-center space-x-0.5 font-sans">
+                <Move className="w-3 h-3" />
+              </span>
+            </div>
           ) : (
             <>
               {device.status !== 'offline' && (
@@ -117,7 +131,7 @@ export const StudentCard: React.FC<StudentCardProps> = ({
           </div>
         )}
 
-        {/* Hover Quick Actions */}
+        {/* Hover Quick Actions in Monitor Mode */}
         {!isEditMode && (
           <div className="absolute inset-0 bg-slate-950/75 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center space-x-1.5 backdrop-blur-[2px] pointer-events-auto">
             <button
@@ -149,6 +163,23 @@ export const StudentCard: React.FC<StudentCardProps> = ({
               title="重新配發 RAM 鑑權 Token"
             >
               <RefreshCw className="w-3.5 h-3.5" />
+            </button>
+          </div>
+        )}
+
+        {/* Hover Quick Action in Edit Mode */}
+        {isEditMode && (
+          <div className="absolute inset-0 bg-slate-950/70 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center pointer-events-auto">
+            <button
+              onClick={(e) => {
+                e.stopPropagation();
+                onEditSeat?.(device);
+              }}
+              className="flex items-center space-x-1 px-3 py-1.5 rounded-lg bg-sky-600 hover:bg-sky-500 text-white text-xs font-semibold shadow-lg shadow-sky-600/30"
+              title="編輯座位資訊"
+            >
+              <Edit2 className="w-3.5 h-3.5" />
+              <span>編輯資訊</span>
             </button>
           </div>
         )}

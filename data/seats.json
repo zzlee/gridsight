@@ -31,26 +31,13 @@
       "lastSeen": 0
     },
     {
-      "id": "PC-03",
-      "hostname": "PC-03",
-      "ip": "192.168.1.103",
-      "mac": "00:1A:2B:3C:4D:03",
-      "username": "Student03",
-      "seatNo": "A3",
-      "gridX": 2,
-      "gridY": 1,
-      "status": "offline",
-      "latencyMs": 0,
-      "lastSeen": 0
-    },
-    {
       "id": "PC-04",
       "hostname": "PC-04",
       "ip": "192.168.1.104",
       "mac": "00:1A:2B:3C:4D:04",
       "username": "Student04",
-      "seatNo": "A4",
-      "gridX": 3,
+      "seatNo": "A3",
+      "gridX": 2,
       "gridY": 1,
       "status": "offline",
       "latencyMs": 0,
@@ -627,18 +614,43 @@
       "status": "offline",
       "latencyMs": 0,
       "lastSeen": 0
+    },
+    {
+      "id": "E0:D5:5E:66:22:B7",
+      "hostname": "DESKTOP-UNKNOWN",
+      "ip": "192.168.190.101",
+      "mac": "E0:D5:5E:66:22:B7",
+      "status": "online",
+      "token": "db63f117069d6ccb3bc681a488d66cb629e37a0f490fe701",
+      "specs": {
+        "agent_version": "5.3.0",
+        "os": "Windows (x64)",
+        "uptime": 428190,
+        "cpu": {
+          "model": "Intel(R) Core(TM) i7-8700K CPU @ 3.70GHz",
+          "cores": 12,
+          "usage_percent": 11.668
+        },
+        "ram": {
+          "total_mb": 16232,
+          "avail_mb": 8255,
+          "usage_percent": 49
+        },
+        "disk": {
+          "drive": "C:",
+          "total_gb": 930,
+          "free_gb": 688,
+          "usage_percent": 26.0215
+        }
+      },
+      "gridX": 3,
+      "gridY": 1,
+      "seatNo": "A4",
+      "thumbnailUrl": "blob:http://localhost:3000/41830028-cb5d-40f8-99a7-b75dd46409c2",
+      "latencyMs": 12,
+      "lastSeen": 1786959314624
     }
   ],
   "aisles": [],
-  "obstacles": [
-    {
-      "id": "obs-podium",
-      "gridX": 2,
-      "gridY": 0,
-      "width": 3,
-      "height": 1,
-      "label": "教師講台 / 黑板",
-      "type": "podium"
-    }
-  ]
+  "obstacles": []
 }

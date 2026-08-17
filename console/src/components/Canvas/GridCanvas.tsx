@@ -13,6 +13,7 @@ interface GridCanvasProps {
   onRefreshAuth: (device: StudentDevice) => void;
   onUnbindSeat: (id: string) => void;
   onOpenSpecs?: (device: StudentDevice) => void;
+  onEditSeat?: (device: StudentDevice) => void;
   onVisibleSeatsChange?: (visibleIds: Set<string>) => void;
   onSwapSeats?: (idA: string, idB: string) => void;
   onMoveSeat?: (id: string, newGridX: number, newGridY: number) => void;
@@ -28,6 +29,7 @@ export const GridCanvas: React.FC<GridCanvasProps> = ({
   onRefreshAuth,
   onUnbindSeat,
   onOpenSpecs,
+  onEditSeat,
   onVisibleSeatsChange,
   onSwapSeats,
   onMoveSeat,
@@ -303,6 +305,7 @@ export const GridCanvas: React.FC<GridCanvasProps> = ({
               onRefreshAuth={onRefreshAuth}
               onUnbind={onUnbindSeat}
               onOpenSpecs={onOpenSpecs}
+              onEditSeat={onEditSeat}
               onDragStart={handleCardDragStart}
               onDragEnd={handleCardDragEnd}
               onDragOver={handleCardDragOver}

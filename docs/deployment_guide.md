@@ -42,15 +42,31 @@ npm run server
 
 ---
 
-## 3. Linux 交叉編譯 Windows `gs-agent.exe`
+## 3. 學生端 `gs-agent.exe` 容器化交叉編譯 (Docker Builder)
 
-在 Ubuntu/Debian 宿主機上安裝 MinGW 工具鏈並編譯：
+為了保證所有開發與部署環境中 MinGW-w64 工具鏈、Windows SDK 標頭檔版本與靜態連結旗標的 100% 一致性，**本專案要求使用 Docker Builder 容器進行編譯**。
+
+### 3.1 標準 Docker 編譯指令
+專案根目錄已提供一鍵編譯腳本：
 ```bash
-# 安裝交叉編譯器
-sudo apt-get update && sudo apt-get install -y mingw-w64 cmake make
-
-# 編譯 gs-agent.exe
-cd beacon
-make
-# 產物 gs-agent.exe 即在當前目錄生成，具備靜態連結與 -mwindows 背景執行特性
+# 執行標準 Docker 交叉編譯
+./scripts/build-docker.sh
 ```
+
+### 3.2 手動 Docker 指令
+```bash
+# 1. 建立 Docker Builder 映像檔
+docker build -t gridsight-builder -f Dockerfile.builder .
+
+# 2. 掛載當前目錄並執行 MinGW-w64 編譯
+docker run --rm \
+    -u "$(id -u):$(id -g)" \
+    -v "$(pwd):/workspace" \
+    gridsight-builder \
+    make -C beacon clean all CXX=x86_64-w64-mingw32-g++
+```
+
+### 3.3 編譯產物特點
+- **產物路徑**：`beacon/gs-agent.exe` (Windows x64 執行檔)
+- **靜態無依賴**：啟用 `-static -static-libgcc -static-libstdc++`，學生端無需安裝任何 VC++ Redistributable 或外部 DLL。
+- **無痕背景執行**：啟用 `-mwindows` 旗標，啟動時完全不彈出命令提示字元 (Console Window)。

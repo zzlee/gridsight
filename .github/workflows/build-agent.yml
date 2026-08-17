@@ -13,15 +13,9 @@ jobs:
       - name: Checkout Code
         uses: actions/checkout@v4
 
-      - name: Install MinGW-w64
+      - name: Build gs-agent.exe via Docker Builder
         run: |
-          sudo apt-get update
-          sudo apt-get install -y mingw-w64 cmake make
-
-      - name: Build gs-agent.exe
-        working-directory: beacon
-        run: |
-          make CXX=x86_64-w64-mingw32-g++
+          ./scripts/build-docker.sh
 
       - name: Upload Artifact
         uses: actions/upload-artifact@v4

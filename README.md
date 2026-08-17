@@ -116,15 +116,18 @@ npm run server
 ```
 開啟瀏覽器訪問 `http://localhost:3000`。
 
-### 2. 學生端輕量代理 (GridSight Beacon) 交叉編譯
-在 Linux (Ubuntu/Debian) 宿主機執行：
-```bash
-# 安裝 MinGW-w64 工具鏈
-sudo apt-get install -y mingw-w64 cmake make
+### 2. 學生端輕量代理 (GridSight Beacon) 交叉編譯 (標準 Docker Builder)
+為確保不同作業系統與開發環境具備一致的 MinGW-w64 工具鏈與靜態相依性，**專案標準採用 Docker Builder 容器化編譯**：
 
-# 編譯 gs-agent.exe
-cd beacon
-make
+```bash
+# 方式 A：一鍵使用 Docker 容器化標準交叉編譯 (推薦)
+./scripts/build-docker.sh
+
+# 方式 B：手動建構 Docker Builder 映像並產出 gs-agent.exe
+docker build -t gridsight-builder -f Dockerfile.builder .
+docker run --rm -u $(id -u):$(id -g) -v $(pwd):/workspace gridsight-builder
+
+# 編譯產物將直接生成於 beacon/gs-agent.exe (Windows x64 靜態無依賴無痕執行檔)
 ```
 
 ### 3. 學生端一鍵熱拉取執行 (Windows Client)

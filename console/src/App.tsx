@@ -27,6 +27,56 @@ export const App: React.FC = () => {
     screenSource: 'primary',
   });
 
+  const [unassignedDevices, setUnassignedDevices] = useState<StudentDevice[]>([]);
+
+  // Fetch discovered devices from backend /api/agents
+  useEffect(() => {
+    const fetchAgents = async () => {
+      try {
+        const resp = await fetch('http://localhost:3001/api/agents');
+        if (resp.ok) {
+          const data = await resp.json();
+          if (data.agents && Array.isArray(data.agents)) {
+            const discovered: StudentDevice[] = data.agents.map((a: any) => ({
+              id: a.mac || `dev-${a.ip.replace(/\./g, '-')}`,
+              hostname: a.hostname,
+              ip: a.ip,
+              mac: a.mac,
+              status: 'online',
+              token: a.token,
+              gridX: 0,
+              gridY: 0,
+            }));
+
+            // Match discovered agents to layout seats
+            setLayout((prev) => {
+              const assignedIps = new Set(prev.seats.map((s) => s.ip));
+              const unassigned = discovered.filter((d) => !assignedIps.has(d.ip));
+              setUnassignedDevices(unassigned);
+
+              // Update token/status for matching seats
+              const updatedSeats = prev.seats.map((seat) => {
+                const match = discovered.find((d) => d.ip === seat.ip || d.hostname === seat.hostname);
+                if (match) {
+                  return { ...seat, token: match.token || seat.token, status: 'online' as const };
+                }
+                return seat;
+              });
+
+              return { ...prev, seats: updatedSeats };
+            });
+          }
+        }
+      } catch (e) {
+        // Backend not running, default layout remains active
+      }
+    };
+
+    fetchAgents();
+    const timer = setInterval(fetchAgents, 5000);
+    return () => clearInterval(timer);
+  }, []);
+
   // 1 FPS Snapshot Polling with AbortController 800ms Circuit Breaker
   useEffect(() => {
     if (mode === 'MONITOR') {
@@ -59,8 +109,28 @@ export const App: React.FC = () => {
     }));
   };
 
-  const handleToggleBroadcast = () => {
-    setBroadcastConfig((prev) => ({ ...prev, active: !prev.active }));
+  const handleToggleBroadcast = async () => {
+    const nextActive = !broadcastConfig.active;
+    setBroadcastConfig((prev) => ({ ...prev, active: nextActive }));
+
+    try {
+      if (nextActive) {
+        await fetch('http://localhost:3001/api/broadcast/start', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            multicastIp: broadcastConfig.multicastIp,
+            port: broadcastConfig.port,
+            fps: broadcastConfig.fps,
+            bitrateKbps: broadcastConfig.bitrateKbps,
+          }),
+        });
+      } else {
+        await fetch('http://localhost:3001/api/broadcast/stop', { method: 'POST' });
+      }
+    } catch (e) {
+      // Backend not reached, local broadcast toggle state remains
+    }
   };
 
   const handleRefreshAuth = (device: StudentDevice) => {
@@ -133,7 +203,7 @@ export const App: React.FC = () => {
       <DevicePool
         isOpen={isDevicePoolOpen}
         onClose={() => setIsDevicePoolOpen(false)}
-        unassignedDevices={[]}
+        unassignedDevices={unassignedDevices}
         onAutoAssign={handleAutoAssign}
       />
     </div>

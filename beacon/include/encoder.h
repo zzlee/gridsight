@@ -5,6 +5,12 @@
 
 namespace GridSight {
 
+enum class JpegEngineType {
+    AUTO = 0,
+    WINDOWS_WIC,
+    TURBO_SIMD_FALLBACK
+};
+
 class ImageEncoder {
 public:
     static bool EncodeToJPEG(const uint8_t* bgra_data, int width, int height, 
@@ -14,6 +20,17 @@ public:
     static bool EncodeToWebP(const uint8_t* bgra_data, int width, int height, 
                              int target_width, int target_height, float quality, 
                              std::vector<uint8_t>& out_webp);
+
+    static const char* GetActiveJpegEngineName();
+
+private:
+    static bool EncodeWithWIC(const uint8_t* bgra_data, int width, int height,
+                              int target_width, int target_height, int quality,
+                              std::vector<uint8_t>& out_jpeg);
+
+    static bool EncodeWithTurbo(const uint8_t* bgra_data, int width, int height,
+                                int target_width, int target_height, int quality,
+                                std::vector<uint8_t>& out_jpeg);
 };
 
 class H264Encoder {

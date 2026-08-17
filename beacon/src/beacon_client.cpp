@@ -3,6 +3,7 @@
 #include "../include/utils.h"
 #include <iostream>
 #include <random>
+#include <cstring>
 
 #ifdef _WIN32
 #include <winsock2.h>
@@ -12,6 +13,10 @@
 #include <netinet/in.h>
 #include <arpa/inet.h>
 #include <unistd.h>
+#define SOCKET int
+#define INVALID_SOCKET -1
+#define SOCKET_ERROR -1
+#define closesocket close
 #endif
 
 namespace GridSight {
@@ -51,10 +56,17 @@ void BeaconClient::DiscoveryLoop() {
                               "\",\"username\":\"" + net_info.username +
                               "\",\"timestamp\":" + std::to_string(Utils::GetCurrentTimestampMs()) + "}";
 
-#ifdef _WIN32
         SOCKET sock = socket(AF_INET, SOCK_DGRAM, 0);
         if (sock != INVALID_SOCKET) {
-            sockaddr_in addr = {0};
+            int ttl = 2;
+#ifdef _WIN32
+            setsockopt(sock, IPPROTO_IP, IP_MULTICAST_TTL, (const char*)&ttl, sizeof(ttl));
+#else
+            setsockopt(sock, IPPROTO_IP, IP_MULTICAST_TTL, &ttl, sizeof(ttl));
+#endif
+
+            sockaddr_in addr;
+            memset(&addr, 0, sizeof(addr));
             addr.sin_family = AF_INET;
             addr.sin_port = htons(port_);
             inet_pton(AF_INET, multicast_ip_.c_str(), &addr.sin_addr);
@@ -66,7 +78,6 @@ void BeaconClient::DiscoveryLoop() {
 
             closesocket(sock);
         }
-#endif
 
         // Update heartbeat immediately after announcement
         Utils::UpdateHeartbeat();
@@ -78,10 +89,8 @@ void BeaconClient::DiscoveryLoop() {
 }
 
 void BeaconClient::ListenForToken(int socket_fd) {
-#ifdef _WIN32
     SOCKET sock = (SOCKET)socket_fd;
 
-    // Set socket to non-blocking or use select with timeout
     fd_set readfds;
     FD_ZERO(&readfds);
     FD_SET(sock, &readfds);
@@ -90,12 +99,12 @@ void BeaconClient::ListenForToken(int socket_fd) {
     tv.tv_sec = 2; // Wait up to 2 seconds for a token grant
     tv.tv_usec = 0;
 
-    int ret = select(0, &readfds, NULL, NULL, &tv);
+    int ret = select((int)sock + 1, &readfds, NULL, NULL, &tv);
     if (ret > 0) {
         if (FD_ISSET(sock, &readfds)) {
             char buffer[1024] = {0};
             sockaddr_in from_addr;
-            int from_len = sizeof(from_addr);
+            socklen_t from_len = sizeof(from_addr);
 
             int bytes = recvfrom(sock, buffer, sizeof(buffer) - 1, 0, (sockaddr*)&from_addr, &from_len);
             if (bytes > 0) {
@@ -114,7 +123,6 @@ void BeaconClient::ListenForToken(int socket_fd) {
             }
         }
     }
-#endif
 }
 
 } // namespace GridSight

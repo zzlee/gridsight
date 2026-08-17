@@ -1,10 +1,17 @@
 CXX ?= x86_64-w64-mingw32-g++
-CXXFLAGS = -std=c++17 -O3 -Wall -Iinclude -mwindows
-LDFLAGS = -static -static-libgcc -static-libstdc++ -lws2_32 -liphlpapi -ld3d11 -ldxgi -lgdi32 -luser32 -lmfplat -lmfuuid -lwmcodecdspuuid -lole32
+
+ifeq ($(findstring mingw,$(CXX)),mingw)
+    CXXFLAGS = -std=c++17 -O3 -Wall -Iinclude -mwindows
+    LDFLAGS = -static -static-libgcc -static-libstdc++ -lws2_32 -liphlpapi -ld3d11 -ldxgi -lgdi32 -luser32 -lmfplat -lmfuuid -lwmcodecdspuuid -lole32 -lwindowscodecs
+    TARGET = gs-agent.exe
+else
+    CXXFLAGS = -std=c++17 -O3 -Wall -Iinclude -pthread
+    LDFLAGS = -pthread
+    TARGET = gs-agent
+endif
 
 SRC = $(wildcard src/*.cpp)
 OBJ = $(SRC:.cpp=.o)
-TARGET = gs-agent.exe
 
 all: $(TARGET)
 
@@ -15,6 +22,6 @@ $(TARGET): $(OBJ)
 	$(CXX) $(CXXFLAGS) -c $< -o $@
 
 clean:
-	rm -f src/*.o $(TARGET)
+	rm -f src/*.o $(TARGET) gs-agent.exe gs-agent
 
 .PHONY: all clean

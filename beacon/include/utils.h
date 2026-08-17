@@ -24,6 +24,8 @@ public:
     static std::string GetEnv(const std::string& key, const std::string& default_value = "");
     static int GetEnvInt(const std::string& key, int default_value = 0);
 
+    static std::string Base64Encode(const uint8_t* data, size_t len);
+    static std::string ComputeWebSocketAcceptKey(const std::string& client_key);
     static void UpdateHeartbeat();
     static uint64_t GetLastHeartbeat();
 };

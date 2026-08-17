@@ -5,6 +5,7 @@
 #include <iostream>
 #include <sstream>
 #include <vector>
+#include <cstring>
 
 #ifdef _WIN32
 #include <winsock2.h>
@@ -12,7 +13,11 @@
 #else
 #include <sys/socket.h>
 #include <netinet/in.h>
+#include <arpa/inet.h>
 #include <unistd.h>
+#define SOCKET int
+#define INVALID_SOCKET -1
+#define SOCKET_ERROR -1
 #define closesocket close
 #endif
 
@@ -27,21 +32,40 @@ HttpServer::~HttpServer() {
 
 bool HttpServer::Start() {
     if (running_.exchange(true)) return true;
+    snapshot_thread_ = std::thread(&HttpServer::SnapshotWorkerLoop, this);
     server_thread_ = std::thread(&HttpServer::ListenLoop, this);
-    Utils::Log("INFO", "HttpServer listening on port " + std::to_string(port_));
+    Utils::Log("INFO", "HttpServer listening on port " + std::to_string(port_) + " (Asynchronous 1 FPS Snapshot Cache Enabled)");
     return true;
 }
 
 void HttpServer::Stop() {
     if (!running_.exchange(false)) return;
-#ifdef _WIN32
-    if (listen_fd_) {
+    if (listen_fd_ != 0 && (SOCKET)listen_fd_ != INVALID_SOCKET) {
         closesocket((SOCKET)listen_fd_);
         listen_fd_ = 0;
     }
-#endif
+    if (snapshot_thread_.joinable()) {
+        snapshot_thread_.join();
+    }
     if (server_thread_.joinable()) {
         server_thread_.join();
+    }
+}
+
+void HttpServer::SnapshotWorkerLoop() {
+    // Background snapshot engine: captures and compresses screen at 1 FPS
+    // Decouples DXGI capture and JPEG encoding from incoming HTTP socket requests
+    while (running_) {
+        FrameData frame;
+        if (capturer_->CaptureFrame(frame)) {
+            std::vector<uint8_t> jpeg_data;
+            if (ImageEncoder::EncodeToJPEG(frame.bgra_buffer.data(), frame.width, frame.height, 480, 270, 70, jpeg_data)) {
+                std::lock_guard<std::mutex> lock(snapshot_mutex_);
+                cached_jpeg_data_ = std::move(jpeg_data);
+                cached_jpeg_timestamp_ = Utils::GetCurrentTimestampMs();
+            }
+        }
+        Utils::SleepMs(1000); // 1 FPS polling cadence
     }
 }
 
@@ -49,13 +73,18 @@ void HttpServer::ListenLoop() {
 #ifdef _WIN32
     WSADATA wsa;
     WSAStartup(MAKEWORD(2, 2), &wsa);
+#endif
 
     SOCKET server_sock = socket(AF_INET, SOCK_STREAM, 0);
     if (server_sock == INVALID_SOCKET) return;
     listen_fd_ = (uintptr_t)server_sock;
 
     int opt = 1;
+#ifdef _WIN32
     setsockopt(server_sock, SOL_SOCKET, SO_REUSEADDR, (const char*)&opt, sizeof(opt));
+#else
+    setsockopt(server_sock, SOL_SOCKET, SO_REUSEADDR, &opt, sizeof(opt));
+#endif
 
     sockaddr_in server_addr = {0};
     server_addr.sin_family = AF_INET;
@@ -63,44 +92,49 @@ void HttpServer::ListenLoop() {
     server_addr.sin_port = htons(port_);
 
     if (bind(server_sock, (sockaddr*)&server_addr, sizeof(server_addr)) == SOCKET_ERROR) {
+        Utils::Log("ERROR", "HttpServer bind failed on port " + std::to_string(port_));
         closesocket(server_sock);
         return;
     }
 
-    listen(server_sock, 10);
+    if (listen(server_sock, 16) == SOCKET_ERROR) {
+        closesocket(server_sock);
+        return;
+    }
 
     while (running_) {
         sockaddr_in client_addr;
-        int client_len = sizeof(client_addr);
+        socklen_t client_len = sizeof(client_addr);
         SOCKET client_sock = accept(server_sock, (sockaddr*)&client_addr, &client_len);
-        if (client_sock == INVALID_SOCKET) break;
+        if (client_sock == INVALID_SOCKET) {
+            if (!running_) break;
+            Utils::SleepMs(50);
+            continue;
+        }
 
         std::thread([this, client_sock]() {
             HandleClient((uintptr_t)client_sock);
         }).detach();
     }
-#endif
 }
 
 void HttpServer::HandleClient(uintptr_t client_socket) {
-#ifdef _WIN32
     SOCKET s = (SOCKET)client_socket;
 
-    // Set send and receive timeouts to 5000ms
-    DWORD timeout = 5000;
+    // Set send and receive timeouts to 3000ms
+#ifdef _WIN32
+    DWORD timeout = 3000;
     setsockopt(s, SOL_SOCKET, SO_RCVTIMEO, (const char*)&timeout, sizeof(timeout));
     setsockopt(s, SOL_SOCKET, SO_SNDTIMEO, (const char*)&timeout, sizeof(timeout));
 #else
-    int s = (int)client_socket;
     struct timeval timeout;
-    timeout.tv_sec = 5;
+    timeout.tv_sec = 3;
     timeout.tv_usec = 0;
     setsockopt(s, SOL_SOCKET, SO_RCVTIMEO, &timeout, sizeof(timeout));
     setsockopt(s, SOL_SOCKET, SO_SNDTIMEO, &timeout, sizeof(timeout));
 #endif
 
-#ifdef _WIN32
-    char buffer[4096] = {0};
+    char buffer[2048] = {0};
     int bytes = recv(s, buffer, sizeof(buffer) - 1, 0);
     if (bytes <= 0) {
         closesocket(s);
@@ -138,14 +172,26 @@ void HttpServer::HandleClient(uintptr_t client_socket) {
     }
 
     if (path.find("/snapshot") == 0) {
-        FrameData frame;
-        if (capturer_->CaptureFrame(frame)) {
-            std::vector<uint8_t> jpeg_data;
-            ImageEncoder::EncodeToJPEG(frame.bgra_buffer.data(), frame.width, frame.height, 480, 270, 75, jpeg_data);
-            SendResponse(client_socket, 200, "image/jpeg", jpeg_data);
+        std::vector<uint8_t> jpeg_to_send;
+        {
+            std::lock_guard<std::mutex> lock(snapshot_mutex_);
+            jpeg_to_send = cached_jpeg_data_;
+        }
+
+        if (!jpeg_to_send.empty()) {
+            // Immediate return from background snapshot cache (< 0.2ms latency!)
+            SendResponse(client_socket, 200, "image/jpeg", jpeg_to_send);
         } else {
-            std::string err = "{\"error\":\"Capture failed\"}";
-            SendResponse(client_socket, 500, "application/json", std::vector<uint8_t>(err.begin(), err.end()));
+            // Cold start fallback
+            FrameData frame;
+            if (capturer_->CaptureFrame(frame)) {
+                std::vector<uint8_t> jpeg_data;
+                ImageEncoder::EncodeToJPEG(frame.bgra_buffer.data(), frame.width, frame.height, 480, 270, 70, jpeg_data);
+                SendResponse(client_socket, 200, "image/jpeg", jpeg_data);
+            } else {
+                std::string err = "{\"error\":\"Capture failed\"}";
+                SendResponse(client_socket, 500, "application/json", std::vector<uint8_t>(err.begin(), err.end()));
+            }
         }
     } else if (path == "/ping" || path == "/status") {
         std::string json = "{\"status\":\"ok\",\"service\":\"GridSight Beacon\"}";
@@ -156,18 +202,17 @@ void HttpServer::HandleClient(uintptr_t client_socket) {
     }
 
     closesocket(s);
-#endif
 }
 
 void HttpServer::SendResponse(uintptr_t client_socket, int status_code, 
                              const std::string& content_type, const std::vector<uint8_t>& body) {
-#ifdef _WIN32
     SOCKET s = (SOCKET)client_socket;
     std::string status_msg = (status_code == 200) ? "200 OK" : (status_code == 401 ? "401 Unauthorized" : "404 Not Found");
     std::ostringstream oss;
     oss << "HTTP/1.1 " << status_msg << "\r\n"
         << "Access-Control-Allow-Origin: *\r\n"
         << "Access-Control-Allow-Headers: X-Auth-Token, Content-Type\r\n"
+        << "Cache-Control: no-cache, no-store, must-revalidate\r\n"
         << "Content-Type: " << content_type << "\r\n"
         << "Content-Length: " << body.size() << "\r\n"
         << "Connection: close\r\n\r\n";
@@ -177,7 +222,6 @@ void HttpServer::SendResponse(uintptr_t client_socket, int status_code,
     if (!body.empty()) {
         send(s, (const char*)body.data(), (int)body.size(), 0);
     }
-#endif
 }
 
 } // namespace GridSight

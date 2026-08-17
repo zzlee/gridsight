@@ -196,6 +196,99 @@ int Utils::GetEnvInt(const std::string& key, int default_value) {
     }
 }
 
+// Standard Base64 Encoding
+std::string Utils::Base64Encode(const uint8_t* data, size_t len) {
+    static const char b64_table[] = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+    std::string result;
+    result.reserve(((len + 2) / 3) * 4);
+
+    for (size_t i = 0; i < len; i += 3) {
+        uint32_t octet_a = i < len ? data[i] : 0;
+        uint32_t octet_b = (i + 1) < len ? data[i + 1] : 0;
+        uint32_t octet_c = (i + 2) < len ? data[i + 2] : 0;
+        uint32_t triple = (octet_a << 16) | (octet_b << 8) | octet_c;
+
+        result.push_back(b64_table[(triple >> 18) & 0x3F]);
+        result.push_back(b64_table[(triple >> 12) & 0x3F]);
+        result.push_back((i + 1) < len ? b64_table[(triple >> 6) & 0x3F] : '=');
+        result.push_back((i + 2) < len ? b64_table[triple & 0x3F] : '=');
+    }
+    return result;
+}
+
+// Standalone SHA-1 Implementation (RFC 3174)
+static void SHA1_Transform(uint32_t state[5], const uint8_t buffer[64]) {
+    uint32_t a = state[0], b = state[1], c = state[2], d = state[3], e = state[4];
+    uint32_t w[80];
+
+    for (int i = 0; i < 16; i++) {
+        w[i] = (buffer[i * 4] << 24) | (buffer[i * 4 + 1] << 16) | (buffer[i * 4 + 2] << 8) | (buffer[i * 4 + 3]);
+    }
+    for (int i = 16; i < 80; i++) {
+        uint32_t t = w[i - 3] ^ w[i - 8] ^ w[i - 14] ^ w[i - 16];
+        w[i] = (t << 1) | (t >> 31);
+    }
+
+    for (int i = 0; i < 80; i++) {
+        uint32_t f, k;
+        if (i < 20) {
+            f = (b & c) | ((~b) & d);
+            k = 0x5A827999;
+        } else if (i < 40) {
+            f = b ^ c ^ d;
+            k = 0x6ED9EBA1;
+        } else if (i < 60) {
+            f = (b & c) | (b & d) | (c & d);
+            k = 0x8F1BBCDC;
+        } else {
+            f = b ^ c ^ d;
+            k = 0xCA62C1D6;
+        }
+        uint32_t temp = ((a << 5) | (a >> 27)) + f + e + k + w[i];
+        e = d;
+        d = c;
+        c = (b << 30) | (b >> 2);
+        b = a;
+        a = temp;
+    }
+
+    state[0] += a;
+    state[1] += b;
+    state[2] += c;
+    state[3] += d;
+    state[4] += e;
+}
+
+std::string Utils::ComputeWebSocketAcceptKey(const std::string& client_key) {
+    std::string combined = client_key + "258EAFA5-E914-47DA-95CA-C5AB0DC85B11";
+    uint32_t state[5] = { 0x67452301, 0xEFCDAB89, 0x98BADCFE, 0x10325476, 0xC3D2E1F0 };
+
+    std::vector<uint8_t> msg(combined.begin(), combined.end());
+    uint64_t bit_len = (uint64_t)msg.size() * 8;
+
+    msg.push_back(0x80);
+    while ((msg.size() % 64) != 56) {
+        msg.push_back(0x00);
+    }
+    for (int i = 7; i >= 0; i--) {
+        msg.push_back((uint8_t)((bit_len >> (i * 8)) & 0xFF));
+    }
+
+    for (size_t i = 0; i < msg.size(); i += 64) {
+        SHA1_Transform(state, &msg[i]);
+    }
+
+    uint8_t digest[20];
+    for (int i = 0; i < 5; i++) {
+        digest[i * 4 + 0] = (uint8_t)((state[i] >> 24) & 0xFF);
+        digest[i * 4 + 1] = (uint8_t)((state[i] >> 16) & 0xFF);
+        digest[i * 4 + 2] = (uint8_t)((state[i] >> 8) & 0xFF);
+        digest[i * 4 + 3] = (uint8_t)(state[i] & 0xFF);
+    }
+
+    return Base64Encode(digest, 20);
+}
+
 void Utils::UpdateHeartbeat() {
     std::ofstream hb_file("gs-heartbeat.txt", std::ios::trunc);
     if (hb_file.is_open()) {

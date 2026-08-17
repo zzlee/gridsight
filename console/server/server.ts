@@ -25,6 +25,20 @@ app.get('/api/health', (req, res) => {
   res.json({ status: 'ok', time: Date.now() });
 });
 
+app.get('/api/agents', (req, res) => {
+  res.json({
+    agents: discoveryService.getDevices(),
+    count: discoveryService.getDevices().length,
+  });
+});
+
+app.get('/api/devices', (req, res) => {
+  res.json({
+    devices: discoveryService.getDevices(),
+    count: discoveryService.getDevices().length,
+  });
+});
+
 app.post('/api/broadcast/start', (req, res) => {
   broadcastStreamer.startStream(req.body);
   res.json({ status: 'streaming', active: true });

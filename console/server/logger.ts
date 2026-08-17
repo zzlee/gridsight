@@ -32,5 +32,6 @@ function writeLog(level: string, ...args: any[]) {
 
 export const logger = {
   info: (...args: any[]) => writeLog('INFO', ...args),
+  warn: (...args: any[]) => writeLog('WARN', ...args),
   error: (...args: any[]) => writeLog('ERROR', ...args),
 };

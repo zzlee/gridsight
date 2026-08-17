@@ -5,6 +5,7 @@ export class PollingManager {
   private circuitBreaker = new AbortableRequestCircuitBreaker(800); // 800ms circuit breaker timeout
   private intervalId: number | null = null;
   private isPolling = false;
+  private activeThumbUrls = new Map<string, string>(); // deviceId -> blob URL
 
   startPolling(
     getDevices: () => StudentDevice[],
@@ -37,6 +38,13 @@ export class PollingManager {
                 const blob = await resp.blob();
                 const latency = Math.round(performance.now() - start);
                 const thumbUrl = URL.createObjectURL(blob);
+
+                // Revoke previously created blob URL for this device to prevent memory leak
+                const prevUrl = this.activeThumbUrls.get(device.id);
+                if (prevUrl) {
+                  URL.revokeObjectURL(prevUrl);
+                }
+                this.activeThumbUrls.set(device.id, thumbUrl);
 
                 onUpdateDevice({
                   id: device.id,
@@ -72,5 +80,8 @@ export class PollingManager {
       clearInterval(this.intervalId);
       this.intervalId = null;
     }
+    // Clean up all allocated blob URLs on stop
+    this.activeThumbUrls.forEach((url) => URL.revokeObjectURL(url));
+    this.activeThumbUrls.clear();
   }
 }

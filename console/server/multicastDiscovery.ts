@@ -2,14 +2,24 @@ import dgram from 'dgram';
 import { TokenAuthority } from './tokenAuthority.js';
 import { logger } from './logger.js';
 
+export interface DiscoveredAgent {
+  hostname: string;
+  ip: string;
+  mac: string;
+  username?: string;
+  token?: string;
+  lastSeen: number;
+}
+
 export class MulticastDiscoveryService {
   private server: dgram.Socket | null = null;
   private multicastAddress = process.env.DISCOVERY_MULTICAST_IP || '239.255.42.99';
   private port = process.env.DISCOVERY_PORT ? parseInt(process.env.DISCOVERY_PORT, 10) : 9001;
   private tokenAuth: TokenAuthority;
-  private onDeviceDiscovered?: (device: any) => void;
+  private onDeviceDiscovered?: ((device: DiscoveredAgent) => void) | undefined;
+  private activeDevices = new Map<string, DiscoveredAgent>(); // key: mac or ip
 
-  constructor(tokenAuth: TokenAuthority, onDeviceDiscovered?: (device: any) => void) {
+  constructor(tokenAuth: TokenAuthority, onDeviceDiscovered?: ((device: DiscoveredAgent) => void) | undefined) {
     this.tokenAuth = tokenAuth;
     this.onDeviceDiscovered = onDeviceDiscovered;
   }
@@ -18,16 +28,21 @@ export class MulticastDiscoveryService {
     this.server = dgram.createSocket({ type: 'udp4', reuseAddr: true });
 
     this.server.on('listening', () => {
-      this.server?.addMembership(this.multicastAddress);
-      logger.info(`[Discovery] Multicast listener joined ${this.multicastAddress}:${this.port}`);
+      try {
+        this.server?.addMembership(this.multicastAddress);
+        logger.info(`[Discovery] Multicast listener joined ${this.multicastAddress}:${this.port}`);
+      } catch (err: any) {
+        logger.warn(`[Discovery] Note: Multicast membership add failed (${err.message}). Listening on UDP port.`);
+      }
     });
 
     this.server.on('message', (msg, rinfo) => {
       try {
         const payload = JSON.parse(msg.toString('utf-8'));
         if (payload.type === 'BEACON') {
+          const mac = payload.mac || rinfo.address;
           // Generate Session Token
-          const token = this.tokenAuth.generateToken(payload.mac, rinfo.address);
+          const token = this.tokenAuth.generateToken(mac, rinfo.address);
 
           // Reply with Token Uni-cast
           const reply = JSON.stringify({
@@ -39,15 +54,19 @@ export class MulticastDiscoveryService {
 
           this.server?.send(reply, rinfo.port, rinfo.address);
 
+          const agent: DiscoveredAgent = {
+            hostname: payload.hostname || `Host-${rinfo.address.replace(/\./g, '-')}`,
+            ip: rinfo.address,
+            mac,
+            username: payload.username || 'Student',
+            token,
+            lastSeen: Date.now(),
+          };
+
+          this.activeDevices.set(mac, agent);
+
           if (this.onDeviceDiscovered) {
-            this.onDeviceDiscovered({
-              hostname: payload.hostname,
-              ip: rinfo.address,
-              mac: payload.mac,
-              username: payload.username,
-              token,
-              lastSeen: Date.now(),
-            });
+            this.onDeviceDiscovered(agent);
           }
         }
       } catch (err) {
@@ -56,6 +75,20 @@ export class MulticastDiscoveryService {
     });
 
     this.server.bind(this.port);
+  }
+
+  getDevices(): DiscoveredAgent[] {
+    const now = Date.now();
+    const result: DiscoveredAgent[] = [];
+    for (const [key, dev] of this.activeDevices.entries()) {
+      if (now - dev.lastSeen < 30000) {
+        // Active within 30s
+        result.push(dev);
+      } else {
+        this.activeDevices.delete(key);
+      }
+    }
+    return result;
   }
 
   stop() {

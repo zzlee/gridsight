@@ -11,7 +11,7 @@ interface FocusModalProps {
 export const FocusModal: React.FC<FocusModalProps> = ({ device, onClose }) => {
   const modalContainerRef = useRef<HTMLDivElement>(null);
   const playerRef = useRef<WebCodecsPlayerHandle>(null);
-  const [showSpecsHud, setShowSpecsHud] = useState(true);
+  const [showSpecsHud, setShowSpecsHud] = useState(false); // Default OFF
   const [showDebugHud, setShowDebugHud] = useState(false); // Default OFF
   const [isFullscreen, setIsFullscreen] = useState(false);
   const [toastMessage, setToastMessage] = useState<string | null>(null);

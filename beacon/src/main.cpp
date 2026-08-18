@@ -188,7 +188,7 @@ int main(int argc, char* argv[]) {
     GridSight::Utils::LoadEnv(".env");
 
     std::string multicast_ip = GridSight::Utils::GetEnv("MULTICAST_IP", "239.255.42.99");
-    int multicast_port = GridSight::Utils::GetEnvInt("MULTICAST_PORT", 9001);
+    int multicast_port = GridSight::Utils::GetEnvInt("MULTICAST_PORT", 8888);
     int http_port = GridSight::Utils::GetEnvInt("HTTP_PORT", 8080);
     int ws_port = GridSight::Utils::GetEnvInt("WS_PORT", 8081);
     std::string rtp_ip = GridSight::Utils::GetEnv("RTP_IP", "239.255.42.100");

@@ -115,8 +115,8 @@ export class MulticastDiscoveryService {
     const now = Date.now();
     const result: DiscoveredAgent[] = [];
     for (const [key, dev] of this.activeDevices.entries()) {
-      if (now - dev.lastSeen < 30000) {
-        // Active within 30s
+      if (now - dev.lastSeen < 6000) {
+        // Active within 6s (agent sends beacon every 1~2s)
         result.push(dev);
       } else {
         this.activeDevices.delete(key);

@@ -123,26 +123,34 @@ export const App: React.FC = () => {
             // Match discovered agents to layout seats via strict MAC-First Primary Key Binding
             setLayout((prev) => {
               const assignedMacs = new Set<string>();
-              const updatedSeats = [...prev.seats];
               const normMac = (m?: string) => (m ? m.replace(/[:-]/g, '').toUpperCase() : '');
+              const discoveredMacMap = new Map<string, StudentDevice>();
 
               discovered.forEach((dev) => {
                 const devKey = normMac(dev.mac);
-                if (!devKey) return;
+                if (devKey) discoveredMacMap.set(devKey, dev);
+              });
 
-                // Match strictly by physical MAC address
-                const idx = updatedSeats.findIndex((s) => normMac(s.mac) === devKey);
-                if (idx !== -1) {
-                  assignedMacs.add(devKey);
-                  // Hot-update current dynamic DHCP IP without altering grid position!
-                  updatedSeats[idx] = {
-                    ...updatedSeats[idx],
+              // Update all current layout seats: mark offline if not in discovered
+              const updatedSeats = prev.seats.map((seat) => {
+                const seatMacKey = normMac(seat.mac);
+                if (seatMacKey && discoveredMacMap.has(seatMacKey)) {
+                  assignedMacs.add(seatMacKey);
+                  const dev = discoveredMacMap.get(seatMacKey)!;
+                  return {
+                    ...seat,
                     ip: dev.ip,
-                    hostname: dev.hostname || updatedSeats[idx].hostname,
-                    token: dev.token || updatedSeats[idx].token,
-                    mac: dev.mac || updatedSeats[idx].mac,
-                    specs: dev.specs || updatedSeats[idx].specs,
-                    status: 'online',
+                    hostname: dev.hostname || seat.hostname,
+                    token: dev.token || seat.token,
+                    mac: dev.mac || seat.mac,
+                    specs: dev.specs || seat.specs,
+                    status: 'online' as const,
+                  };
+                } else {
+                  // Device is no longer broadcasting beacons -> mark offline
+                  return {
+                    ...seat,
+                    status: 'offline' as const,
                   };
                 }
               });

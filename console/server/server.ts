@@ -425,7 +425,9 @@ Invoke-WebRequest -Uri $exeUrl -OutFile $destPath -UseBasicParsing
 # Configure Firewall
 try {
     netsh advfirewall firewall delete rule name="GridSight Agent" 2>$null | Out-Null
-    netsh advfirewall firewall add rule name="GridSight Agent" dir=in action=allow program="$destPath" enable=yes profile=any protocol=TCP 2>$null | Out-Null
+    netsh advfirewall firewall delete rule name="GridSight Agent Out" 2>$null | Out-Null
+    netsh advfirewall firewall add rule name="GridSight Agent" dir=in action=allow program="$destPath" enable=yes profile=any protocol=any 2>$null | Out-Null
+    netsh advfirewall firewall add rule name="GridSight Agent Out" dir=out action=allow program="$destPath" enable=yes profile=any protocol=any 2>$null | Out-Null
 } catch {}
 
 Write-Host "[GridSight] 正在啟動最新版 gs-agent.exe (v5.3.0)..." -ForegroundColor Green

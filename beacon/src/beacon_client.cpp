@@ -80,6 +80,10 @@ void BeaconClient::DiscoveryLoop() {
             int ttl = 2;
 #ifdef _WIN32
             setsockopt(sock, IPPROTO_IP, IP_MULTICAST_TTL, (const char*)&ttl, sizeof(ttl));
+            in_addr local_interface;
+            if (inet_pton(AF_INET, net_info.ip.c_str(), &local_interface) == 1) {
+                setsockopt(sock, IPPROTO_IP, IP_MULTICAST_IF, (const char*)&local_interface, sizeof(local_interface));
+            }
 #else
             setsockopt(sock, IPPROTO_IP, IP_MULTICAST_TTL, &ttl, sizeof(ttl));
 #endif

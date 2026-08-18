@@ -445,6 +445,75 @@ if ($proc) {
   res.send(script);
 });
 
+// Route: One-click Mock 70-Agent Cluster PowerShell script
+app.get('/mock-agent.ps1', (req, res) => {
+  const host = req.headers.host || `${req.hostname}:${PORT}`;
+  const teacherIp = host.split(':')[0];
+  const count = req.query.count || '70';
+  const script = `# ========================================================
+# GridSight Mock 70+ Agents One-Click Launcher
+# ========================================================
+$ErrorActionPreference = "SilentlyContinue"
+$serverHost = "${host}"
+$teacherIp = "${teacherIp}"
+$mockCount = ${count}
+$scriptUrl = "http://$serverHost/mock_agents.py"
+$destPath = "$env:TEMP\\gridsight_mock_agents.py"
+
+Write-Host "=======================================================" -ForegroundColor Cyan
+Write-Host "  GridSight Mock 70+ Agent 叢集一鍵啟動程序" -ForegroundColor Cyan
+Write-Host "=======================================================" -ForegroundColor Cyan
+
+# Check Python installation
+$pyCmd = Get-Command python -ErrorAction SilentlyContinue
+if (-not $pyCmd) {
+    Write-Host "[Error] 找不到 Python 環境！請先至 https://www.python.org 下載安裝 Python。" -ForegroundColor Red
+    return
+}
+
+# Install pillow for realistic screen generation
+Write-Host "[GridSight] 檢查影像處理套件 (Pillow)..." -ForegroundColor Yellow
+pip install pillow --quiet 2>$null | Out-Null
+
+Write-Host "[GridSight] 正在從 $scriptUrl 下載 Mock Agent 程式碼..." -ForegroundColor Cyan
+[Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12 -bor [Net.SecurityProtocolType]::Tls11 -bor [Net.SecurityProtocolType]::Tls
+Invoke-WebRequest -Uri $scriptUrl -OutFile $destPath -UseBasicParsing
+
+Write-Host "[GridSight] 🚀 正在啟動 $mockCount 路模擬學生端 (對象教師端: $teacherIp)..." -ForegroundColor Green
+Write-Host "[GridSight] 提示：按下 Ctrl + C 即可隨時停止模擬叢集。" -ForegroundColor DarkGray
+Write-Host ""
+
+# Run Python mock agents directly in the current terminal window
+python $destPath --count $mockCount --teacher-ip $teacherIp
+`;
+  res.setHeader('Content-Type', 'text/plain; charset=utf-8');
+  res.send(script);
+});
+
+// Route: Serve mock_agents.py file
+const possibleMockScriptPaths = [
+  path.resolve(__dirname, '../../tools/mock_agents.py'),
+  path.resolve(__dirname, '../tools/mock_agents.py'),
+  '/app/tools/mock_agents.py',
+];
+
+const getMockScriptPath = () => {
+  for (const p of possibleMockScriptPaths) {
+    if (fs.existsSync(p)) return p;
+  }
+  return null;
+};
+
+app.get(['/mock_agents.py', '/tools/mock_agents.py'], (req, res) => {
+  const scriptPath = getMockScriptPath();
+  if (scriptPath) {
+    res.setHeader('Content-Type', 'text/plain; charset=utf-8');
+    res.sendFile(scriptPath);
+  } else {
+    res.status(404).send('# Error: mock_agents.py not found on server');
+  }
+});
+
 // Route: Serve gs-agent.exe binary download
 const possibleAgentPaths = [
   path.resolve(__dirname, '../../beacon/gs-agent.exe'),

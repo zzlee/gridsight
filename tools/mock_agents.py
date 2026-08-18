@@ -120,16 +120,15 @@ class MockAgent:
             if path.startswith('/api/snapshot'):
                 # Return pre-cached JPEG snapshot
                 resp_headers = (
-                    b"HTTP/1.1 200 OK\r\n"
-                    b"Content-Type: image/jpeg\r\n"
-                    b"Cache-Control: no-store, no-cache, must-revalidate\r\n"
-                    b"Access-Control-Allow-Origin: *\r\n"
+                    "HTTP/1.1 200 OK\r\n"
+                    "Content-Type: image/jpeg\r\n"
+                    "Cache-Control: no-store, no-cache, must-revalidate\r\n"
+                    "Access-Control-Allow-Origin: *\r\n"
                     f"Content-Length: {len(self.jpeg_cache)}\r\n"
-                    b"Connection: close\r\n"
-                    b"\r\n"
-                )
-                writer.write(resp_headers)
-                writer.write(self.jpeg_cache)
+                    "Connection: close\r\n"
+                    "\r\n"
+                ).encode('utf-8')
+                writer.write(resp_headers + self.jpeg_cache)
                 await writer.drain()
 
             elif path.startswith('/api/specs'):
@@ -144,15 +143,15 @@ class MockAgent:
                     "gpu_model": "NVIDIA GeForce RTX 3060 12GB (Mock)",
                     "os": "Windows 11 Pro 64-bit"
                 }).encode('utf-8')
-                resp = (
-                    b"HTTP/1.1 200 OK\r\n"
-                    b"Content-Type: application/json\r\n"
-                    b"Access-Control-Allow-Origin: *\r\n"
+                resp_headers = (
+                    "HTTP/1.1 200 OK\r\n"
+                    "Content-Type: application/json\r\n"
+                    "Access-Control-Allow-Origin: *\r\n"
                     f"Content-Length: {len(body)}\r\n"
-                    b"Connection: close\r\n"
-                    b"\r\n" + body
-                )
-                writer.write(resp)
+                    "Connection: close\r\n"
+                    "\r\n"
+                ).encode('utf-8')
+                writer.write(resp_headers + body)
                 await writer.drain()
 
             elif path.startswith('/api/auth'):
@@ -161,28 +160,28 @@ class MockAgent:
                     "authenticated": True,
                     "token": f"mock-token-{self.index}-{int(time.time())}"
                 }).encode('utf-8')
-                resp = (
-                    b"HTTP/1.1 200 OK\r\n"
-                    b"Content-Type: application/json\r\n"
-                    b"Access-Control-Allow-Origin: *\r\n"
+                resp_headers = (
+                    "HTTP/1.1 200 OK\r\n"
+                    "Content-Type: application/json\r\n"
+                    "Access-Control-Allow-Origin: *\r\n"
                     f"Content-Length: {len(body)}\r\n"
-                    b"Connection: close\r\n"
-                    b"\r\n" + body
-                )
-                writer.write(resp)
+                    "Connection: close\r\n"
+                    "\r\n"
+                ).encode('utf-8')
+                writer.write(resp_headers + body)
                 await writer.drain()
 
             else:
                 body = b'{"status":"ok","mock":true}'
-                resp = (
-                    b"HTTP/1.1 200 OK\r\n"
-                    b"Content-Type: application/json\r\n"
-                    b"Access-Control-Allow-Origin: *\r\n"
+                resp_headers = (
+                    "HTTP/1.1 200 OK\r\n"
+                    "Content-Type: application/json\r\n"
+                    "Access-Control-Allow-Origin: *\r\n"
                     f"Content-Length: {len(body)}\r\n"
-                    b"Connection: close\r\n"
-                    b"\r\n" + body
-                )
-                writer.write(resp)
+                    "Connection: close\r\n"
+                    "\r\n"
+                ).encode('utf-8')
+                writer.write(resp_headers + body)
                 await writer.drain()
 
         except Exception:

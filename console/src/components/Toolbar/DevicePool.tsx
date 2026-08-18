@@ -7,7 +7,7 @@ interface DevicePoolProps {
   onClose: () => void;
   unassignedDevices: StudentDevice[];
   onAutoAssign: () => void;
-  onReturnToPool?: (seatId: string) => void;
+  onReturnToPool?: (seatIds: string | string[]) => void;
   onAssignToFirstAvailable?: (device: StudentDevice) => void;
 }
 
@@ -49,8 +49,23 @@ export const DevicePool: React.FC<DevicePoolProps> = ({
     e.preventDefault();
     e.stopPropagation();
     setIsDropTargetActive(false);
+
+    if (!onReturnToPool) return;
+
+    // Check if multiple IDs were dragged
+    const multiJson = e.dataTransfer.getData('selectedIds');
+    if (multiJson) {
+      try {
+        const ids = JSON.parse(multiJson);
+        if (Array.isArray(ids) && ids.length > 0) {
+          onReturnToPool(ids);
+          return;
+        }
+      } catch {}
+    }
+
     const sourceId = e.dataTransfer.getData('text/plain');
-    if (sourceId && onReturnToPool) {
+    if (sourceId) {
       onReturnToPool(sourceId);
     }
   };

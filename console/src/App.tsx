@@ -6,6 +6,8 @@ import { FocusModal } from './components/Viewer/FocusModal';
 import { DeviceSpecsModal } from './components/Viewer/DeviceSpecsModal';
 import { MatrixConfigModal } from './components/Toolbar/MatrixConfigModal';
 import { EditSeatModal } from './components/Toolbar/EditSeatModal';
+import { BatchActionToolbar } from './components/Toolbar/BatchActionToolbar';
+import { BatchEditModal } from './components/Toolbar/BatchEditModal';
 import { DevicePool } from './components/Toolbar/DevicePool';
 import { AuthLockModal } from './components/Auth/AuthLockModal';
 import { ChangePinModal } from './components/Auth/ChangePinModal';
@@ -30,6 +32,7 @@ export const App: React.FC = () => {
   const [focusDevice, setFocusDevice] = useState<StudentDevice | null>(null);
   const [specsDevice, setSpecsDevice] = useState<StudentDevice | null>(null);
   const [editingSeat, setEditingSeat] = useState<StudentDevice | null>(null);
+  const [isBatchEditOpen, setIsBatchEditOpen] = useState(false);
   const [isMatrixConfigOpen, setIsMatrixConfigOpen] = useState(false);
   const [isDevicePoolOpen, setIsDevicePoolOpen] = useState(false);
   // Viewport Zoom & Pan Persistence (localStorage)
@@ -217,6 +220,31 @@ export const App: React.FC = () => {
     }));
   };
 
+  const handleBatchSelect = (ids: string[], append: boolean = false) => {
+    const idSet = new Set(ids);
+    setLayout((prev) => ({
+      ...prev,
+      seats: prev.seats.map((s) => {
+        if (idSet.has(s.id)) return { ...s, selected: true };
+        return append ? s : { ...s, selected: false };
+      }),
+    }));
+  };
+
+  const handleSelectAll = () => {
+    setLayout((prev) => ({
+      ...prev,
+      seats: prev.seats.map((s) => ({ ...s, selected: true })),
+    }));
+  };
+
+  const handleClearSelection = () => {
+    setLayout((prev) => ({
+      ...prev,
+      seats: prev.seats.map((s) => ({ ...s, selected: false })),
+    }));
+  };
+
   const handleRefreshAuth = (device: StudentDevice) => {
     // Generate and inject new dynamic RAM token
     const newToken = Math.random().toString(36).substring(2) + Math.random().toString(36).substring(2);
@@ -274,24 +302,125 @@ export const App: React.FC = () => {
     });
   };
 
-  // Drag & Drop: Return a student card from canvas back to Device Pool
-  const handleReturnToPool = (seatId: string) => {
-    setLayout((prev) => {
-      const seat = prev.seats.find((s) => s.id === seatId);
-      if (!seat) return prev;
+  // Drag & Drop: Return single or multiple student cards from canvas back to Device Pool
+  const handleReturnToPool = (seatIds: string | string[]) => {
+    const ids = Array.isArray(seatIds) ? seatIds : [seatIds];
+    if (ids.length === 0) return;
+    const idSet = new Set(ids);
 
-      // Add to unassigned devices if it is a real online machine or discovered device
-      if (seat.status === 'online' || seat.mac || !seat.id.startsWith('PC-Slot-')) {
+    setLayout((prev) => {
+      const seatsToReturn = prev.seats.filter((s) => idSet.has(s.id));
+      if (seatsToReturn.length === 0) return prev;
+
+      // Add eligible devices to unassigned pool
+      const newPoolEntries = seatsToReturn.filter(
+        (seat) => seat.status === 'online' || seat.mac || !seat.id.startsWith('PC-Slot-')
+      );
+
+      if (newPoolEntries.length > 0) {
         setUnassignedDevices((pool) => {
-          if (pool.some((d) => d.id === seat.id || (d.mac && d.mac === seat.mac) || d.ip === seat.ip)) {
-            return pool;
-          }
-          return [...pool, seat];
+          const poolMacs = new Set(pool.map((d) => d.mac?.toUpperCase()).filter(Boolean));
+          const poolIds = new Set(pool.map((d) => d.id));
+          const added = newPoolEntries.filter(
+            (s) => !poolIds.has(s.id) && (!s.mac || !poolMacs.has(s.mac.toUpperCase()))
+          );
+          return [...pool, ...added];
         });
       }
 
       // Remove from active layout seats
-      const updatedSeats = prev.seats.filter((s) => s.id !== seatId);
+      const updatedSeats = prev.seats.filter((s) => !idSet.has(s.id));
+      const newLayout = { ...prev, seats: updatedSeats };
+      LayoutStorage.saveLayout(newLayout);
+      return newLayout;
+    });
+  };
+
+  // Batch action: Auto re-sequence seat numbers sequentially for selected seats
+  const handleAutoRenumberSelected = () => {
+    setLayout((prev) => {
+      const selected = prev.seats.filter((s) => s.selected);
+      if (selected.length === 0) return prev;
+
+      // Sort selected seats row-by-row (top-to-bottom, left-to-right)
+      selected.sort((a, b) => (a.gridY !== b.gridY ? a.gridY - b.gridY : a.gridX - b.gridX));
+
+      const renumberedMap = new Map<string, string>();
+      selected.forEach((seat) => {
+        const rowLabel = String.fromCharCode(65 + (seat.gridY % 26));
+        const newSeatNo = `${rowLabel}${seat.gridX + 1}`;
+        renumberedMap.set(seat.id, newSeatNo);
+      });
+
+      const updatedSeats = prev.seats.map((s) => {
+        if (renumberedMap.has(s.id)) {
+          return { ...s, seatNo: renumberedMap.get(s.id)! };
+        }
+        return s;
+      });
+
+      const newLayout = { ...prev, seats: updatedSeats };
+      LayoutStorage.saveLayout(newLayout);
+      return newLayout;
+    });
+  };
+
+  // Batch action: Apply bulk properties / renaming to selected seats
+  const handleApplyBatchEdit = (options: {
+    prefixMode?: 'ROW_COL' | 'NUMBER' | 'CUSTOM';
+    customPrefix?: string;
+    startNumber?: number;
+    clearUsernames?: boolean;
+    setCommonGroup?: string;
+    unbindDevices?: boolean;
+  }) => {
+    if (options.unbindDevices) {
+      const selectedIds = layout.seats.filter((s) => s.selected).map((s) => s.id);
+      handleReturnToPool(selectedIds);
+      return;
+    }
+
+    setLayout((prev) => {
+      const selected = prev.seats.filter((s) => s.selected);
+      if (selected.length === 0) return prev;
+
+      // Sort row-by-row
+      selected.sort((a, b) => (a.gridY !== b.gridY ? a.gridY - b.gridY : a.gridX - b.gridX));
+
+      const updatedMap = new Map<string, Partial<StudentDevice>>();
+      let counter = options.startNumber || 1;
+
+      selected.forEach((seat) => {
+        let seatNo = seat.seatNo;
+        if (options.prefixMode === 'ROW_COL') {
+          const rowLabel = String.fromCharCode(65 + (seat.gridY % 26));
+          seatNo = `${rowLabel}${seat.gridX + 1}`;
+        } else if (options.prefixMode === 'NUMBER') {
+          seatNo = String(counter).padStart(2, '0');
+          counter++;
+        } else if (options.prefixMode === 'CUSTOM') {
+          seatNo = `${options.customPrefix || 'PC-'}${counter}`;
+          counter++;
+        }
+
+        const changes: Partial<StudentDevice> = { seatNo };
+        if (options.clearUsernames) {
+          changes.username = '';
+        }
+        if (options.setCommonGroup) {
+          changes.username = options.setCommonGroup;
+        }
+
+        updatedMap.set(seat.id, changes);
+      });
+
+      const updatedSeats = prev.seats.map((s) => {
+        if (updatedMap.has(s.id)) {
+          return { ...s, ...updatedMap.get(s.id)! };
+        }
+        return s;
+      });
+
       const newLayout = { ...prev, seats: updatedSeats };
       LayoutStorage.saveLayout(newLayout);
       return newLayout;
@@ -518,6 +647,9 @@ export const App: React.FC = () => {
         setPan={setPan}
         setZoom={setZoom}
         onSelectStudent={handleSelectStudent}
+        onBatchSelect={handleBatchSelect}
+        onClearSelection={handleClearSelection}
+        onSelectAll={handleSelectAll}
         onFocusStudent={setFocusDevice}
         onRefreshAuth={handleRefreshAuth}
         onUnbindSeat={handleUnbindSeat}
@@ -531,7 +663,28 @@ export const App: React.FC = () => {
         onAssignFromPool={handleAssignFromPool}
       />
 
-      {/* Edit Seat Information Modal (SeatNo, Hostname, Username, MAC) */}
+      {/* Multi-Selection Batch Action Floating Toolbar */}
+      {mode === 'EDIT_LAYOUT' && (
+        <BatchActionToolbar
+          selectedSeats={layout.seats.filter((s) => s.selected)}
+          onReturnToPool={handleReturnToPool}
+          onOpenBatchEdit={() => setIsBatchEditOpen(true)}
+          onAutoRenumber={handleAutoRenumberSelected}
+          onClearSelection={handleClearSelection}
+          onSelectAll={handleSelectAll}
+          totalSeatsCount={layout.seats.length}
+        />
+      )}
+
+      {/* Batch Edit Modal */}
+      <BatchEditModal
+        isOpen={isBatchEditOpen}
+        selectedSeats={layout.seats.filter((s) => s.selected)}
+        onClose={() => setIsBatchEditOpen(false)}
+        onApplyBatchEdit={handleApplyBatchEdit}
+      />
+
+      {/* Edit Single Seat Information Modal (SeatNo, Hostname, Username, MAC) */}
       <EditSeatModal
         isOpen={!!editingSeat}
         seat={editingSeat}

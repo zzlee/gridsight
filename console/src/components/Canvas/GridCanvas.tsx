@@ -13,6 +13,9 @@ interface GridCanvasProps {
   setPan: React.Dispatch<React.SetStateAction<{ x: number; y: number }>>;
   setZoom?: React.Dispatch<React.SetStateAction<number>>;
   onSelectStudent: (id: string, multi: boolean) => void;
+  onBatchSelect?: (ids: string[], append?: boolean) => void;
+  onClearSelection?: () => void;
+  onSelectAll?: () => void;
   onFocusStudent: (device: StudentDevice) => void;
   onRefreshAuth: (device: StudentDevice) => void;
   onUnbindSeat: (id: string) => void;
@@ -32,6 +35,9 @@ export const GridCanvas: React.FC<GridCanvasProps> = ({
   setPan,
   setZoom,
   onSelectStudent,
+  onBatchSelect,
+  onClearSelection,
+  onSelectAll,
   onFocusStudent,
   onRefreshAuth,
   onUnbindSeat,
@@ -46,33 +52,110 @@ export const GridCanvas: React.FC<GridCanvasProps> = ({
   const [isPanning, setIsPanning] = useState(false);
   const [startPan, setStartPan] = useState({ x: 0, y: 0 });
 
+  // Marquee / Box Selection state
+  const [isBoxSelecting, setIsBoxSelecting] = useState(false);
+  const [boxStart, setBoxStart] = useState<{ x: number; y: number } | null>(null);
+  const [boxCurrent, setBoxCurrent] = useState<{ x: number; y: number } | null>(null);
+
   // Drag-and-drop state for editing layout
   const [draggedSeatId, setDraggedSeatId] = useState<string | null>(null);
   const [dragOverSeatId, setDragOverSeatId] = useState<string | null>(null);
   const [dragOverCell, setDragOverCell] = useState<{ x: number; y: number } | null>(null);
 
+  // Card dimensions (16:9 ratio card matching 480x270 thumbnail)
+  const cardWidth = 190;
+  const cardHeight = 150;
+  const gap = 14;
+
   const handleMouseDown = (e: React.MouseEvent) => {
-    // Middle-click or Alt+Left-click or background drag triggers canvas panning
-    if (e.button === 1 || (e.button === 0 && (e.altKey || e.target === containerRef.current))) {
+    // Middle-click or Alt+Left-click triggers canvas panning
+    if (e.button === 1 || (e.button === 0 && e.altKey)) {
       setIsPanning(true);
       setStartPan({ x: e.clientX - pan.x, y: e.clientY - pan.y });
+      return;
+    }
+
+    // Left-click on canvas background: initiate marquee box selection or background pan
+    if (e.button === 0 && (e.target === containerRef.current || (e.target as HTMLElement).classList.contains('canvas-background-area'))) {
+      if (mode === 'EDIT_LAYOUT' || e.shiftKey) {
+        setIsBoxSelecting(true);
+        setBoxStart({ x: e.clientX, y: e.clientY });
+        setBoxCurrent({ x: e.clientX, y: e.clientY });
+        if (!e.shiftKey && !e.ctrlKey && !e.metaKey && onClearSelection) {
+          onClearSelection();
+        }
+      } else {
+        setIsPanning(true);
+        setStartPan({ x: e.clientX - pan.x, y: e.clientY - pan.y });
+      }
     }
   };
 
   const handleMouseMove = (e: React.MouseEvent) => {
     if (isPanning) {
       setPan({ x: e.clientX - startPan.x, y: e.clientY - startPan.y });
+    } else if (isBoxSelecting && boxStart && containerRef.current) {
+      setBoxCurrent({ x: e.clientX, y: e.clientY });
+
+      const containerRect = containerRef.current.getBoundingClientRect();
+      const selLeft = Math.min(boxStart.x, e.clientX) - containerRect.left;
+      const selRight = Math.max(boxStart.x, e.clientX) - containerRect.left;
+      const selTop = Math.min(boxStart.y, e.clientY) - containerRect.top;
+      const selBottom = Math.max(boxStart.y, e.clientY) - containerRect.top;
+
+      // Find all seat cards intersecting the screen selection rectangle
+      const intersectingIds: string[] = [];
+      layout.seats.forEach((seat) => {
+        const cardLeft = seat.gridX * (cardWidth + gap) * zoom + (pan.x + 30);
+        const cardTop = seat.gridY * (cardHeight + gap) * zoom + (pan.y + 20);
+        const cardRight = cardLeft + cardWidth * zoom;
+        const cardBottom = cardTop + cardHeight * zoom;
+
+        const intersects = !(
+          cardLeft > selRight ||
+          cardRight < selLeft ||
+          cardTop > selBottom ||
+          cardBottom < selTop
+        );
+
+        if (intersects) {
+          intersectingIds.push(seat.id);
+        }
+      });
+
+      if (onBatchSelect) {
+        onBatchSelect(intersectingIds, e.shiftKey || e.ctrlKey || e.metaKey);
+      }
     }
   };
 
   const handleMouseUp = () => {
     setIsPanning(false);
+    setIsBoxSelecting(false);
+    setBoxStart(null);
+    setBoxCurrent(null);
   };
 
-  // Card dimensions (16:9 ratio card matching 480x270 thumbnail)
-  const cardWidth = 190;
-  const cardHeight = 150;
-  const gap = 14;
+  // Keyboard shortcut listener for Select All (Ctrl+A) and Deselect (Esc)
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'a') {
+        const activeEl = document.activeElement;
+        const isInput = activeEl && (activeEl.tagName === 'INPUT' || activeEl.tagName === 'TEXTAREA');
+        if (!isInput && onSelectAll) {
+          e.preventDefault();
+          onSelectAll();
+        }
+      } else if (e.key === 'Escape') {
+        if (onClearSelection) {
+          onClearSelection();
+        }
+      }
+    };
+
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [onSelectAll, onClearSelection]);
 
   // Viewport calculation: determine which seats are inside the visible canvas viewport
   const calculateVisibleSeats = useCallback(() => {
@@ -140,6 +223,12 @@ export const GridCanvas: React.FC<GridCanvasProps> = ({
     e.dataTransfer.setData('text/plain', id);
     e.dataTransfer.setData('source', 'canvas-seat');
     e.dataTransfer.effectAllowed = 'move';
+
+    // If dragged card is part of multi-selection, attach all selected seat IDs
+    const currentSelected = layout.seats.filter((s) => s.selected).map((s) => s.id);
+    const allDraggedIds = currentSelected.includes(id) ? currentSelected : [id];
+    e.dataTransfer.setData('selectedIds', JSON.stringify(allDraggedIds));
+
     setDraggedSeatId(id);
   };
 
@@ -352,6 +441,19 @@ export const GridCanvas: React.FC<GridCanvasProps> = ({
           </div>
         ))}
       </div>
+
+      {/* Marquee Drag-Box Selection Rectangle Overlay */}
+      {isBoxSelecting && boxStart && boxCurrent && containerRef.current && (
+        <div
+          className="absolute border-2 border-sky-400 bg-sky-500/20 rounded pointer-events-none z-50 shadow-lg shadow-sky-500/10"
+          style={{
+            left: Math.min(boxStart.x, boxCurrent.x) - containerRef.current.getBoundingClientRect().left,
+            top: Math.min(boxStart.y, boxCurrent.y) - containerRef.current.getBoundingClientRect().top,
+            width: Math.abs(boxCurrent.x - boxStart.x),
+            height: Math.abs(boxCurrent.y - boxStart.y),
+          }}
+        />
+      )}
 
       {/* Mini-map Overlay */}
       <MiniMap layout={layout} />

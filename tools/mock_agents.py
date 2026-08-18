@@ -301,7 +301,7 @@ async def snapshot_push_loop(agents: List[MockAgent], teacher_ip: str, teacher_p
 async def main():
     parser = argparse.ArgumentParser(description="GridSight High-Concurrency Mock Agent Cluster")
     parser.add_argument("--count", type=int, default=70, help="Number of simulated agents (default: 70)")
-    parser.add_argument("--base-port", type=int, default=8081, help="Starting HTTP port for agents (default: 8081)")
+    parser.add_argument("--base-port", type=int, default=18081, help="Starting HTTP port for agents (default: 18081)")
     parser.add_argument("--local-ip", type=str, default="", help="Custom local IP to advertise (auto-detect if empty)")
     parser.add_argument("--teacher-ip", type=str, default="", help="Teacher console IP for direct unicast / HTTP push")
     parser.add_argument("--teacher-port", type=int, default=3000, help="Teacher console HTTP port (default: 3000)")
@@ -316,23 +316,35 @@ async def main():
     print(f"🚀 GridSight Mock Agent Cluster Initializing")
     print(f"   • Total Agents: {args.count} instances (MOCK-01 ~ MOCK-{args.count:02d})")
     print(f"   • Local Host IP: {local_ip}")
-    print(f"   • Port Range: {args.base_port} ~ {args.base_port + args.count - 1}")
     print(f"   • Multicast Target: {args.multicast_ip}:{args.multicast_port}")
     if args.teacher_ip:
         print(f"   • Teacher Console: http://{args.teacher_ip}:{args.teacher_port}")
     print(f"   • Pillow Rendering: {'Enabled (Realistic Thumbnails)' if HAS_PIL else 'Disabled (Minimal JPEG)'}")
     print("=" * 68)
 
-    agents = [MockAgent(i + 1, local_ip, args.base_port) for i in range(args.count)]
-
-    # Start Async HTTP Servers for each port
+    # Start Async HTTP Servers with automatic port collision avoidance
     servers = []
-    print(f"[HTTP] Spawning {args.count} async HTTP snapshot listeners...")
-    for agent in agents:
-        srv = await asyncio.start_server(agent.handle_client, '0.0.0.0', agent.port)
-        servers.append(srv)
+    agents = []
+    current_port = args.base_port
 
-    print(f"[HTTP] All {args.count} ports listening successfully!")
+    print(f"[HTTP] Spawning {args.count} async HTTP snapshot listeners starting at port {args.base_port}...")
+    for i in range(args.count):
+        while True:
+            agent = MockAgent(i + 1, local_ip, current_port)
+            try:
+                srv = await asyncio.start_server(agent.handle_client, '0.0.0.0', current_port)
+                servers.append(srv)
+                agents.append(agent)
+                current_port += 1
+                break
+            except OSError:
+                # Port already in use by another process -> seamlessly try next port
+                current_port += 1
+                if current_port > 65000:
+                    print("[Error] Ran out of available network ports.")
+                    return
+
+    print(f"[HTTP] All {args.count} agents listening successfully (Ports: {agents[0].port} ~ {agents[-1].port})!")
 
     # Start Beacon Broadcaster Task
     beacon_task = asyncio.create_task(

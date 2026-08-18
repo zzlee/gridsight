@@ -12,6 +12,7 @@ import {
   Sliders,
   Footprints,
   Landmark,
+  UserPlus,
 } from 'lucide-react';
 
 interface TopNavProps {
@@ -22,6 +23,7 @@ interface TopNavProps {
   onOpenAisleConfig: () => void;
   onOpenObstacleModal: () => void;
   onOpenDevicePool: () => void;
+  onOpenStudentConnect: () => void;
   unassignedCount?: number;
   zoom: number;
   setZoom: React.Dispatch<React.SetStateAction<number>>;
@@ -39,6 +41,7 @@ export const TopNav: React.FC<TopNavProps> = ({
   onOpenAisleConfig,
   onOpenObstacleModal,
   onOpenDevicePool,
+  onOpenStudentConnect,
   unassignedCount = 0,
   zoom,
   setZoom,
@@ -187,6 +190,16 @@ export const TopNav: React.FC<TopNavProps> = ({
               {unassignedCount}
             </span>
           )}
+        </button>
+
+        {/* Quick Student Connect / Join Instruction Modal */}
+        <button
+          onClick={onOpenStudentConnect}
+          className="flex items-center space-x-1.5 px-3 py-1 rounded-lg bg-gradient-to-r from-emerald-600/25 to-sky-600/25 hover:from-emerald-600/40 hover:to-sky-600/40 border border-emerald-500/40 text-xs font-semibold text-emerald-300 hover:text-emerald-200 transition-all shadow-sm active:scale-95"
+          title="學生端一鍵連線指引 (Win + R 快速加入)"
+        >
+          <UserPlus className="w-3.5 h-3.5 text-emerald-400" />
+          <span>學生端連線</span>
         </button>
 
         {/* Zoom Controls */}

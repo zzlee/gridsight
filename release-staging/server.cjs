@@ -27604,6 +27604,28 @@ if ($proc) {
   res.setHeader("Content-Type", "text/plain; charset=utf-8");
   res.send(script);
 });
+app.get("/stop-agent.ps1", (req, res) => {
+  const script = `# ========================================================
+# GridSight Student Agent Stop Script
+# ========================================================
+Write-Host "=======================================================" -ForegroundColor Cyan
+Write-Host "  GridSight \u5B78\u751F\u7AEF\u4EE3\u7406\u7A0B\u5F0F (gs-agent) \u505C\u6B62\u7A0B\u5E8F" -ForegroundColor Cyan
+Write-Host "=======================================================" -ForegroundColor Cyan
+
+$proc = Get-Process -Name "gs-agent" -ErrorAction SilentlyContinue
+if ($proc) {
+    Write-Host "[GridSight] \u6B63\u5728\u7D42\u6B62\u80CC\u666F gs-agent \u884C\u7A0B (PID: $($proc.Id -join ', '))..." -ForegroundColor Yellow
+    taskkill /F /IM gs-agent.exe /T 2>$null | Out-Null
+    Stop-Process -Name "gs-agent" -Force -ErrorAction SilentlyContinue
+    Start-Sleep -Milliseconds 500
+    Write-Host "[GridSight] \u2705 \u5B78\u751F\u7AEF\u4EE3\u7406\u7A0B\u5F0F (gs-agent) \u5DF2\u6210\u529F\u505C\u6B62\uFF01" -ForegroundColor Green
+} else {
+    Write-Host "[GridSight] \u2139\uFE0F \u672A\u6AA2\u6E2C\u5230\u6B63\u5728\u904B\u884C\u7684 gs-agent \u884C\u7A0B\u3002" -ForegroundColor DarkGray
+}
+`;
+  res.setHeader("Content-Type", "text/plain; charset=utf-8");
+  res.send(script);
+});
 app.get("/mock-agent.ps1", (req, res) => {
   const host = req.headers.host || `${req.hostname}:${PORT}`;
   const teacherIp = host.split(":")[0];

@@ -13,6 +13,7 @@ import { BatchEditModal } from './components/Toolbar/BatchEditModal';
 import { DevicePool } from './components/Toolbar/DevicePool';
 import { AuthLockModal } from './components/Auth/AuthLockModal';
 import { ChangePinModal } from './components/Auth/ChangePinModal';
+import { StudentConnectModal } from './components/Toolbar/StudentConnectModal';
 import { PollingManager, TrafficStats } from './services/pollingManager';
 import { LayoutStorage } from './services/layoutStorage';
 import { AuthService } from './services/authService';
@@ -39,6 +40,7 @@ export const App: React.FC = () => {
   const [isAisleConfigOpen, setIsAisleConfigOpen] = useState(false);
   const [isObstacleModalOpen, setIsObstacleModalOpen] = useState(false);
   const [isDevicePoolOpen, setIsDevicePoolOpen] = useState(false);
+  const [isStudentConnectOpen, setIsStudentConnectOpen] = useState(false);
   // Viewport Zoom & Pan Persistence (localStorage)
   const [zoom, setZoom] = useState<number>(() => {
     try {
@@ -673,6 +675,11 @@ export const App: React.FC = () => {
     }
   };
 
+  // If user opens http://<IP>:3000/join, render dedicated student onboarding portal directly
+  if (typeof window !== 'undefined' && (window.location.pathname.startsWith('/join') || window.location.pathname.startsWith('/connect') || window.location.pathname.startsWith('/student'))) {
+    return <StudentConnectModal isOpen={true} isStandalonePage={true} onClose={() => {}} />;
+  }
+
   return (
     <div className="w-screen h-screen flex flex-col bg-slate-950 overflow-hidden">
       <TopNav
@@ -683,6 +690,7 @@ export const App: React.FC = () => {
         onOpenAisleConfig={() => setIsAisleConfigOpen(true)}
         onOpenObstacleModal={() => setIsObstacleModalOpen(true)}
         onOpenDevicePool={() => setIsDevicePoolOpen(true)}
+        onOpenStudentConnect={() => setIsStudentConnectOpen(true)}
         unassignedCount={unassignedDevices.length}
         zoom={zoom}
         setZoom={setZoom}
@@ -799,6 +807,12 @@ export const App: React.FC = () => {
       <ChangePinModal
         isOpen={isChangePinOpen}
         onClose={() => setIsChangePinOpen(false)}
+      />
+
+      {/* Student Fast Connect / Join Modal */}
+      <StudentConnectModal
+        isOpen={isStudentConnectOpen}
+        onClose={() => setIsStudentConnectOpen(false)}
       />
 
       {/* Security Auth Lock Modal (PIN Entry) */}

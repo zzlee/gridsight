@@ -1,0 +1,13 @@
+{
+  "name": "gridsight",
+  "version": "5.3.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "build:windows": "node scripts/build-windows-console.js",
+    "build": "npm --prefix console run build",
+    "dev": "npm --prefix console run dev",
+    "server": "npm --prefix console/server run start",
+    "build:docker": "./scripts/build-docker.sh"
+  }
+}

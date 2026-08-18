@@ -13,7 +13,6 @@ import socket
 import struct
 import sys
 import time
-import urllib.request
 from typing import Dict, List
 
 # Try importing PIL for realistic synthetic thumbnail generation; fallback to raw JPEG if not available
@@ -228,7 +227,7 @@ async def beacon_broadcast_loop(agents: List[MockAgent], multicast_ip: str, mult
 
     print(f"[Beacon] Multicast active -> {multicast_ip}:{multicast_port} ({len(agents)} agents, interval: {interval}s)")
     if teacher_ip:
-        print(f"[Beacon] Unicast direct backup -> {teacher_ip}:{multicast_port} & HTTP Snapshot Push -> http://{teacher_ip}:3000/api/agent/snapshot")
+        print(f"[Beacon] Direct unicast backup -> {teacher_ip}:{multicast_port}")
 
     while True:
         try:
@@ -258,34 +257,41 @@ async def beacon_broadcast_loop(agents: List[MockAgent], multicast_ip: str, mult
         await asyncio.sleep(interval)
 
 
-async def snapshot_push_loop(agents: List[MockAgent], teacher_ip: str, interval: float = 1.0):
-    """Optionally pushes snapshots to teacher console via HTTP POST (100% firewall & multicast proof)."""
+async def push_single_snapshot(teacher_ip: str, teacher_port: int, agent: MockAgent):
+    """Sends a single HTTP POST snapshot asynchronously via raw TCP socket."""
+    try:
+        reader, writer = await asyncio.open_connection(teacher_ip, teacher_port)
+        req_headers = (
+            f"POST /api/agent/snapshot HTTP/1.1\r\n"
+            f"Host: {teacher_ip}:{teacher_port}\r\n"
+            f"Content-Type: image/jpeg\r\n"
+            f"x-agent-mac: {agent.mac}\r\n"
+            f"x-agent-ip: {agent.ip}\r\n"
+            f"x-agent-hostname: {agent.hostname}\r\n"
+            f"Content-Length: {len(agent.jpeg_cache)}\r\n"
+            f"Connection: close\r\n"
+            f"\r\n"
+        ).encode('utf-8')
+        writer.write(req_headers + agent.jpeg_cache)
+        await writer.drain()
+        writer.close()
+        await writer.wait_closed()
+    except Exception:
+        pass
+
+
+async def snapshot_push_loop(agents: List[MockAgent], teacher_ip: str, teacher_port: int = 3000, interval: float = 1.0):
+    """Asynchronously pushes snapshots for all 70 agents concurrently to the teacher console."""
     if not teacher_ip:
         return
 
-    url = f"http://{teacher_ip}:3000/api/agent/snapshot"
-    print(f"[Snapshot Push] Background HTTP push loop active -> {url}")
+    print(f"[Snapshot Push] Async non-blocking push loop active -> http://{teacher_ip}:{teacher_port}/api/agent/snapshot")
 
     while True:
         try:
-            for agent in agents:
-                req = urllib.request.Request(
-                    url,
-                    data=agent.jpeg_cache,
-                    headers={
-                        "Content-Type": "image/jpeg",
-                        "x-agent-mac": agent.mac,
-                        "x-agent-ip": agent.ip,
-                        "x-agent-hostname": agent.hostname,
-                    },
-                    method="POST"
-                )
-                try:
-                    with urllib.request.urlopen(req, timeout=1.5) as resp:
-                        pass
-                except Exception:
-                    pass
-                await asyncio.sleep(0.01)
+            # Concurrently push snapshots in parallel batches
+            tasks = [push_single_snapshot(teacher_ip, teacher_port, agent) for agent in agents]
+            await asyncio.gather(*tasks, return_exceptions=True)
         except Exception:
             pass
 
@@ -298,6 +304,7 @@ async def main():
     parser.add_argument("--base-port", type=int, default=8081, help="Starting HTTP port for agents (default: 8081)")
     parser.add_argument("--local-ip", type=str, default="", help="Custom local IP to advertise (auto-detect if empty)")
     parser.add_argument("--teacher-ip", type=str, default="", help="Teacher console IP for direct unicast / HTTP push")
+    parser.add_argument("--teacher-port", type=int, default=3000, help="Teacher console HTTP port (default: 3000)")
     parser.add_argument("--multicast-ip", type=str, default="239.255.42.99", help="Multicast IP group (default: 239.255.42.99)")
     parser.add_argument("--multicast-port", type=int, default=8888, help="Multicast UDP port (default: 8888)")
     parser.add_argument("--interval", type=float, default=1.0, help="Beacon broadcast interval in seconds (default: 1.0)")
@@ -312,7 +319,7 @@ async def main():
     print(f"   • Port Range: {args.base_port} ~ {args.base_port + args.count - 1}")
     print(f"   • Multicast Target: {args.multicast_ip}:{args.multicast_port}")
     if args.teacher_ip:
-        print(f"   • Teacher Console IP: {args.teacher_ip}")
+        print(f"   • Teacher Console: http://{args.teacher_ip}:{args.teacher_port}")
     print(f"   • Pillow Rendering: {'Enabled (Realistic Thumbnails)' if HAS_PIL else 'Disabled (Minimal JPEG)'}")
     print("=" * 68)
 
@@ -332,15 +339,15 @@ async def main():
         beacon_broadcast_loop(agents, args.multicast_ip, args.multicast_port, args.teacher_ip, local_ip, args.interval)
     )
 
-    # If teacher IP specified, start HTTP snapshot push task
+    # If teacher IP specified, start async parallel snapshot push loop
     push_task = None
     if args.teacher_ip:
-        push_task = asyncio.create_task(snapshot_push_loop(agents, args.teacher_ip, args.interval))
+        push_task = asyncio.create_task(snapshot_push_loop(agents, args.teacher_ip, args.teacher_port, args.interval))
 
     print(f"\n[Ready] Press Ctrl+C at any time to terminate the mock cluster.\n")
 
     try:
-        await beacon_task
+        await asyncio.gather(beacon_task, push_task if push_task else beacon_task)
     except asyncio.CancelledError:
         pass
     finally:

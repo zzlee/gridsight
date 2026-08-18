@@ -355,11 +355,39 @@ app.post(
   }
 );
 
-// Route: Serve cached JPEG snapshots to Teacher Browser UI
-app.get(['/api/snapshot/:id', '/api/snapshot'], (req, res) => {
+// Route: Serve cached JPEG snapshots to Teacher Browser UI (with on-demand proxy fallback)
+app.get(['/api/snapshot/:id', '/api/snapshot'], async (req, res) => {
   const rawId = req.params.id || (req.query.id as string) || (req.query.mac as string) || (req.query.ip as string) || '';
   const normalizedId = normalizeTarget(rawId);
-  const entry = snapshotCache.get(normalizedId) || snapshotCache.get(rawId);
+  let entry = snapshotCache.get(normalizedId) || snapshotCache.get(rawId);
+
+  // If not in cache or older than 3 seconds, perform fast on-demand proxy fetch from agent port
+  if (!entry || Date.now() - entry.timestamp >= 3000) {
+    const dev = discoveryService.getDevices().find(
+      (d) => normalizeTarget(d.mac) === normalizedId || d.ip === rawId || d.hostname === rawId
+    );
+    if (dev && dev.ip) {
+      const port = dev.port || 8080;
+      try {
+        const agentUrl = `http://${dev.ip}:${port}/api/snapshot`;
+        const controller = new AbortController();
+        const timeout = setTimeout(() => controller.abort(), 1200);
+        const resp = await fetch(agentUrl, { signal: controller.signal });
+        clearTimeout(timeout);
+        if (resp.ok) {
+          const ab = await resp.arrayBuffer();
+          const buffer = Buffer.from(ab);
+          entry = { buffer, timestamp: Date.now() };
+          snapshotCache.set(normalizedId, entry);
+          if (dev.mac) snapshotCache.set(normalizeTarget(dev.mac), entry);
+          if (dev.ip) snapshotCache.set(dev.ip, entry);
+        }
+      } catch {
+        // Fall through to existing cache if available
+      }
+    }
+  }
+
   if (entry && Date.now() - entry.timestamp < 15000) {
     res.setHeader('Content-Type', 'image/jpeg');
     res.setHeader('Cache-Control', 'no-cache, no-store, must-revalidate');

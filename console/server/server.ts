@@ -11,14 +11,13 @@ import { MulticastDiscoveryService } from './multicastDiscovery.js';
 import { TeacherBroadcastStreamer } from './broadcastStreamer.js';
 import { logger } from './logger.js';
 
-const __filename = fileURLToPath(import.meta.url);
-const __dirname = path.dirname(__filename);
+const currentDirname = typeof __dirname !== 'undefined' ? __dirname : path.dirname(fileURLToPath(import.meta.url || 'file:///'));
 
 const app = express();
 const server = createServer(app);
 const wss = new WebSocketServer({ server });
 
-const PORT = process.env.API_PORT ? parseInt(process.env.API_PORT, 10) : 3001;
+const PORT = process.env.API_PORT || process.env.PORT ? parseInt(process.env.API_PORT || process.env.PORT || '3000', 10) : 3000;
 const HOST = process.env.API_HOST || '0.0.0.0';
 
 app.use(cors());
@@ -217,7 +216,11 @@ app.get('/api/stream/debug', requireTeacherAuth, (req, res) => {
   });
 });
 
-const SEATS_FILE = process.env.SEATS_FILE || '/data/seats.json';
+const isStandalone = (process as any).pkg !== undefined || process.platform === 'win32';
+const defaultSeatsFile = isStandalone
+  ? path.resolve(process.cwd(), 'data', 'seats.json')
+  : '/data/seats.json';
+const SEATS_FILE = process.env.SEATS_FILE || defaultSeatsFile;
 
 const ensureSeatsDirectory = () => {
   const dir = path.dirname(SEATS_FILE);
@@ -492,8 +495,10 @@ python $destPath --count $mockCount --teacher-ip $teacherIp
 
 // Route: Serve mock_agents.py file
 const possibleMockScriptPaths = [
-  path.resolve(__dirname, '../../tools/mock_agents.py'),
-  path.resolve(__dirname, '../tools/mock_agents.py'),
+  path.resolve(currentDirname, '../../tools/mock_agents.py'),
+  path.resolve(currentDirname, '../tools/mock_agents.py'),
+  path.resolve(currentDirname, 'tools/mock_agents.py'),
+  path.resolve(process.cwd(), 'tools/mock_agents.py'),
   '/app/tools/mock_agents.py',
 ];
 
@@ -516,8 +521,12 @@ app.get(['/mock_agents.py', '/tools/mock_agents.py'], (req, res) => {
 
 // Route: Serve gs-agent.exe binary download
 const possibleAgentPaths = [
-  path.resolve(__dirname, '../../beacon/gs-agent.exe'),
-  path.resolve(__dirname, '../downloads/gs-agent.exe'),
+  path.resolve(currentDirname, '../../beacon/gs-agent.exe'),
+  path.resolve(currentDirname, '../downloads/gs-agent.exe'),
+  path.resolve(currentDirname, 'beacon/gs-agent.exe'),
+  path.resolve(currentDirname, 'gs-agent.exe'),
+  path.resolve(process.cwd(), 'gs-agent.exe'),
+  path.resolve(process.cwd(), 'beacon/gs-agent.exe'),
   '/app/downloads/gs-agent.exe',
   '/app/beacon/gs-agent.exe',
 ];
@@ -540,9 +549,55 @@ app.get(['/download/gs-agent.exe', '/gs-agent.exe'], (req, res) => {
   }
 });
 
+// Route: Serve gs-console.exe Windows Standalone binary download
+const possibleConsolePaths = [
+  path.resolve(currentDirname, '../../release/gs-console.exe'),
+  path.resolve(currentDirname, '../release/gs-console.exe'),
+  path.resolve(currentDirname, 'release/gs-console.exe'),
+  path.resolve(currentDirname, 'gs-console.exe'),
+  path.resolve(process.cwd(), 'release/gs-console.exe'),
+  path.resolve(process.cwd(), 'gs-console.exe'),
+  '/app/release/gs-console.exe',
+  '/app/downloads/gs-console.exe',
+];
+
+const getConsoleBinaryPath = () => {
+  for (const p of possibleConsolePaths) {
+    if (fs.existsSync(p)) return p;
+  }
+  return null;
+};
+
+app.get(['/download/gs-console.exe', '/gs-console.exe'], (req, res) => {
+  const binaryPath = getConsoleBinaryPath();
+  if (binaryPath) {
+    res.setHeader('Content-Type', 'application/octet-stream');
+    res.setHeader('Content-Disposition', 'attachment; filename="gs-console.exe"');
+    res.sendFile(binaryPath);
+  } else {
+    res.status(404).json({ error: 'gs-console.exe not found on server. Please run npm run build:windows first.' });
+  }
+});
+
 // Serve frontend dist assets if present
-const staticDistPath = process.env.STATIC_DIR || path.resolve(__dirname, '../dist');
-if (fs.existsSync(staticDistPath)) {
+const candidateDistPaths = [
+  process.env.STATIC_DIR,
+  path.resolve(currentDirname, '../dist'),
+  path.resolve(currentDirname, 'dist'),
+  path.resolve(process.cwd(), 'dist'),
+  '/app/console/dist',
+  '/app/dist',
+];
+
+let staticDistPath = '';
+for (const p of candidateDistPaths) {
+  if (p && fs.existsSync(p)) {
+    staticDistPath = p;
+    break;
+  }
+}
+
+if (staticDistPath) {
   app.use(express.static(staticDistPath));
   app.get('*', (req, res, next) => {
     if (req.path.startsWith('/api/') || req.path === '/install-agent.ps1' || req.path.startsWith('/download/')) return next();
@@ -552,5 +607,16 @@ if (fs.existsSync(staticDistPath)) {
 }
 
 server.listen(PORT, HOST, () => {
-  logger.info(`[GridSight Server] Coordinator API & WebSocket Relay running on http://${HOST}:${PORT}`);
+  const localUrl = `http://localhost:${PORT}`;
+  logger.info(`=============================================================`);
+  logger.info(`  GridSight Teacher Console v5.3.0`);
+  logger.info(`  Web Console UI: ${localUrl}`);
+  logger.info(`  Multicast Beacon Discovery: 239.255.42.99:8888`);
+  logger.info(`=============================================================`);
+
+  if (process.platform === 'win32' && !process.argv.includes('--no-open')) {
+    import('child_process').then(({ exec }) => {
+      exec(`start ${localUrl}`);
+    }).catch(() => {});
+  }
 });

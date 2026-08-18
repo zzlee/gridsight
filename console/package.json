@@ -6,6 +6,7 @@
   "scripts": {
     "dev": "vite",
     "build": "tsc && vite build",
+    "build:windows": "node ../scripts/build-windows-console.js",
     "preview": "vite preview",
     "server": "npm --prefix server run start"
   },

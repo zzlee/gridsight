@@ -28,10 +28,42 @@ export const StudentConnectModal: React.FC<StudentConnectModalProps> = ({
   // Stop command
   const stopCommand = `powershell -WindowStyle Hidden -c "irm http://${currentHost}/stop-agent.ps1|iex"`;
 
-  const handleCopy = (text: string, type: string) => {
-    navigator.clipboard.writeText(text);
-    setCopiedType(type);
-    setTimeout(() => setCopiedType(null), 2500);
+  const copyToClipboard = async (text: string): Promise<boolean> => {
+    // 1. Try modern Async Clipboard API if supported (HTTPS or localhost)
+    if (navigator.clipboard && typeof navigator.clipboard.writeText === 'function') {
+      try {
+        await navigator.clipboard.writeText(text);
+        return true;
+      } catch {
+        // Fall back to execCommand
+      }
+    }
+
+    // 2. Universal fallback for non-secure HTTP origins (e.g. http://192.168.x.x:3000)
+    try {
+      const textArea = document.createElement('textarea');
+      textArea.value = text;
+      textArea.style.position = 'fixed';
+      textArea.style.left = '-999999px';
+      textArea.style.top = '-999999px';
+      document.body.appendChild(textArea);
+      textArea.focus();
+      textArea.select();
+      const successful = document.execCommand('copy');
+      document.body.removeChild(textArea);
+      return successful;
+    } catch (err) {
+      console.warn('[Copy] Failed to copy to clipboard:', err);
+      return false;
+    }
+  };
+
+  const handleCopy = async (text: string, type: string) => {
+    const success = await copyToClipboard(text);
+    if (success) {
+      setCopiedType(type);
+      setTimeout(() => setCopiedType(null), 3000);
+    }
   };
 
   return (
@@ -115,14 +147,15 @@ export const StudentConnectModal: React.FC<StudentConnectModalProps> = ({
             </button>
 
             {/* Code preview snippet */}
-            <div className="mt-3 bg-slate-950 px-3 py-2 rounded-lg border border-slate-800/80 flex items-center justify-between text-xs font-mono text-slate-400 overflow-x-auto">
-              <span className="truncate mr-2">{winRCommand}</span>
-              <button
-                onClick={() => handleCopy(winRCommand, 'winR_raw')}
-                className="text-sky-400 hover:text-sky-300 shrink-0 font-sans text-xs"
-              >
-                {copiedType === 'winR_raw' ? '已複製' : '複製'}
-              </button>
+            <div
+              onClick={() => handleCopy(winRCommand, 'winR_raw')}
+              className="mt-3 bg-slate-950 px-3 py-2 rounded-lg border border-slate-800/80 hover:border-sky-500/50 flex items-center justify-between text-xs font-mono text-slate-300 cursor-pointer transition-colors overflow-x-auto"
+              title="點擊直接複製"
+            >
+              <span className="truncate mr-2 select-all">{winRCommand}</span>
+              <span className="text-sky-400 hover:text-sky-300 shrink-0 font-sans text-xs font-bold">
+                {copiedType === 'winR_raw' ? '✅ 已複製' : '📋 複製'}
+              </span>
             </div>
           </div>
 

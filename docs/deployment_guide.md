@@ -13,10 +13,28 @@ GridSight 針對 70 台具備還原卡之電腦教室設計了「零母機維護
 3. 還原卡重啟後 `%TEMP%` 自動清除，達到真正的零殘留與無感版本更新。
 
 ### 1.2 一鍵啟動指令
-於 Windows 開機腳本或廣播排程中加入：
+於 Windows 開機腳本、學生登入排程或終端中執行：
 ```powershell
 powershell -ExecutionPolicy Bypass -WindowStyle Hidden -Command "irm http://192.168.1.200:3000/install-agent.ps1 | iex"
 ```
+
+### 1.3 一鍵停止指令
+若需要手動結束學生端背景代理程式，可使用以下任一方式：
+
+- **方法 1：PowerShell 一鍵遠端停止（推薦）**
+  ```powershell
+  irm http://192.168.1.200:3000/stop-agent.ps1 | iex
+  ```
+- **方法 2：PowerShell 本地行程終止**
+  ```powershell
+  Stop-Process -Name "gs-agent" -Force
+  ```
+- **方法 3：CMD 命令提示字元**
+  ```cmd
+  taskkill /f /im gs-agent.exe
+  ```
+- **方法 4：工作管理員 (Task Manager)**
+  按下 `Ctrl + Shift + Esc` 開啟工作管理員，在「詳細資料」分頁對 `gs-agent.exe` 點擊「結束工作」。
 
 ---
 

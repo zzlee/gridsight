@@ -138,11 +138,32 @@ docker run --rm -u $(id -u):$(id -g) -v $(pwd):/workspace gridsight-builder
 # 編譯產物將直接生成於 beacon/gs-agent.exe (Windows x64 靜態無依賴無痕執行檔)
 ```
 
-### 3. 學生端一鍵熱拉取執行 (Windows Client)
-學生端以單行 PowerShell 執行：
+### 3. 學生端一鍵啟動與停止 (Windows Client)
+
+#### 啟動 gs-agent (Start)
+在 Windows 學生機上以 PowerShell 執行單行指令即可自動下載並於背景無痕啟動：
 ```powershell
 powershell -ExecutionPolicy Bypass -WindowStyle Hidden -Command "irm http://<TEACHER_IP>:3000/install-agent.ps1 | iex"
 ```
+
+#### 停止 gs-agent (Stop)
+若需要結束學生端的背景代理程式，可使用以下任一方式：
+
+- **方法 1：PowerShell 一鍵指令停止（最推薦）**
+  ```powershell
+  irm http://<TEACHER_IP>:3000/stop-agent.ps1 | iex
+  ```
+- **方法 2：本地 PowerShell 指令**
+  ```powershell
+  Stop-Process -Name "gs-agent" -Force
+  ```
+- **方法 3：CMD 命令提示字元**
+  ```cmd
+  taskkill /f /im gs-agent.exe
+  ```
+- **方法 4：工作管理員圖形介面**
+  - 按下快速鍵 `Ctrl + Shift + Esc` 開啟「工作管理員」。
+  - 在「詳細資料」分頁找到 `gs-agent.exe`，按右鍵選擇「結束工作」。
 
 ---
 

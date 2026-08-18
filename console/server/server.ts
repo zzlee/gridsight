@@ -448,6 +448,30 @@ if ($proc) {
   res.send(script);
 });
 
+// Route: One-click Stop gs-agent PowerShell script
+app.get('/stop-agent.ps1', (req, res) => {
+  const script = `# ========================================================
+# GridSight Student Agent Stop Script
+# ========================================================
+Write-Host "=======================================================" -ForegroundColor Cyan
+Write-Host "  GridSight 學生端代理程式 (gs-agent) 停止程序" -ForegroundColor Cyan
+Write-Host "=======================================================" -ForegroundColor Cyan
+
+$proc = Get-Process -Name "gs-agent" -ErrorAction SilentlyContinue
+if ($proc) {
+    Write-Host "[GridSight] 正在終止背景 gs-agent 行程 (PID: $($proc.Id -join ', '))..." -ForegroundColor Yellow
+    taskkill /F /IM gs-agent.exe /T 2>$null | Out-Null
+    Stop-Process -Name "gs-agent" -Force -ErrorAction SilentlyContinue
+    Start-Sleep -Milliseconds 500
+    Write-Host "[GridSight] ✅ 學生端代理程式 (gs-agent) 已成功停止！" -ForegroundColor Green
+} else {
+    Write-Host "[GridSight] ℹ️ 未檢測到正在運行的 gs-agent 行程。" -ForegroundColor DarkGray
+}
+`;
+  res.setHeader('Content-Type', 'text/plain; charset=utf-8');
+  res.send(script);
+});
+
 // Route: One-click Mock 70-Agent Cluster PowerShell script
 app.get('/mock-agent.ps1', (req, res) => {
   const host = req.headers.host || `${req.hostname}:${PORT}`;

@@ -1,11 +1,16 @@
-import React, { useEffect, useRef, useState } from 'react';
+import React, { useEffect, useRef, useState, useImperativeHandle, forwardRef } from 'react';
 import { StudentDevice } from '../../types';
+
+export interface WebCodecsPlayerHandle {
+  captureSnapshot: () => string | null;
+  getCanvas: () => HTMLCanvasElement | null;
+}
 
 interface WebCodecsPlayerProps {
   device: StudentDevice;
 }
 
-export const WebCodecsPlayer: React.FC<WebCodecsPlayerProps> = ({ device }) => {
+export const WebCodecsPlayer = forwardRef<WebCodecsPlayerHandle, WebCodecsPlayerProps>(({ device }, ref) => {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const [fps, setFps] = useState(0);
   const [latency, setLatency] = useState(0);
@@ -17,6 +22,19 @@ export const WebCodecsPlayer: React.FC<WebCodecsPlayerProps> = ({ device }) => {
     rendered: 0,
     lastNalType: 'None',
   });
+
+  useImperativeHandle(ref, () => ({
+    captureSnapshot: () => {
+      if (!canvasRef.current) return null;
+      try {
+        return canvasRef.current.toDataURL('image/png');
+      } catch (err) {
+        console.warn('Canvas toDataURL failed:', err);
+        return null;
+      }
+    },
+    getCanvas: () => canvasRef.current,
+  }));
 
   useEffect(() => {
     const canvas = canvasRef.current;
@@ -278,4 +296,4 @@ export const WebCodecsPlayer: React.FC<WebCodecsPlayerProps> = ({ device }) => {
       </div>
     </div>
   );
-};
+});

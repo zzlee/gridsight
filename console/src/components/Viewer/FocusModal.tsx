@@ -1,7 +1,7 @@
-import React, { useState } from 'react';
+import React, { useState, useRef, useEffect } from 'react';
 import { StudentDevice } from '../../types';
-import { WebCodecsPlayer } from './WebCodecsPlayer';
-import { X, Maximize, Camera, ShieldCheck, Cpu, MemoryStick, HardDrive, Info } from 'lucide-react';
+import { WebCodecsPlayer, WebCodecsPlayerHandle } from './WebCodecsPlayer';
+import { X, Maximize, Minimize, Camera, ShieldCheck, Cpu, MemoryStick, HardDrive, Info, CheckCircle } from 'lucide-react';
 
 interface FocusModalProps {
   device: StudentDevice | null;
@@ -9,14 +9,102 @@ interface FocusModalProps {
 }
 
 export const FocusModal: React.FC<FocusModalProps> = ({ device, onClose }) => {
+  const modalContainerRef = useRef<HTMLDivElement>(null);
+  const playerRef = useRef<WebCodecsPlayerHandle>(null);
   const [showSpecsHud, setShowSpecsHud] = useState(true);
+  const [isFullscreen, setIsFullscreen] = useState(false);
+  const [toastMessage, setToastMessage] = useState<string | null>(null);
+
+  // Sync fullscreen state with browser events (e.g. Esc key)
+  useEffect(() => {
+    const handleFullscreenChange = () => {
+      setIsFullscreen(!!document.fullscreenElement);
+    };
+    document.addEventListener('fullscreenchange', handleFullscreenChange);
+    return () => document.removeEventListener('fullscreenchange', handleFullscreenChange);
+  }, []);
+
   if (!device) return null;
 
   const specs = device.specs;
 
+  const handleToggleFullscreen = async () => {
+    if (!modalContainerRef.current) return;
+    if (!document.fullscreenElement) {
+      try {
+        await modalContainerRef.current.requestFullscreen();
+        setIsFullscreen(true);
+      } catch (err) {
+        console.warn('[FocusModal] Fullscreen error:', err);
+      }
+    } else {
+      try {
+        await document.exitFullscreen();
+        setIsFullscreen(false);
+      } catch (err) {
+        console.warn('[FocusModal] Exit fullscreen error:', err);
+      }
+    }
+  };
+
+  const handleTakeSnapshot = async () => {
+    let dataUrl: string | null = null;
+
+    // 1. Try capturing exact current frame from WebCodecs canvas
+    if (playerRef.current) {
+      dataUrl = playerRef.current.captureSnapshot();
+    }
+
+    // 2. Fallback to thumbnail URL if canvas was blank
+    if (!dataUrl && device.thumbnailUrl) {
+      dataUrl = device.thumbnailUrl;
+    }
+
+    const timestamp = new Date().toISOString().replace(/[:.]/g, '-');
+    const filename = `GridSight_${device.seatNo || device.hostname}_${timestamp}.png`;
+
+    if (dataUrl) {
+      const link = document.createElement('a');
+      link.href = dataUrl;
+      link.download = filename;
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+
+      setToastMessage(`📸 截圖已儲存：${filename}`);
+      setTimeout(() => setToastMessage(null), 3000);
+    } else {
+      // 3. Fallback: Fetch direct snapshot via backend API
+      try {
+        const resp = await fetch(`/api/snapshot/${encodeURIComponent(device.mac || device.ip)}?t=${Date.now()}`);
+        if (resp.ok) {
+          const blob = await resp.blob();
+          const blobUrl = URL.createObjectURL(blob);
+          const link = document.createElement('a');
+          link.href = blobUrl;
+          link.download = filename;
+          document.body.appendChild(link);
+          link.click();
+          document.body.removeChild(link);
+          URL.revokeObjectURL(blobUrl);
+
+          setToastMessage(`📸 截圖已儲存：${filename}`);
+          setTimeout(() => setToastMessage(null), 3000);
+        }
+      } catch (err) {
+        console.warn('[FocusModal] Snapshot download failed:', err);
+      }
+    }
+  };
+
   return (
-    <div className="fixed inset-0 z-50 bg-slate-950/85 backdrop-blur-md flex items-center justify-center p-4">
-      <div className="relative w-full max-w-5xl h-[85vh] bg-slate-900 border border-slate-800 rounded-xl shadow-2xl flex flex-col overflow-hidden">
+    <div className="fixed inset-0 z-50 bg-slate-950/85 backdrop-blur-md flex items-center justify-center p-4 select-none">
+      <div
+        ref={modalContainerRef}
+        className={`relative w-full bg-slate-900 border border-slate-800 rounded-xl shadow-2xl flex flex-col overflow-hidden transition-all ${
+          isFullscreen ? 'h-full max-w-none rounded-none border-none' : 'max-w-5xl h-[85vh]'
+        }`}
+      >
         {/* Header */}
         <div className="flex items-center justify-between px-4 py-3 bg-slate-950 border-b border-slate-800">
           <div className="flex items-center space-x-3">
@@ -42,15 +130,23 @@ export const FocusModal: React.FC<FocusModalProps> = ({ device, onClose }) => {
             >
               <Info className="w-4 h-4" />
             </button>
-            <button className="p-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-300" title="畫面截圖存檔">
+            <button
+              onClick={handleTakeSnapshot}
+              className="p-1.5 rounded-lg bg-slate-800 hover:bg-sky-600 text-slate-300 hover:text-white transition-colors"
+              title="畫面截圖存檔 (下載 PNG)"
+            >
               <Camera className="w-4 h-4" />
             </button>
-            <button className="p-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-300" title="全螢幕">
-              <Maximize className="w-4 h-4" />
+            <button
+              onClick={handleToggleFullscreen}
+              className="p-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-300 hover:text-white transition-colors"
+              title={isFullscreen ? '退出全螢幕' : '全螢幕 (F11)'}
+            >
+              {isFullscreen ? <Minimize className="w-4 h-4" /> : <Maximize className="w-4 h-4" />}
             </button>
             <button
               onClick={onClose}
-              className="p-1.5 rounded-lg bg-rose-500/20 hover:bg-rose-500/30 text-rose-400 border border-rose-500/30"
+              className="p-1.5 rounded-lg bg-rose-500/20 hover:bg-rose-500/30 text-rose-400 border border-rose-500/30 transition-colors"
               title="關閉"
             >
               <X className="w-4 h-4" />
@@ -60,7 +156,15 @@ export const FocusModal: React.FC<FocusModalProps> = ({ device, onClose }) => {
 
         {/* Video Canvas Area */}
         <div className="flex-1 bg-black overflow-hidden relative">
-          <WebCodecsPlayer device={device} />
+          <WebCodecsPlayer ref={playerRef} device={device} />
+
+          {/* Toast Notification */}
+          {toastMessage && (
+            <div className="absolute top-4 left-1/2 -translate-x-1/2 z-50 bg-sky-950/90 border border-sky-500/50 text-sky-200 text-xs px-4 py-2 rounded-xl shadow-2xl backdrop-blur-md flex items-center space-x-2 animate-in fade-in slide-in-from-top-2 duration-150">
+              <CheckCircle className="w-4 h-4 text-emerald-400" />
+              <span>{toastMessage}</span>
+            </div>
+          )}
 
           {/* OSD Hardware Status Floating Overlay */}
           {showSpecsHud && specs && (

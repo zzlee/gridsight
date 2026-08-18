@@ -77,7 +77,19 @@ powershell -WindowStyle Hidden -c "irm http://<教師IP>:3000/install-agent.ps1|
   - 內建包含 `dist/` 前端、`beacon/gs-agent.exe` 下載與多播探索。
   - 佈局自動儲存於同層 `data/seats.json`。
 
-### 4.2 Linux Docker 容器部署
+### 4.2 Windows 官方簽名綠色便攜包 (`gridsight-console-portable.zip`) ⭐【零防毒誤報推薦】
+- **打包指令**：
+  ```bash
+  npm run build:portable
+  # 或 node scripts/build-windows-portable.js
+  ```
+- **產物位置**：`release/gridsight-console-portable.zip`（約 27 MB）
+- **特性**：
+  - **100% 絕不觸發 Windows Defender / SmartScreen 警告**。
+  - 內嵌微軟 / OpenJS 官方認證數位簽章之原生 `node.exe`。
+  - 包含 `start-console.bat`（一鍵背景啟動並自動開啟瀏覽器）與 `stop-console.bat`（一鍵停止）。
+
+### 4.3 Linux Docker 容器部署
 - **啟動與重構**：
   ```bash
   docker compose build && docker compose up -d

@@ -5,6 +5,7 @@
   "type": "module",
   "scripts": {
     "build:windows": "node scripts/build-windows-console.js",
+    "build:portable": "node scripts/build-windows-portable.js",
     "build": "npm --prefix console run build",
     "dev": "npm --prefix console run dev",
     "server": "npm --prefix console/server run start",

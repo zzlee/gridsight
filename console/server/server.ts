@@ -603,6 +603,36 @@ app.get(['/download/gs-console.exe', '/gs-console.exe'], (req, res) => {
   }
 });
 
+// Route: Serve gridsight-console-portable.zip download
+const possiblePortablePaths = [
+  path.resolve(currentDirname, '../../release/gridsight-console-portable.zip'),
+  path.resolve(currentDirname, '../release/gridsight-console-portable.zip'),
+  path.resolve(currentDirname, 'release/gridsight-console-portable.zip'),
+  path.resolve(currentDirname, 'gridsight-console-portable.zip'),
+  path.resolve(process.cwd(), 'release/gridsight-console-portable.zip'),
+  path.resolve(process.cwd(), 'gridsight-console-portable.zip'),
+  '/app/release/gridsight-console-portable.zip',
+  '/app/downloads/gridsight-console-portable.zip',
+];
+
+const getPortableZipPath = () => {
+  for (const p of possiblePortablePaths) {
+    if (fs.existsSync(p)) return p;
+  }
+  return null;
+};
+
+app.get(['/download/gridsight-console-portable.zip', '/download/console-portable.zip'], (req, res) => {
+  const zipPath = getPortableZipPath();
+  if (zipPath) {
+    res.setHeader('Content-Type', 'application/zip');
+    res.setHeader('Content-Disposition', 'attachment; filename="gridsight-console-portable.zip"');
+    res.sendFile(zipPath);
+  } else {
+    res.status(404).json({ error: 'gridsight-console-portable.zip not found on server. Please run npm run build:portable first.' });
+  }
+});
+
 // Serve frontend dist assets if present
 const candidateDistPaths = [
   process.env.STATIC_DIR,

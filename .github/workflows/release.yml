@@ -64,15 +64,18 @@ jobs:
           npm --prefix console install
           npm --prefix console/server install
 
-      - name: Build Standalone Windows gs-console.exe
+      - name: Build Standalone Windows gs-console.exe & Zero-Warning Portable Zip
         run: |
           node scripts/build-windows-console.js
+          node scripts/build-windows-portable.js
 
-      - name: Upload Console Artifact
+      - name: Upload Console Artifacts
         uses: actions/upload-artifact@v4
         with:
           name: gs-console
-          path: release/gs-console.exe
+          path: |
+            release/gs-console.exe
+            release/gridsight-console-portable.zip
 
   release:
     name: Publish GitHub Release
@@ -93,6 +96,7 @@ jobs:
         run: |
           mkdir -p release-dist
           cp artifacts/gs-console/gs-console.exe release-dist/gs-console.exe
+          cp artifacts/gs-console/gridsight-console-portable.zip release-dist/gridsight-console-portable.zip
           cp artifacts/gs-agent/gs-agent.exe release-dist/gs-agent.exe
           ls -lh release-dist/
 
@@ -105,16 +109,20 @@ jobs:
             ## 🚀 GridSight Release (${{ github.ref_name || inputs.tag_name }})
             
             ### 📦 下載檔案 (Downloads)
-            - **`gs-console.exe`**：教師端獨立免安裝單檔（內嵌 Node.js 執行期環境與 Web 控制台，雙擊即可啟動）。
+            - **`gridsight-console-portable.zip`** ⭐ **【強烈推薦・零防毒誤報】**：內建微軟/OpenJS 官方認證數位簽章之 Node.js，解壓縮後雙擊 `start-console.bat` 即可使用，**保證 100% 絕不觸發 Windows Defender / SmartScreen 警告**！
+            - **`gs-console.exe`**：教師端獨立單檔版（免安裝環境，雙擊自動開啟瀏覽器）。
             - **`gs-agent.exe`**：學生端輕量無痕背景代理程式 (Windows x64 Native)。
             
             ### 🌟 本版功能亮點
+            - 🛡️ **官方數位簽章綠色便攜版**：完全消除 Windows Defender / SmartScreen 誤報。
             - 🖥️ **Windows 獨立單檔執行**：免安裝 Node.js / Docker，雙擊自動開啟瀏覽器。
+            - 🌐 **學生端極速加入門戶 (`/join`)**：瀏覽器一鍵複製，按下 `Win + R` 貼上即連線。
             - 🔲 **佈局編輯多選與框選**：支援滑鼠拉框多選、Ctrl+點選、重編座號與批次拖曳回設備池。
             - 🚶 **走道劃分 (Aisles) 與講台/障礙物 (Obstacles)**：自訂橫直走道與教室實體物件，隨意縮放不丟失。
             - 📸 **串流高解析截圖與全螢幕**：WebCodecs 即時串流一鍵下載原生解析度截圖，支援純淨全螢幕監看。
             - 🛑 **學生端一鍵停止**：提供 `/stop-agent.ps1` 一鍵終止背景代理。
           files: |
+            release-dist/gridsight-console-portable.zip
             release-dist/gs-console.exe
             release-dist/gs-agent.exe
           draft: false

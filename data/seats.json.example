@@ -1,0 +1,9 @@
+{
+  "id": "layout-matrix-8x6",
+  "name": "電腦教室 (8×6, 48席位)",
+  "cols": 8,
+  "rows": 6,
+  "seats": [],
+  "aisles": [],
+  "obstacles": []
+}

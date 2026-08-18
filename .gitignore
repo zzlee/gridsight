@@ -15,6 +15,16 @@ beacon/gs-agent
 *.so
 *.dll
 
+# Runtime Data & Storage
+data/*
+!data/.gitkeep
+!data/seats.json.example
+
+# Environment Files
+.env
+.env.local
+!.env.example
+
 # IDE / Editor
 .vscode/
 .idea/

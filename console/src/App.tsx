@@ -602,8 +602,20 @@ export const App: React.FC = () => {
     });
   };
 
-  // Apply customizable X * Y Matrix Dimensions
+  // Apply customizable X * Y Matrix Dimensions & Classroom Renaming
   const handleApplyMatrix = (cols: number, rows: number, name: string, keepExisting: boolean) => {
+    // Keep aisles that remain within new matrix dimensions
+    const validAisles = (layout.aisles || []).filter((a) => {
+      if (a.type === 'vertical') return a.index < cols - 1;
+      if (a.type === 'horizontal') return a.index < rows - 1;
+      return true;
+    });
+
+    // Keep obstacles that remain within new matrix dimensions
+    const validObstacles = (layout.obstacles || []).filter((o) => {
+      return o.gridX < cols && o.gridY < rows;
+    });
+
     if (!keepExisting) {
       // Move all current online devices into unassigned pool
       const onlineAssigned = layout.seats.filter((s) => s.status === 'online');
@@ -613,7 +625,15 @@ export const App: React.FC = () => {
         return [...prev, ...added];
       });
 
-      const newLayout = LayoutStorage.createMatrixLayout(cols, rows, name);
+      const newLayout: ClassroomLayout = {
+        id: `layout-matrix-${cols}x${rows}-${Date.now()}`,
+        name: name.trim() || `標準矩陣 (${cols}×${rows}, ${cols * rows}席位)`,
+        cols: Math.max(cols, 4),
+        rows,
+        seats: [],
+        aisles: validAisles,
+        obstacles: validObstacles,
+      };
       setLayout(newLayout);
       LayoutStorage.saveLayout(newLayout);
     } else {
@@ -639,13 +659,13 @@ export const App: React.FC = () => {
       }
 
       const newLayout: ClassroomLayout = {
-        id: `layout-matrix-${cols}x${rows}-${Date.now()}`,
-        name: name || `標準矩陣 (${cols}×${rows}, ${cols * rows}席位)`,
+        id: layout.id || `layout-matrix-${cols}x${rows}-${Date.now()}`,
+        name: name.trim() || layout.name || `標準矩陣 (${cols}×${rows}, ${cols * rows}席位)`,
         cols: Math.max(cols, 4),
         rows,
         seats: withinBounds, // Keep only actual assigned devices, unassigned slots remain clean & empty
-        aisles: [],
-        obstacles: [],
+        aisles: validAisles,
+        obstacles: validObstacles,
       };
 
       setLayout(newLayout);

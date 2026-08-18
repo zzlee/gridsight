@@ -1,10 +1,12 @@
 import React, { useEffect, useState, useRef } from 'react';
-import { ClassroomLayout, StudentDevice, AppMode } from './types';
+import { ClassroomLayout, StudentDevice, AppMode, GridAisle, GridObstacle } from './types';
 import { TopNav } from './components/Toolbar/TopNav';
 import { GridCanvas } from './components/Canvas/GridCanvas';
 import { FocusModal } from './components/Viewer/FocusModal';
 import { DeviceSpecsModal } from './components/Viewer/DeviceSpecsModal';
 import { MatrixConfigModal } from './components/Toolbar/MatrixConfigModal';
+import { AisleConfigModal } from './components/Toolbar/AisleConfigModal';
+import { ObstacleModal } from './components/Toolbar/ObstacleModal';
 import { EditSeatModal } from './components/Toolbar/EditSeatModal';
 import { BatchActionToolbar } from './components/Toolbar/BatchActionToolbar';
 import { BatchEditModal } from './components/Toolbar/BatchEditModal';
@@ -34,6 +36,8 @@ export const App: React.FC = () => {
   const [editingSeat, setEditingSeat] = useState<StudentDevice | null>(null);
   const [isBatchEditOpen, setIsBatchEditOpen] = useState(false);
   const [isMatrixConfigOpen, setIsMatrixConfigOpen] = useState(false);
+  const [isAisleConfigOpen, setIsAisleConfigOpen] = useState(false);
+  const [isObstacleModalOpen, setIsObstacleModalOpen] = useState(false);
   const [isDevicePoolOpen, setIsDevicePoolOpen] = useState(false);
   // Viewport Zoom & Pan Persistence (localStorage)
   const [zoom, setZoom] = useState<number>(() => {
@@ -427,6 +431,33 @@ export const App: React.FC = () => {
     });
   };
 
+  // Save classroom aisles configuration
+  const handleSaveAisles = (aisles: GridAisle[]) => {
+    setLayout((prev) => {
+      const newLayout = { ...prev, aisles };
+      LayoutStorage.saveLayout(newLayout);
+      return newLayout;
+    });
+  };
+
+  // Save classroom obstacles / podium configuration
+  const handleSaveObstacles = (obstacles: GridObstacle[]) => {
+    setLayout((prev) => {
+      const newLayout = { ...prev, obstacles };
+      LayoutStorage.saveLayout(newLayout);
+      return newLayout;
+    });
+  };
+
+  // Quick delete single obstacle
+  const handleDeleteObstacle = (id: string) => {
+    setLayout((prev) => {
+      const newLayout = { ...prev, obstacles: (prev.obstacles || []).filter((o) => o.id !== id) };
+      LayoutStorage.saveLayout(newLayout);
+      return newLayout;
+    });
+  };
+
   // Drag & Drop: Drag an unassigned machine from Device Pool into canvas grid [x, y]
   const handleAssignFromPool = (deviceId: string, targetGridX: number, targetGridY: number) => {
     const dev = unassignedDevices.find((d) => d.id === deviceId);
@@ -629,6 +660,8 @@ export const App: React.FC = () => {
         setMode={setMode}
         layout={layout}
         onOpenMatrixConfig={() => setIsMatrixConfigOpen(true)}
+        onOpenAisleConfig={() => setIsAisleConfigOpen(true)}
+        onOpenObstacleModal={() => setIsObstacleModalOpen(true)}
         onOpenDevicePool={() => setIsDevicePoolOpen(true)}
         unassignedCount={unassignedDevices.length}
         zoom={zoom}
@@ -661,6 +694,8 @@ export const App: React.FC = () => {
         onSwapSeats={handleSwapSeats}
         onMoveSeat={handleMoveSeat}
         onAssignFromPool={handleAssignFromPool}
+        onEditObstacle={() => setIsObstacleModalOpen(true)}
+        onDeleteObstacle={handleDeleteObstacle}
       />
 
       {/* Multi-Selection Batch Action Floating Toolbar */}
@@ -682,6 +717,22 @@ export const App: React.FC = () => {
         selectedSeats={layout.seats.filter((s) => s.selected)}
         onClose={() => setIsBatchEditOpen(false)}
         onApplyBatchEdit={handleApplyBatchEdit}
+      />
+
+      {/* Aisle Configuration Modal */}
+      <AisleConfigModal
+        isOpen={isAisleConfigOpen}
+        onClose={() => setIsAisleConfigOpen(false)}
+        layout={layout}
+        onSaveAisles={handleSaveAisles}
+      />
+
+      {/* Obstacles & Teacher Podium Modal */}
+      <ObstacleModal
+        isOpen={isObstacleModalOpen}
+        onClose={() => setIsObstacleModalOpen(false)}
+        layout={layout}
+        onSaveObstacles={handleSaveObstacles}
       />
 
       {/* Edit Single Seat Information Modal (SeatNo, Hostname, Username, MAC) */}

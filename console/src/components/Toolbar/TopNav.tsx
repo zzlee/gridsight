@@ -10,6 +10,8 @@ import {
   ZoomOut,
   RotateCcw,
   Sliders,
+  Footprints,
+  Landmark,
 } from 'lucide-react';
 
 interface TopNavProps {
@@ -17,6 +19,8 @@ interface TopNavProps {
   setMode: (m: AppMode) => void;
   layout: ClassroomLayout;
   onOpenMatrixConfig: () => void;
+  onOpenAisleConfig: () => void;
+  onOpenObstacleModal: () => void;
   onOpenDevicePool: () => void;
   unassignedCount?: number;
   zoom: number;
@@ -32,6 +36,8 @@ export const TopNav: React.FC<TopNavProps> = ({
   setMode,
   layout,
   onOpenMatrixConfig,
+  onOpenAisleConfig,
+  onOpenObstacleModal,
   onOpenDevicePool,
   unassignedCount = 0,
   zoom,
@@ -141,11 +147,31 @@ export const TopNav: React.FC<TopNavProps> = ({
         {/* Matrix Dimensions Button (X × Y Standard Matrix) */}
         <button
           onClick={onOpenMatrixConfig}
-          className="flex items-center space-x-1.5 px-2.5 py-1 rounded bg-slate-900 hover:bg-slate-800 border border-slate-800 text-xs text-slate-300 hover:text-white"
+          className="flex items-center space-x-1.5 px-2.5 py-1 rounded bg-slate-900 hover:bg-slate-800 border border-slate-800 text-xs text-slate-300 hover:text-white transition-colors"
           title="自訂 X × Y 矩陣尺寸"
         >
           <Sliders className="w-3.5 h-3.5 text-sky-400" />
-          <span>矩陣尺寸 ({cols}×{rows})</span>
+          <span>矩陣 ({cols}×{rows})</span>
+        </button>
+
+        {/* Aisles Division Configuration */}
+        <button
+          onClick={onOpenAisleConfig}
+          className="flex items-center space-x-1.5 px-2.5 py-1 rounded bg-slate-900 hover:bg-slate-800 border border-slate-800 text-xs text-slate-300 hover:text-white transition-colors"
+          title="走道劃分設定 (Aisles)"
+        >
+          <Footprints className="w-3.5 h-3.5 text-sky-400" />
+          <span>走道 ({layout.aisles?.length || 0})</span>
+        </button>
+
+        {/* Obstacles & Teacher Podium Configuration */}
+        <button
+          onClick={onOpenObstacleModal}
+          className="flex items-center space-x-1.5 px-2.5 py-1 rounded bg-slate-900 hover:bg-slate-800 border border-slate-800 text-xs text-slate-300 hover:text-white transition-colors"
+          title="講台與障礙物管理 (Obstacles)"
+        >
+          <Landmark className="w-3.5 h-3.5 text-amber-400" />
+          <span>講台/障礙物 ({layout.obstacles?.length || 0})</span>
         </button>
 
         {/* Device Pool Button with unassigned badge */}

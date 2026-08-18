@@ -1,5 +1,5 @@
 import React, { useRef, useState, useEffect, useCallback } from 'react';
-import { ClassroomLayout, StudentDevice, AppMode } from '../../types';
+import { ClassroomLayout, StudentDevice, AppMode, GridObstacle } from '../../types';
 import { StudentCard } from './StudentCard';
 import { ObstacleMarker } from './ObstacleMarker';
 import { MiniMap } from './MiniMap';
@@ -25,6 +25,8 @@ interface GridCanvasProps {
   onSwapSeats?: (idA: string, idB: string) => void;
   onMoveSeat?: (id: string, newGridX: number, newGridY: number) => void;
   onAssignFromPool?: (deviceId: string, targetGridX: number, targetGridY: number) => void;
+  onEditObstacle?: (obstacle: GridObstacle) => void;
+  onDeleteObstacle?: (id: string) => void;
 }
 
 export const GridCanvas: React.FC<GridCanvasProps> = ({
@@ -47,6 +49,8 @@ export const GridCanvas: React.FC<GridCanvasProps> = ({
   onSwapSeats,
   onMoveSeat,
   onAssignFromPool,
+  onEditObstacle,
+  onDeleteObstacle,
 }) => {
   const containerRef = useRef<HTMLDivElement>(null);
   const [isPanning, setIsPanning] = useState(false);
@@ -66,6 +70,24 @@ export const GridCanvas: React.FC<GridCanvasProps> = ({
   const cardWidth = 190;
   const cardHeight = 150;
   const gap = 14;
+  const aisleGap = 36; // Visual extra width/height added by aisles
+
+  // Calculate actual pixel positions with aisle gaps
+  const getVisualX = useCallback(
+    (col: number) => {
+      const vAislesBefore = (layout.aisles || []).filter((a) => a.type === 'vertical' && a.index <= col - 1).length;
+      return col * (cardWidth + gap) + vAislesBefore * aisleGap;
+    },
+    [layout.aisles]
+  );
+
+  const getVisualY = useCallback(
+    (row: number) => {
+      const hAislesBefore = (layout.aisles || []).filter((a) => a.type === 'horizontal' && a.index <= row - 1).length;
+      return row * (cardHeight + gap) + hAislesBefore * aisleGap;
+    },
+    [layout.aisles]
+  );
 
   const handleMouseDown = (e: React.MouseEvent) => {
     // Middle-click or Alt+Left-click triggers canvas panning
@@ -106,8 +128,8 @@ export const GridCanvas: React.FC<GridCanvasProps> = ({
       // Find all seat cards intersecting the screen selection rectangle
       const intersectingIds: string[] = [];
       layout.seats.forEach((seat) => {
-        const cardLeft = seat.gridX * (cardWidth + gap) * zoom + (pan.x + 30);
-        const cardTop = seat.gridY * (cardHeight + gap) * zoom + (pan.y + 20);
+        const cardLeft = getVisualX(seat.gridX) * zoom + (pan.x + 30);
+        const cardTop = getVisualY(seat.gridY) * zoom + (pan.y + 20);
         const cardRight = cardLeft + cardWidth * zoom;
         const cardBottom = cardTop + cardHeight * zoom;
 
@@ -371,8 +393,8 @@ export const GridCanvas: React.FC<GridCanvasProps> = ({
                       : 'border-slate-900/80 bg-slate-950/40 pointer-events-none'
                   }`}
                   style={{
-                    left: c * (cardWidth + gap),
-                    top: r * (cardHeight + gap),
+                    left: getVisualX(c),
+                    top: getVisualY(r),
                     width: cardWidth,
                     height: cardHeight,
                   }}
@@ -392,21 +414,84 @@ export const GridCanvas: React.FC<GridCanvasProps> = ({
           })}
         </div>
 
-        {/* Render Teacher Podium Obstacles if any */}
-        {layout.obstacles.map((obs) => (
-          <div
-            key={obs.id}
-            style={{
-              position: 'absolute',
-              left: obs.gridX * (cardWidth + gap),
-              top: obs.gridY * (cardHeight + gap),
-              width: obs.width * (cardWidth + gap) - gap,
-              height: obs.height * (cardHeight + gap) - gap,
-            }}
-          >
-            <ObstacleMarker obstacle={obs} />
-          </div>
-        ))}
+        {/* Render Vertical Aisles Pathways */}
+        {(layout.aisles || [])
+          .filter((a) => a.type === 'vertical')
+          .map((aisle) => {
+            const aisleLeft = getVisualX(aisle.index) + cardWidth + gap / 2;
+            const aisleHeight = getVisualY(totalRows - 1) + cardHeight;
+            return (
+              <div
+                key={aisle.id}
+                className="absolute flex flex-col items-center justify-center pointer-events-none"
+                style={{
+                  left: aisleLeft,
+                  top: 0,
+                  width: aisleGap,
+                  height: aisleHeight,
+                }}
+              >
+                <div className="h-full w-px border-l-2 border-dashed border-sky-500/25" />
+                <span className="absolute px-1.5 py-0.5 rounded bg-sky-950/90 border border-sky-800/70 text-[9px] text-sky-400 font-mono rotate-90 tracking-wider whitespace-nowrap shadow-sm">
+                  {aisle.label || '走道'}
+                </span>
+              </div>
+            );
+          })}
+
+        {/* Render Horizontal Aisles Pathways */}
+        {(layout.aisles || [])
+          .filter((a) => a.type === 'horizontal')
+          .map((aisle) => {
+            const aisleTop = getVisualY(aisle.index) + cardHeight + gap / 2;
+            const aisleWidth = getVisualX(totalCols - 1) + cardWidth;
+            return (
+              <div
+                key={aisle.id}
+                className="absolute flex items-center justify-center pointer-events-none"
+                style={{
+                  left: 0,
+                  top: aisleTop,
+                  width: aisleWidth,
+                  height: aisleGap,
+                }}
+              >
+                <div className="w-full h-px border-t-2 border-dashed border-amber-500/25" />
+                <span className="absolute px-2 py-0.5 rounded bg-amber-950/90 border border-amber-800/70 text-[9px] text-amber-400 font-mono tracking-wider whitespace-nowrap shadow-sm">
+                  {aisle.label || '通道'}
+                </span>
+              </div>
+            );
+          })}
+
+        {/* Render Obstacles / Podium */}
+        {(layout.obstacles || []).map((obs) => {
+          const left = getVisualX(obs.gridX);
+          const top = getVisualY(obs.gridY);
+          const width = getVisualX(obs.gridX + obs.width - 1) + cardWidth - left;
+          const height = getVisualY(obs.gridY + obs.height - 1) + cardHeight - top;
+
+          return (
+            <div
+              key={obs.id}
+              style={{
+                position: 'absolute',
+                left,
+                top,
+                width,
+                height,
+                zIndex: 10,
+              }}
+            >
+              <ObstacleMarker
+                obstacle={obs}
+                isEditMode={mode === 'EDIT_LAYOUT'}
+                onEdit={onEditObstacle}
+                onDelete={onDeleteObstacle}
+              />
+            </div>
+          );
+        })}
 
         {/* Render Assigned Student Cards */}
         {layout.seats.map((seat) => (
@@ -414,8 +499,8 @@ export const GridCanvas: React.FC<GridCanvasProps> = ({
             key={seat.id}
             style={{
               position: 'absolute',
-              left: seat.gridX * (cardWidth + gap),
-              top: seat.gridY * (cardHeight + gap),
+              left: getVisualX(seat.gridX),
+              top: getVisualY(seat.gridY),
               width: cardWidth,
               height: cardHeight,
               zIndex: draggedSeatId === seat.id ? 50 : 1,

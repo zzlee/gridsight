@@ -13,6 +13,7 @@ import socket
 import struct
 import sys
 import time
+import urllib.request
 from typing import Dict, List
 
 # Try importing PIL for realistic synthetic thumbnail generation; fallback to raw JPEG if not available
@@ -26,7 +27,7 @@ def create_sample_jpeg(agent_id: int, hostname: str, width: int = 480, height: i
     """Generates an in-memory realistic test screen JPEG with student label and timestamp."""
     import io
     if HAS_PIL:
-        # Create dark background with grid pattern
+        # Create dark background with window layout
         img = Image.new('RGB', (width, height), color=(15, 23, 42)) # slate-900
         draw = ImageDraw.Draw(img)
 
@@ -35,18 +36,18 @@ def create_sample_jpeg(agent_id: int, hostname: str, width: int = 480, height: i
         draw.rectangle([(12, 10), (24, 22)], fill=(56, 189, 248)) # sky-400
 
         # Draw mock application windows
-        colors = [(30, 58, 138), (88, 28, 135), (20, 83, 45)]
+        colors = [(30, 58, 138), (88, 28, 135), (20, 83, 45), (120, 53, 15)]
         accent = colors[agent_id % len(colors)]
-        draw.rounded_rectangle([(30, 50), (width - 30, height - 30)], radius=8, fill=(15, 23, 42), outline=accent, width=2)
-        draw.rectangle([(30, 50), (width - 30, 75)], fill=accent)
+        draw.rounded_rectangle([(25, 45), (width - 25, height - 25)], radius=8, fill=(15, 23, 42), outline=accent, width=2)
+        draw.rectangle([(25, 45), (width - 25, 72)], fill=accent)
 
         # Text information
         draw.text((36, 8), f"GridSight Mock Client - {hostname}", fill=(241, 245, 249))
-        draw.text((45, 55), f"Workspace #{agent_id:02d}", fill=(255, 255, 255))
-        draw.text((50, 90), f"Status: Live Streaming (Mock Source)", fill=(148, 163, 184))
-        draw.text((50, 115), f"CPU: {random.randint(10, 40)}%  |  RAM: {random.randint(30, 65)}%", fill=(56, 189, 248))
-        draw.text((50, 140), f"Resolution: {width}x{height} (16:9 Standard)", fill=(148, 163, 184))
-        draw.text((50, height - 55), f"Time: {time.strftime('%H:%M:%S')}", fill=(100, 116, 139))
+        draw.text((38, 52), f"Seat / Workspace #{agent_id:02d}", fill=(255, 255, 255))
+        draw.text((40, 85), f"Status: Live Streaming (Mock Source)", fill=(148, 163, 184))
+        draw.text((40, 110), f"CPU: {random.randint(10, 40)}%  |  RAM: {random.randint(30, 65)}%", fill=(56, 189, 248))
+        draw.text((40, 135), f"Resolution: {width}x{height} (16:9 Standard)", fill=(148, 163, 184))
+        draw.text((40, height - 48), f"Time: {time.strftime('%H:%M:%S')}", fill=(100, 116, 139))
 
         buf = io.BytesIO()
         img.save(buf, format='JPEG', quality=75)
@@ -85,15 +86,22 @@ class MockAgent:
         self.metrics["ram"] = max(20, min(90, self.metrics["ram"] + random.randint(-1, 1)))
 
         return {
-            "type": "beacon",
+            "type": "BEACON",
+            "version": "5.3.0",
             "hostname": self.hostname,
             "ip": self.ip,
             "port": self.port,
             "mac": self.mac,
             "username": self.username,
-            "status": "idle",
-            "metrics": self.metrics,
-            "stream_ready": True
+            "timestamp": int(time.time() * 1000),
+            "specs": {
+                "agent_version": "5.3.0",
+                "os": "Windows 11 Pro (Mock)",
+                "uptime": 3600,
+                "cpu": {"model": "Intel Core i7-12700 (Mock)", "cores": 12, "usage_percent": self.metrics["cpu"]},
+                "ram": {"total_mb": 16384, "avail_mb": 8192, "usage_percent": self.metrics["ram"]},
+                "disk": {"drive": "C:", "total_gb": 512, "free_gb": 256, "usage_percent": self.metrics["disk"]}
+            }
         }
 
     async def handle_client(self, reader: asyncio.StreamReader, writer: asyncio.StreamWriter):
@@ -117,7 +125,7 @@ class MockAgent:
                 if not h_line or h_line == b'\r\n' or h_line == b'\n':
                     break
 
-            if path.startswith('/api/snapshot'):
+            if path.startswith('/api/snapshot') or path.startswith('/snapshot'):
                 # Return pre-cached JPEG snapshot
                 resp_headers = (
                     "HTTP/1.1 200 OK\r\n"
@@ -207,23 +215,79 @@ def get_default_local_ip() -> str:
     return ip
 
 
-async def beacon_broadcast_loop(agents: List[MockAgent], multicast_ip: str, multicast_port: int, interval: float):
+async def beacon_broadcast_loop(agents: List[MockAgent], multicast_ip: str, multicast_port: int, teacher_ip: str, local_ip: str, interval: float):
     """Sends multicast UDP discovery beacons for all simulated agents."""
     sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM, socket.IPPROTO_UDP)
-    # Set Multicast TTL to 2 for local LAN routing
-    sock.setsockopt(socket.IPPROTO_IP, socket.IP_MULTICAST_TTL, struct.pack('b', 2))
+    sock.setsockopt(socket.IPPROTO_IP, socket.IP_MULTICAST_TTL, struct.pack('b', 4))
 
-    print(f"[Beacon] Multicast broadcaster active -> {multicast_ip}:{multicast_port} ({len(agents)} agents, interval: {interval}s)")
+    # Bind multicast outgoing interface to local IP to ensure Windows routes through LAN card
+    try:
+        sock.setsockopt(socket.IPPROTO_IP, socket.IP_MULTICAST_IF, socket.inet_aton(local_ip))
+    except Exception as e:
+        print(f"[Beacon Note] IP_MULTICAST_IF bind note: {e}")
+
+    print(f"[Beacon] Multicast active -> {multicast_ip}:{multicast_port} ({len(agents)} agents, interval: {interval}s)")
+    if teacher_ip:
+        print(f"[Beacon] Unicast direct backup -> {teacher_ip}:{multicast_port} & HTTP Snapshot Push -> http://{teacher_ip}:3000/api/agent/snapshot")
 
     while True:
         try:
             for agent in agents:
-                data = json.dumps(agent.get_beacon_payload()).encode('utf-8')
-                sock.sendto(data, (multicast_ip, multicast_port))
+                payload = agent.get_beacon_payload()
+                data = json.dumps(payload).encode('utf-8')
+
+                # 1. Multicast broadcast
+                try:
+                    sock.sendto(data, (multicast_ip, multicast_port))
+                except Exception:
+                    pass
+
+                # 2. Unicast direct backup (if teacher-ip provided)
+                if teacher_ip:
+                    try:
+                        sock.sendto(data, (teacher_ip, multicast_port))
+                    except Exception:
+                        pass
+
                 # Slight micro-sleep between packets to avoid UDP burst drops
                 await asyncio.sleep(0.002)
+
         except Exception as e:
-            print(f"[Beacon Warning] Failed to send multicast packet: {e}")
+            print(f"[Beacon Warning] Failed to send beacon packet: {e}")
+
+        await asyncio.sleep(interval)
+
+
+async def snapshot_push_loop(agents: List[MockAgent], teacher_ip: str, interval: float = 1.0):
+    """Optionally pushes snapshots to teacher console via HTTP POST (100% firewall & multicast proof)."""
+    if not teacher_ip:
+        return
+
+    url = f"http://{teacher_ip}:3000/api/agent/snapshot"
+    print(f"[Snapshot Push] Background HTTP push loop active -> {url}")
+
+    while True:
+        try:
+            for agent in agents:
+                req = urllib.request.Request(
+                    url,
+                    data=agent.jpeg_cache,
+                    headers={
+                        "Content-Type": "image/jpeg",
+                        "x-agent-mac": agent.mac,
+                        "x-agent-ip": agent.ip,
+                        "x-agent-hostname": agent.hostname,
+                    },
+                    method="POST"
+                )
+                try:
+                    with urllib.request.urlopen(req, timeout=1.5) as resp:
+                        pass
+                except Exception:
+                    pass
+                await asyncio.sleep(0.01)
+        except Exception:
+            pass
 
         await asyncio.sleep(interval)
 
@@ -233,21 +297,24 @@ async def main():
     parser.add_argument("--count", type=int, default=70, help="Number of simulated agents (default: 70)")
     parser.add_argument("--base-port", type=int, default=8081, help="Starting HTTP port for agents (default: 8081)")
     parser.add_argument("--local-ip", type=str, default="", help="Custom local IP to advertise (auto-detect if empty)")
-    parser.add_argument("--multicast-ip", type=str, default="239.255.0.1", help="Multicast IP group (default: 239.255.0.1)")
-    parser.add_argument("--multicast-port", type=int, default=9000, help="Multicast UDP port (default: 9000)")
+    parser.add_argument("--teacher-ip", type=str, default="", help="Teacher console IP for direct unicast / HTTP push")
+    parser.add_argument("--multicast-ip", type=str, default="239.255.42.99", help="Multicast IP group (default: 239.255.42.99)")
+    parser.add_argument("--multicast-port", type=int, default=8888, help="Multicast UDP port (default: 8888)")
     parser.add_argument("--interval", type=float, default=1.0, help="Beacon broadcast interval in seconds (default: 1.0)")
     args = parser.parse_args()
 
     local_ip = args.local_ip if args.local_ip else get_default_local_ip()
 
-    print("=" * 65)
+    print("=" * 68)
     print(f"🚀 GridSight Mock Agent Cluster Initializing")
     print(f"   • Total Agents: {args.count} instances (MOCK-01 ~ MOCK-{args.count:02d})")
     print(f"   • Local Host IP: {local_ip}")
     print(f"   • Port Range: {args.base_port} ~ {args.base_port + args.count - 1}")
     print(f"   • Multicast Target: {args.multicast_ip}:{args.multicast_port}")
+    if args.teacher_ip:
+        print(f"   • Teacher Console IP: {args.teacher_ip}")
     print(f"   • Pillow Rendering: {'Enabled (Realistic Thumbnails)' if HAS_PIL else 'Disabled (Minimal JPEG)'}")
-    print("=" * 65)
+    print("=" * 68)
 
     agents = [MockAgent(i + 1, local_ip, args.base_port) for i in range(args.count)]
 
@@ -262,8 +329,13 @@ async def main():
 
     # Start Beacon Broadcaster Task
     beacon_task = asyncio.create_task(
-        beacon_broadcast_loop(agents, args.multicast_ip, args.multicast_port, args.interval)
+        beacon_broadcast_loop(agents, args.multicast_ip, args.multicast_port, args.teacher_ip, local_ip, args.interval)
     )
+
+    # If teacher IP specified, start HTTP snapshot push task
+    push_task = None
+    if args.teacher_ip:
+        push_task = asyncio.create_task(snapshot_push_loop(agents, args.teacher_ip, args.interval))
 
     print(f"\n[Ready] Press Ctrl+C at any time to terminate the mock cluster.\n")
 

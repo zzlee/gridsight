@@ -39,8 +39,12 @@ export interface DiscoveredAgent {
 
 export class MulticastDiscoveryService {
   private server: dgram.Socket | null = null;
-  private multicastAddress = process.env.DISCOVERY_MULTICAST_IP || '239.255.42.99';
-  private port = process.env.DISCOVERY_PORT ? parseInt(process.env.DISCOVERY_PORT, 10) : 9001;
+  private multicastAddress = process.env.MULTICAST_IP || process.env.DISCOVERY_MULTICAST_IP || '239.255.42.99';
+  private port = process.env.MULTICAST_PORT
+    ? parseInt(process.env.MULTICAST_PORT, 10)
+    : process.env.DISCOVERY_PORT
+    ? parseInt(process.env.DISCOVERY_PORT, 10)
+    : 8888;
   private tokenAuth: TokenAuthority;
   private onDeviceDiscovered?: ((device: DiscoveredAgent) => void) | undefined;
   private activeDevices = new Map<string, DiscoveredAgent>(); // key: mac or ip
@@ -65,7 +69,8 @@ export class MulticastDiscoveryService {
     this.server.on('message', (msg, rinfo) => {
       try {
         const payload = JSON.parse(msg.toString('utf-8'));
-        if (payload.type === 'BEACON') {
+        const pType = (payload.type || '').toUpperCase();
+        if (pType === 'BEACON') {
           const mac = payload.mac || rinfo.address;
           // Generate Session Token
           const token = this.tokenAuth.generateToken(mac, rinfo.address);

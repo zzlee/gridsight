@@ -1,7 +1,7 @@
 import React, { useState, useRef, useEffect } from 'react';
 import { StudentDevice } from '../../types';
 import { WebCodecsPlayer, WebCodecsPlayerHandle } from './WebCodecsPlayer';
-import { X, Maximize, Minimize, Camera, ShieldCheck, Cpu, MemoryStick, HardDrive, Info, CheckCircle } from 'lucide-react';
+import { X, Maximize, Minimize, Camera, ShieldCheck, Cpu, MemoryStick, HardDrive, Info, CheckCircle, Activity } from 'lucide-react';
 
 interface FocusModalProps {
   device: StudentDevice | null;
@@ -12,6 +12,7 @@ export const FocusModal: React.FC<FocusModalProps> = ({ device, onClose }) => {
   const modalContainerRef = useRef<HTMLDivElement>(null);
   const playerRef = useRef<WebCodecsPlayerHandle>(null);
   const [showSpecsHud, setShowSpecsHud] = useState(true);
+  const [showDebugHud, setShowDebugHud] = useState(false); // Default OFF
   const [isFullscreen, setIsFullscreen] = useState(false);
   const [toastMessage, setToastMessage] = useState<string | null>(null);
 
@@ -119,6 +120,18 @@ export const FocusModal: React.FC<FocusModalProps> = ({ device, onClose }) => {
             </div>
           </div>
           <div className="flex items-center space-x-2">
+            {/* Toggle Stream Diagnostic HUD (Default OFF) */}
+            <button
+              onClick={() => setShowDebugHud(!showDebugHud)}
+              className={`p-1.5 rounded-lg border transition-colors ${
+                showDebugHud
+                  ? 'bg-emerald-600/30 border-emerald-500 text-emerald-300'
+                  : 'bg-slate-800 border-slate-700 text-slate-400 hover:text-slate-200'
+              }`}
+              title="切換左上角串流除錯資訊 (FPS / 延遲 / 幀型)"
+            >
+              <Activity className="w-4 h-4" />
+            </button>
             <button
               onClick={() => setShowSpecsHud(!showSpecsHud)}
               className={`p-1.5 rounded-lg border transition-colors ${
@@ -156,7 +169,7 @@ export const FocusModal: React.FC<FocusModalProps> = ({ device, onClose }) => {
 
         {/* Video Canvas Area */}
         <div className="flex-1 bg-black overflow-hidden relative">
-          <WebCodecsPlayer ref={playerRef} device={device} />
+          <WebCodecsPlayer ref={playerRef} device={device} showDebugHud={showDebugHud} />
 
           {/* Toast Notification */}
           {toastMessage && (

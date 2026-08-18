@@ -8,9 +8,10 @@ export interface WebCodecsPlayerHandle {
 
 interface WebCodecsPlayerProps {
   device: StudentDevice;
+  showDebugHud?: boolean;
 }
 
-export const WebCodecsPlayer = forwardRef<WebCodecsPlayerHandle, WebCodecsPlayerProps>(({ device }, ref) => {
+export const WebCodecsPlayer = forwardRef<WebCodecsPlayerHandle, WebCodecsPlayerProps>(({ device, showDebugHud = false }, ref) => {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const [fps, setFps] = useState(0);
   const [latency, setLatency] = useState(0);
@@ -259,41 +260,43 @@ export const WebCodecsPlayer = forwardRef<WebCodecsPlayerHandle, WebCodecsPlayer
         className="w-full h-full object-contain bg-slate-950"
       />
 
-      {/* OSD Performance & Real-Time Debug HUD */}
-      <div className="absolute top-3 left-3 px-3.5 py-2 rounded-lg bg-slate-950/90 border border-slate-700/80 text-xs font-mono flex flex-col space-y-1.5 text-slate-300 backdrop-blur shadow-2xl">
-        <div className="flex items-center space-x-3">
-          <div className="flex items-center space-x-1.5">
-            <span
-              className={`w-2.5 h-2.5 rounded-full ${
-                streamStatus === 'Live 30FPS' ? 'bg-emerald-500 animate-pulse' : 'bg-amber-500'
-              }`}
-            />
-            <span className="text-emerald-400 font-bold">{fps} FPS</span>
+      {/* OSD Performance & Real-Time Debug HUD (Controlled by showDebugHud, default OFF) */}
+      {showDebugHud && (
+        <div className="absolute top-3 left-3 px-3.5 py-2 rounded-lg bg-slate-950/90 border border-slate-700/80 text-xs font-mono flex flex-col space-y-1.5 text-slate-300 backdrop-blur shadow-2xl animate-in fade-in duration-150">
+          <div className="flex items-center space-x-3">
+            <div className="flex items-center space-x-1.5">
+              <span
+                className={`w-2.5 h-2.5 rounded-full ${
+                  streamStatus === 'Live 30FPS' ? 'bg-emerald-500 animate-pulse' : 'bg-amber-500'
+                }`}
+              />
+              <span className="text-emerald-400 font-bold">{fps} FPS</span>
+            </div>
+            <div>
+              延遲: <span className="text-sky-400 font-bold">{latency > 0 ? `${latency} ms` : '<50 ms'}</span>
+            </div>
+            <div>
+              硬解: <span className="text-purple-400 font-bold">{decoderMode}</span>
+            </div>
+            <div>
+              狀態: <span className="text-slate-200 font-semibold">{streamStatus}</span>
+            </div>
           </div>
-          <div>
-            延遲: <span className="text-sky-400 font-bold">{latency > 0 ? `${latency} ms` : '<50 ms'}</span>
-          </div>
-          <div>
-            硬解: <span className="text-purple-400 font-bold">{decoderMode}</span>
-          </div>
-          <div>
-            狀態: <span className="text-slate-200 font-semibold">{streamStatus}</span>
-          </div>
-        </div>
 
-        {/* Real-Time Diagnostic Telemetry */}
-        <div className="text-[11px] text-slate-400 border-t border-slate-800 pt-1.5 flex items-center space-x-3">
-          <span>
-            接收包數: <b className="text-cyan-400">{debugStats.packets}</b> ({debugStats.kbReceived} KB)
-          </span>
-          <span>
-            解碼幀數: <b className="text-emerald-400">{debugStats.rendered}</b>
-          </span>
-          <span>
-            最新幀型: <b className="text-amber-300">{debugStats.lastNalType}</b>
-          </span>
+          {/* Real-Time Diagnostic Telemetry */}
+          <div className="text-[11px] text-slate-400 border-t border-slate-800 pt-1.5 flex items-center space-x-3">
+            <span>
+              接收包數: <b className="text-cyan-400">{debugStats.packets}</b> ({debugStats.kbReceived} KB)
+            </span>
+            <span>
+              解碼幀數: <b className="text-emerald-400">{debugStats.rendered}</b>
+            </span>
+            <span>
+              最新幀型: <b className="text-amber-300">{debugStats.lastNalType}</b>
+            </span>
+          </div>
         </div>
-      </div>
+      )}
     </div>
   );
 });

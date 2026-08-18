@@ -120,7 +120,7 @@ cd console && npm install
 # 啟動 Web 介面 (Port 3000)
 npm run dev
 
-# 另開終端啟動後端協調器 (Discovery & Token Authority, Port 3001)
+# 另開終端啟動後端協調器 (Discovery, Token Authority & Streaming, 預設 Port 3000)
 npm run server
 ```
 

@@ -62,9 +62,9 @@ docker compose up -d
 cd console
 npm install
 
-# 2. 啟動教師端前端 (Port 3000) 與後端服務 (Port 3001)
+# 2. 啟動教師端前端 (Port 3000) 與後端服務 (Port 3000)
 npm run dev
-# 另開終端啟動完整後端協調器
+# 另開終端啟動完整後端協調器 (或直接運行 server)
 npm run server
 ```
 

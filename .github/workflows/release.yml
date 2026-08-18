@@ -1,12 +1,19 @@
-name: Release
+name: Release GridSight
 
 on:
   push:
     tags:
       - 'v*'
+  workflow_dispatch:
+    inputs:
+      tag_name:
+        description: 'Release Tag (e.g. v5.3.0)'
+        required: true
+        default: 'v5.3.0'
 
 jobs:
   build-agent:
+    name: Build Student Agent (gs-agent.exe)
     runs-on: ubuntu-latest
     steps:
       - name: Checkout Code
@@ -20,16 +27,18 @@ jobs:
       - name: Build gs-agent.exe
         working-directory: beacon
         run: |
-          make CXX=x86_64-w64-mingw32-g++
+          make clean all CXX=x86_64-w64-mingw32-g++
 
-      - name: Upload Artifact
+      - name: Upload Agent Artifact
         uses: actions/upload-artifact@v4
         with:
-          name: gs-agent-windows-x64
+          name: gs-agent
           path: beacon/gs-agent.exe
 
   build-console:
+    name: Build Standalone Teacher Console (gs-console.exe)
     runs-on: ubuntu-latest
+    needs: [build-agent]
     steps:
       - name: Checkout Code
         uses: actions/checkout@v4
@@ -39,27 +48,34 @@ jobs:
         with:
           node-version: 20
           cache: 'npm'
-          cache-dependency-path: console/package.json
+          cache-dependency-path: |
+            package.json
+            console/package.json
+            console/server/package.json
+
+      - name: Download Built Agent Binary
+        uses: actions/download-artifact@v4
+        with:
+          name: gs-agent
+          path: beacon
 
       - name: Install Dependencies
-        working-directory: console
-        run: npm ci
-
-      - name: Type Check & Build Frontend
-        working-directory: console
-        run: npm run build
-
-      - name: Create Release Archive
         run: |
-          zip -r gridsight-console.zip console -x "console/node_modules/*"
+          npm --prefix console install
+          npm --prefix console/server install
 
-      - name: Upload Artifact
+      - name: Build Standalone Windows gs-console.exe
+        run: |
+          node scripts/build-windows-console.js
+
+      - name: Upload Console Artifact
         uses: actions/upload-artifact@v4
         with:
-          name: gridsight-console
-          path: gridsight-console.zip
+          name: gs-console
+          path: release/gs-console.exe
 
   release:
+    name: Publish GitHub Release
     needs: [build-agent, build-console]
     runs-on: ubuntu-latest
     permissions:
@@ -68,21 +84,38 @@ jobs:
       - name: Checkout Code
         uses: actions/checkout@v4
 
-      - name: Download Agent Artifact
+      - name: Download All Artifacts
         uses: actions/download-artifact@v4
         with:
-          name: gs-agent-windows-x64
-          path: .
+          path: artifacts
 
-      - name: Download Console Artifact
-        uses: actions/download-artifact@v4
-        with:
-          name: gridsight-console
-          path: .
+      - name: Organize Release Files
+        run: |
+          mkdir -p release-dist
+          cp artifacts/gs-console/gs-console.exe release-dist/gs-console.exe
+          cp artifacts/gs-agent/gs-agent.exe release-dist/gs-agent.exe
+          ls -lh release-dist/
 
-      - name: Create Release
+      - name: Create GitHub Release
         uses: softprops/action-gh-release@v2
         with:
+          tag_name: ${{ github.ref_name || inputs.tag_name }}
+          name: GridSight ${{ github.ref_name || inputs.tag_name }}
+          body: |
+            ## 🚀 GridSight Release (${{ github.ref_name || inputs.tag_name }})
+            
+            ### 📦 下載檔案 (Downloads)
+            - **`gs-console.exe`**：教師端獨立免安裝單檔（內嵌 Node.js 執行期環境與 Web 控制台，雙擊即可啟動）。
+            - **`gs-agent.exe`**：學生端輕量無痕背景代理程式 (Windows x64 Native)。
+            
+            ### 🌟 本版功能亮點
+            - 🖥️ **Windows 獨立單檔執行**：免安裝 Node.js / Docker，雙擊自動開啟瀏覽器。
+            - 🔲 **佈局編輯多選與框選**：支援滑鼠拉框多選、Ctrl+點選、重編座號與批次拖曳回設備池。
+            - 🚶 **走道劃分 (Aisles) 與講台/障礙物 (Obstacles)**：自訂橫直走道與教室實體物件，隨意縮放不丟失。
+            - 📸 **串流高解析截圖與全螢幕**：WebCodecs 即時串流一鍵下載原生解析度截圖，支援純淨全螢幕監看。
+            - 🛑 **學生端一鍵停止**：提供 `/stop-agent.ps1` 一鍵終止背景代理。
           files: |
-            gs-agent.exe
-            gridsight-console.zip
+            release-dist/gs-console.exe
+            release-dist/gs-agent.exe
+          draft: false
+          prerelease: false

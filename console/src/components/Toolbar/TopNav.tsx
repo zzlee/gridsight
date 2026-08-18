@@ -49,7 +49,7 @@ export const TopNav: React.FC<TopNavProps> = ({
 }) => {
   const activeSeatCount = layout.seats.length;
   const cols = layout.cols;
-  const rows = Math.max(1, layout.rows - 1);
+  const rows = layout.rows;
 
   return (
     <header className="h-14 bg-slate-950 border-b border-slate-800 px-4 flex items-center justify-between z-30 select-none">

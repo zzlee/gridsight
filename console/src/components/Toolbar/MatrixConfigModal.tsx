@@ -17,7 +17,7 @@ export const MatrixConfigModal: React.FC<MatrixConfigModalProps> = ({
   onApplyMatrix,
 }) => {
   const [cols, setCols] = useState<number>(() => currentLayout.cols || 8);
-  const [rows, setRows] = useState<number>(() => Math.max(1, currentLayout.rows - 1) || 6);
+  const [rows, setRows] = useState<number>(() => currentLayout.rows || 6);
   const [name, setName] = useState<string>(() => currentLayout.name || '電腦教室');
   const [keepExisting, setKeepExisting] = useState<boolean>(true);
 

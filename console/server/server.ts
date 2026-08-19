@@ -222,14 +222,12 @@ const defaultSeatsFile = isStandalone
   : '/data/seats.json';
 const SEATS_FILE = process.env.SEATS_FILE || defaultSeatsFile;
 
-const ensureSeatsDirectory = () => {
+const ensureSeatsDirectory = async () => {
   const dir = path.dirname(SEATS_FILE);
-  if (!fs.existsSync(dir)) {
-    try {
-      fs.mkdirSync(dir, { recursive: true });
-    } catch (err) {
-      logger.warn(`[Seats] Failed to create directory ${dir}: ${err}`);
-    }
+  try {
+    await fs.promises.mkdir(dir, { recursive: true });
+  } catch (err) {
+    logger.warn(`[Seats] Failed to create directory ${dir}: ${err}`);
   }
 };
 
@@ -247,10 +245,10 @@ const getDefaultSeatsLayout = () => {
   };
 };
 
-const saveSeatsLayout = (layoutData: any) => {
-  ensureSeatsDirectory();
+const saveSeatsLayout = async (layoutData: any) => {
+  await ensureSeatsDirectory();
   try {
-    fs.writeFileSync(SEATS_FILE, JSON.stringify(layoutData, null, 2), 'utf-8');
+    await fs.promises.writeFile(SEATS_FILE, JSON.stringify(layoutData, null, 2), 'utf-8');
     logger.info(`[Seats] Successfully saved layout to ${SEATS_FILE}`);
     return true;
   } catch (err) {
@@ -259,32 +257,30 @@ const saveSeatsLayout = (layoutData: any) => {
   }
 };
 
-const loadSeatsLayout = () => {
-  ensureSeatsDirectory();
+const loadSeatsLayout = async () => {
+  await ensureSeatsDirectory();
   try {
-    if (fs.existsSync(SEATS_FILE)) {
-      const content = fs.readFileSync(SEATS_FILE, 'utf-8');
-      const parsed = JSON.parse(content);
-      if (parsed && Array.isArray(parsed.seats)) {
-        // Filter out legacy dummy offline seats
-        const cleanedSeats = parsed.seats.filter(
-          (s: any) =>
-            !(
-              s.status === 'offline' &&
-              s.ip?.startsWith('192.168.1.') &&
-              s.mac?.startsWith('00:1A:2B:3C')
-            )
-        );
-        parsed.seats = cleanedSeats;
-        return parsed;
-      }
+    const content = await fs.promises.readFile(SEATS_FILE, 'utf-8');
+    const parsed = JSON.parse(content);
+    if (parsed && Array.isArray(parsed.seats)) {
+      // Filter out legacy dummy offline seats
+      const cleanedSeats = parsed.seats.filter(
+        (s: any) =>
+          !(
+            s.status === 'offline' &&
+            s.ip?.startsWith('192.168.1.') &&
+            s.mac?.startsWith('00:1A:2B:3C')
+          )
+      );
+      parsed.seats = cleanedSeats;
+      return parsed;
     }
   } catch (err) {
     logger.warn(`[Seats] Error reading ${SEATS_FILE}: ${err}`);
   }
 
   const defaultLayout = getDefaultSeatsLayout();
-  saveSeatsLayout(defaultLayout);
+  await saveSeatsLayout(defaultLayout);
   return defaultLayout;
 };
 
@@ -292,17 +288,17 @@ app.get('/api/health', (req, res) => {
   res.json({ status: 'ok', time: Date.now(), seatsFile: SEATS_FILE });
 });
 
-app.get('/api/layout', (req, res) => {
-  const layout = loadSeatsLayout();
+app.get('/api/layout', async (req, res) => {
+  const layout = await loadSeatsLayout();
   res.json({ success: true, layout, file: SEATS_FILE });
 });
 
-app.post('/api/layout', requireTeacherAuth, (req, res) => {
+app.post('/api/layout', requireTeacherAuth, async (req, res) => {
   const layout = req.body;
   if (!layout || !Array.isArray(layout.seats)) {
     return res.status(400).json({ success: false, error: 'Invalid layout structure' });
   }
-  const saved = saveSeatsLayout(layout);
+  const saved = await saveSeatsLayout(layout);
   if (saved) {
     res.json({ success: true, message: 'Layout successfully saved to server', file: SEATS_FILE });
   } else {

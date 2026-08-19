@@ -18,6 +18,8 @@
 #include <windows.h>
 #pragma comment(lib, "iphlpapi.lib")
 #pragma comment(lib, "ws2_32.lib")
+#else
+#include <unistd.h>
 #endif
 
 namespace GridSight {
@@ -230,8 +232,7 @@ std::this_thread::sleep_for(std::chrono::milliseconds(ms));
 std::string Utils::GenerateRandomToken(size_t length) {
     static const char charset[] =
         "0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz";
-    std::random_device rd;
-    std::mt19937 generator(rd());
+    thread_local std::mt19937 generator(std::random_device{}());
     std::uniform_int_distribution<size_t> dist(0, sizeof(charset) - 2);
 
     std::string result;

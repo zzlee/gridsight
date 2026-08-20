@@ -144,7 +144,7 @@ powershell -WindowStyle Hidden -c "irm http://<教師IP>:3000/install-agent.ps1|
 
 ### 7.2 離題關鍵字庫與警示機制
 - **預設關鍵字庫**：`YouTube`, `Bilibili`, `Roblox`, `Minecraft`, `Steam`, `Discord`, `Twitch`, `抖音`, `Tiktok`, `巴哈姆特`, `動畫瘋`, `Facebook`, `Instagram`, `Netflix`, `Game`, `遊戲`。
-- **持久化**：關鍵字庫與警示開關自動保存在教師端瀏覽器 `localStorage`。
+- **持久化**：關鍵字庫已全面持久化儲存於後端伺服器的 `data/seats.json`（`layout.offTaskKeywords`），任何裝置開啟教師端皆能同步同一套自訂字庫。
 - **即時視覺回饋**：
   - 當學生視窗標題命中關鍵字時，座位卡片外框呈現**紅色警示脈衝光暈**（`ring-2 ring-rose-500/70 shadow-rose-950 animate-pulse`）並標註 `⚠️ 離題`。
   - 頂部導航列顯示即時「**🚨 離題警示 (N台)**」按鈕。

@@ -412,7 +412,7 @@ app.get(['/api/snapshot/:id', '/api/snapshot'], async (req, res) => {
 app.get('/install-agent.ps1', (req, res) => {
   const host = req.headers.host || `${req.hostname}:${PORT}`;
   const script = `# ========================================================
-# GridSight Agent One-Click Pull & Launch Script (v5.3.0)
+# GridSight Agent One-Click Pull & Launch Script (v5.3.3)
 # ========================================================
 $ErrorActionPreference = "SilentlyContinue"
 $serverHost = "${host}"
@@ -421,7 +421,7 @@ $destDir = "$env:TEMP"
 $destPath = "$destDir\\gs-agent.exe"
 
 Write-Host "=======================================================" -ForegroundColor Cyan
-Write-Host "  GridSight Student Agent v5.3.0 部署與啟動程序" -ForegroundColor Cyan
+Write-Host "  GridSight Student Agent v5.3.3 部署與啟動程序" -ForegroundColor Cyan
 Write-Host "=======================================================" -ForegroundColor Cyan
 Write-Host "[GridSight] 正在終止舊版 gs-agent 行程..." -ForegroundColor Yellow
 
@@ -441,13 +441,13 @@ try {
     netsh advfirewall firewall add rule name="GridSight Agent Out" dir=out action=allow program="$destPath" enable=yes profile=any protocol=any 2>$null | Out-Null
 } catch {}
 
-Write-Host "[GridSight] 正在啟動最新版 gs-agent.exe (v5.3.0)..." -ForegroundColor Green
+Write-Host "[GridSight] 正在啟動最新版 gs-agent.exe (v5.3.3)..." -ForegroundColor Green
 Start-Process -FilePath $destPath -WindowStyle Hidden
 
 Start-Sleep -Seconds 1
 $proc = Get-Process -Name "gs-agent" -ErrorAction SilentlyContinue
 if ($proc) {
-    Write-Host "[GridSight] ✅ 學生端代理程式 (v5.3.0) 已成功在背景啟動！ (PID: $($proc[0].Id))" -ForegroundColor Green
+    Write-Host "[GridSight] ✅ 學生端代理程式 (v5.3.3) 已成功在背景啟動！ (PID: $($proc[0].Id))" -ForegroundColor Green
 } else {
     Write-Host "[GridSight] ⚠️ 警告：無法確認背景行程狀態，請檢查防毒軟體或權限設定。" -ForegroundColor Yellow
 }
@@ -671,7 +671,7 @@ if (staticDistPath) {
 server.listen(PORT, HOST, () => {
   const localUrl = `http://localhost:${PORT}`;
   logger.info(`=============================================================`);
-  logger.info(`  GridSight Teacher Console v5.3.0`);
+  logger.info(`  GridSight Teacher Console v5.3.3`);
   logger.info(`  Web Console UI: ${localUrl}`);
   logger.info(`  Multicast Beacon Discovery: 239.255.42.99:8888`);
   logger.info(`=============================================================`);

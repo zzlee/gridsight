@@ -91,6 +91,7 @@ void HttpServer::PushSnapshotToTeacher(const std::vector<uint8_t>& jpeg_data) {
         NetworkInfo net = Utils::GetSystemNetworkInfo();
         std::string win_title = Utils::GetActiveWindowTitle();
         std::string win_b64 = Utils::Base64Encode((const uint8_t*)win_title.data(), win_title.size());
+        std::ostringstream oss;
         oss << "POST /api/agent/snapshot HTTP/1.1\r\n"
             << "Host: " << host << ":" << port << "\r\n"
             << "X-Agent-MAC: " << net.mac << "\r\n"

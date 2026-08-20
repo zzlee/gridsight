@@ -3,7 +3,7 @@ import { ClassroomLayout, StudentDevice, AppMode, GridObstacle } from '../../typ
 import { StudentCard } from './StudentCard';
 import { ObstacleMarker } from './ObstacleMarker';
 import { MiniMap } from './MiniMap';
-import { Monitor } from 'lucide-react';
+import { Monitor, ZoomIn, ZoomOut, RotateCcw } from 'lucide-react';
 
 interface GridCanvasProps {
   layout: ClassroomLayout;
@@ -12,6 +12,7 @@ interface GridCanvasProps {
   pan: { x: number; y: number };
   setPan: React.Dispatch<React.SetStateAction<{ x: number; y: number }>>;
   setZoom?: React.Dispatch<React.SetStateAction<number>>;
+  onResetView?: () => void;
   onSelectStudent: (id: string, multi: boolean) => void;
   onBatchSelect?: (ids: string[], append?: boolean) => void;
   onClearSelection?: () => void;
@@ -37,6 +38,7 @@ export const GridCanvas: React.FC<GridCanvasProps> = ({
   pan,
   setPan,
   setZoom,
+  onResetView,
   onSelectStudent,
   onBatchSelect,
   onClearSelection,
@@ -547,6 +549,40 @@ export const GridCanvas: React.FC<GridCanvasProps> = ({
           }}
         />
       )}
+
+      {/* Floating Viewport Zoom & Reset Controls (Bottom-Right) */}
+      <div className="absolute bottom-4 right-4 z-40 bg-slate-900/90 backdrop-blur-md border border-slate-800 rounded-xl p-1 shadow-2xl flex items-center space-x-1 select-none">
+        {setZoom && (
+          <>
+            <button
+              onClick={() => setZoom((z) => Math.max(0.3, z - 0.1))}
+              className="p-1.5 rounded-lg hover:bg-slate-800 text-slate-400 hover:text-slate-200 transition-colors"
+              title="縮小畫布 (或 Ctrl + 滑鼠滾輪)"
+            >
+              <ZoomOut className="w-4 h-4" />
+            </button>
+            <span className="text-xs font-mono w-11 text-center text-slate-300 font-semibold">
+              {Math.round(zoom * 100)}%
+            </span>
+            <button
+              onClick={() => setZoom((z) => Math.min(2.5, z + 0.1))}
+              className="p-1.5 rounded-lg hover:bg-slate-800 text-slate-400 hover:text-slate-200 transition-colors"
+              title="放大畫布 (或 Ctrl + 滑鼠滾輪)"
+            >
+              <ZoomIn className="w-4 h-4" />
+            </button>
+          </>
+        )}
+        {onResetView && (
+          <button
+            onClick={onResetView}
+            className="p-1.5 rounded-lg hover:bg-slate-800 text-slate-400 hover:text-sky-400 transition-colors border-l border-slate-800 pl-2"
+            title="重置視角與縮放 (100%)"
+          >
+            <RotateCcw className="w-3.5 h-3.5" />
+          </button>
+        )}
+      </div>
 
       {/* Mini-map Overlay */}
       <MiniMap layout={layout} />

@@ -762,9 +762,6 @@ export const App: React.FC = () => {
           onOpenAlertSettings={() => setIsAlertSettingsOpen(true)}
           offTaskCount={offTaskDevices.length}
           unassignedCount={unassignedDevices.length}
-          zoom={zoom}
-          setZoom={setZoom}
-          onResetView={handleResetView}
           onLock={() => setIsLocked(true)}
           onOpenChangePin={() => setIsChangePinOpen(true)}
           trafficStats={trafficStats}
@@ -777,6 +774,7 @@ export const App: React.FC = () => {
           pan={pan}
           setPan={setPan}
           setZoom={setZoom}
+          onResetView={handleResetView}
           filterOnlyOffTask={filterOnlyOffTask}
           onSelectStudent={handleSelectStudent}
           onBatchSelect={handleBatchSelect}

@@ -231,6 +231,12 @@ const ensureSeatsDirectory = async () => {
   }
 };
 
+const DEFAULT_OFFTASK_KEYWORDS = [
+  'YouTube', 'Bilibili', 'Roblox', 'Minecraft', 'Steam',
+  'Discord', 'Twitch', '抖音', 'Tiktok', '巴哈姆特',
+  '動畫瘋', 'Facebook', 'Instagram', 'Netflix', 'Game', '遊戲'
+];
+
 const getDefaultSeatsLayout = () => {
   const cols = 8;
   const rows = 6;
@@ -242,6 +248,7 @@ const getDefaultSeatsLayout = () => {
     seats: [], // Clean empty matrix by default!
     aisles: [],
     obstacles: [],
+    offTaskKeywords: DEFAULT_OFFTASK_KEYWORDS,
   };
 };
 
@@ -273,6 +280,9 @@ const loadSeatsLayout = async () => {
           )
       );
       parsed.seats = cleanedSeats;
+      if (!Array.isArray(parsed.offTaskKeywords)) {
+        parsed.offTaskKeywords = DEFAULT_OFFTASK_KEYWORDS;
+      }
       return parsed;
     }
   } catch (err) {

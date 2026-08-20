@@ -3,6 +3,12 @@ import { AuthService } from './authService';
 
 const STORAGE_KEY = 'gridsight_layouts_v10';
 
+export const DEFAULT_OFFTASK_KEYWORDS = [
+  'YouTube', 'Bilibili', 'Roblox', 'Minecraft', 'Steam',
+  'Discord', 'Twitch', '抖音', 'Tiktok', '巴哈姆特',
+  '動畫瘋', 'Facebook', 'Instagram', 'Netflix', 'Game', '遊戲'
+];
+
 export const LayoutStorage = {
   /**
    * Save layout to backend server (which writes to SEATS_FILE specified in .env)
@@ -95,6 +101,7 @@ export const LayoutStorage = {
       seats: [], // Clean blank seats by default!
       aisles: [],
       obstacles: [],
+      offTaskKeywords: DEFAULT_OFFTASK_KEYWORDS,
     };
   },
 };

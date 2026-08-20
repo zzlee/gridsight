@@ -27416,6 +27416,24 @@ var ensureSeatsDirectory = async () => {
     logger.warn(`[Seats] Failed to create directory ${dir}: ${err}`);
   }
 };
+var DEFAULT_OFFTASK_KEYWORDS = [
+  "YouTube",
+  "Bilibili",
+  "Roblox",
+  "Minecraft",
+  "Steam",
+  "Discord",
+  "Twitch",
+  "\u6296\u97F3",
+  "Tiktok",
+  "\u5DF4\u54C8\u59C6\u7279",
+  "\u52D5\u756B\u760B",
+  "Facebook",
+  "Instagram",
+  "Netflix",
+  "Game",
+  "\u904A\u6232"
+];
 var getDefaultSeatsLayout = () => {
   const cols = 8;
   const rows = 6;
@@ -27427,7 +27445,8 @@ var getDefaultSeatsLayout = () => {
     seats: [],
     // Clean empty matrix by default!
     aisles: [],
-    obstacles: []
+    obstacles: [],
+    offTaskKeywords: DEFAULT_OFFTASK_KEYWORDS
   };
 };
 var saveSeatsLayout = async (layoutData) => {
@@ -27451,6 +27470,9 @@ var loadSeatsLayout = async () => {
         (s) => !(s.status === "offline" && s.ip?.startsWith("192.168.1.") && s.mac?.startsWith("00:1A:2B:3C"))
       );
       parsed.seats = cleanedSeats;
+      if (!Array.isArray(parsed.offTaskKeywords)) {
+        parsed.offTaskKeywords = DEFAULT_OFFTASK_KEYWORDS;
+      }
       return parsed;
     }
   } catch (err) {

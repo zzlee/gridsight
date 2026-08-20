@@ -68,6 +68,11 @@ export const App: React.FC = () => {
 
   const handleUpdateKeywords = (kws: string[]) => {
     setOffTaskKeywords(kws);
+    setLayout((prev) => {
+      const updated = { ...prev, offTaskKeywords: kws };
+      LayoutStorage.saveLayout(updated);
+      return updated;
+    });
     try {
       localStorage.setItem('gridsight_offtask_keywords', JSON.stringify(kws));
     } catch {}
@@ -89,23 +94,21 @@ export const App: React.FC = () => {
   // Viewport Zoom & Pan Persistence (localStorage)
   const [zoom, setZoom] = useState<number>(() => {
     try {
-      const savedZoom = localStorage.getItem('gridsight_viewport_zoom');
-      if (savedZoom) {
-        const val = parseFloat(savedZoom);
-        if (!isNaN(val) && val >= 0.2 && val <= 3.0) return val;
+      const saved = localStorage.getItem('gridsight_zoom');
+      if (saved) {
+        const val = parseFloat(saved);
+        if (!isNaN(val) && val >= 0.3 && val <= 2.5) return val;
       }
     } catch {}
-    return 0.85;
+    return 1;
   });
 
   const [pan, setPan] = useState<{ x: number; y: number }>(() => {
     try {
-      const savedPan = localStorage.getItem('gridsight_viewport_pan');
-      if (savedPan) {
-        const parsed = JSON.parse(savedPan);
-        if (typeof parsed.x === 'number' && typeof parsed.y === 'number') {
-          return parsed;
-        }
+      const saved = localStorage.getItem('gridsight_pan');
+      if (saved) {
+        const parsed = JSON.parse(saved);
+        if (typeof parsed.x === 'number' && typeof parsed.y === 'number') return parsed;
       }
     } catch {}
     return { x: 0, y: 0 };
@@ -126,11 +129,11 @@ export const App: React.FC = () => {
   }, [pan]);
 
   const handleResetView = () => {
-    setZoom(0.85);
+    setZoom(1);
     setPan({ x: 0, y: 0 });
     try {
-      localStorage.setItem('gridsight_viewport_zoom', '0.85');
-      localStorage.setItem('gridsight_viewport_pan', JSON.stringify({ x: 0, y: 0 }));
+      localStorage.setItem('gridsight_zoom', '1');
+      localStorage.setItem('gridsight_pan', JSON.stringify({ x: 0, y: 0 }));
     } catch {}
   };
 
@@ -141,6 +144,9 @@ export const App: React.FC = () => {
     LayoutStorage.fetchServerLayout().then((srvLayout) => {
       if (srvLayout) {
         setLayout(srvLayout);
+        if (Array.isArray(srvLayout.offTaskKeywords) && srvLayout.offTaskKeywords.length > 0) {
+          setOffTaskKeywords(srvLayout.offTaskKeywords);
+        }
       }
     });
   }, []);

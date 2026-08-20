@@ -69,6 +69,7 @@ export interface ClassroomLayout {
   seats: StudentDevice[];
   aisles: GridAisle[];
   obstacles: GridObstacle[];
+  offTaskKeywords?: string[];
 }
 
 export type AppMode = 'MONITOR' | 'EDIT_LAYOUT' | 'BROADCAST';

@@ -27407,14 +27407,12 @@ app.get("/api/stream/debug", requireTeacherAuth, (req, res) => {
 var isStandalone = process.pkg !== void 0 || process.platform === "win32";
 var defaultSeatsFile = isStandalone ? import_path2.default.resolve(process.cwd(), "data", "seats.json") : "/data/seats.json";
 var SEATS_FILE = process.env.SEATS_FILE || defaultSeatsFile;
-var ensureSeatsDirectory = () => {
+var ensureSeatsDirectory = async () => {
   const dir = import_path2.default.dirname(SEATS_FILE);
-  if (!import_fs2.default.existsSync(dir)) {
-    try {
-      import_fs2.default.mkdirSync(dir, { recursive: true });
-    } catch (err) {
-      logger.warn(`[Seats] Failed to create directory ${dir}: ${err}`);
-    }
+  try {
+    await import_fs2.default.promises.mkdir(dir, { recursive: true });
+  } catch (err) {
+    logger.warn(`[Seats] Failed to create directory ${dir}: ${err}`);
   }
 };
 var getDefaultSeatsLayout = () => {
@@ -27431,10 +27429,10 @@ var getDefaultSeatsLayout = () => {
     obstacles: []
   };
 };
-var saveSeatsLayout = (layoutData) => {
-  ensureSeatsDirectory();
+var saveSeatsLayout = async (layoutData) => {
+  await ensureSeatsDirectory();
   try {
-    import_fs2.default.writeFileSync(SEATS_FILE, JSON.stringify(layoutData, null, 2), "utf-8");
+    await import_fs2.default.promises.writeFile(SEATS_FILE, JSON.stringify(layoutData, null, 2), "utf-8");
     logger.info(`[Seats] Successfully saved layout to ${SEATS_FILE}`);
     return true;
   } catch (err) {
@@ -27442,40 +27440,38 @@ var saveSeatsLayout = (layoutData) => {
     return false;
   }
 };
-var loadSeatsLayout = () => {
-  ensureSeatsDirectory();
+var loadSeatsLayout = async () => {
+  await ensureSeatsDirectory();
   try {
-    if (import_fs2.default.existsSync(SEATS_FILE)) {
-      const content = import_fs2.default.readFileSync(SEATS_FILE, "utf-8");
-      const parsed = JSON.parse(content);
-      if (parsed && Array.isArray(parsed.seats)) {
-        const cleanedSeats = parsed.seats.filter(
-          (s) => !(s.status === "offline" && s.ip?.startsWith("192.168.1.") && s.mac?.startsWith("00:1A:2B:3C"))
-        );
-        parsed.seats = cleanedSeats;
-        return parsed;
-      }
+    const content = await import_fs2.default.promises.readFile(SEATS_FILE, "utf-8");
+    const parsed = JSON.parse(content);
+    if (parsed && Array.isArray(parsed.seats)) {
+      const cleanedSeats = parsed.seats.filter(
+        (s) => !(s.status === "offline" && s.ip?.startsWith("192.168.1.") && s.mac?.startsWith("00:1A:2B:3C"))
+      );
+      parsed.seats = cleanedSeats;
+      return parsed;
     }
   } catch (err) {
     logger.warn(`[Seats] Error reading ${SEATS_FILE}: ${err}`);
   }
   const defaultLayout = getDefaultSeatsLayout();
-  saveSeatsLayout(defaultLayout);
+  await saveSeatsLayout(defaultLayout);
   return defaultLayout;
 };
 app.get("/api/health", (req, res) => {
   res.json({ status: "ok", time: Date.now(), seatsFile: SEATS_FILE });
 });
-app.get("/api/layout", (req, res) => {
-  const layout = loadSeatsLayout();
+app.get("/api/layout", async (req, res) => {
+  const layout = await loadSeatsLayout();
   res.json({ success: true, layout, file: SEATS_FILE });
 });
-app.post("/api/layout", requireTeacherAuth, (req, res) => {
+app.post("/api/layout", requireTeacherAuth, async (req, res) => {
   const layout = req.body;
   if (!layout || !Array.isArray(layout.seats)) {
     return res.status(400).json({ success: false, error: "Invalid layout structure" });
   }
-  const saved = saveSeatsLayout(layout);
+  const saved = await saveSeatsLayout(layout);
   if (saved) {
     res.json({ success: true, message: "Layout successfully saved to server", file: SEATS_FILE });
   } else {
@@ -27524,8 +27520,9 @@ app.post(
 );
 app.get(["/api/snapshot/:id", "/api/snapshot"], async (req, res) => {
   const rawId = req.params.id || req.query.id || req.query.mac || req.query.ip || "";
+  const isHighRes = req.query.full === "1" || req.query.highres === "1";
   const normalizedId = normalizeTarget(rawId);
-  let entry = snapshotCache.get(normalizedId) || snapshotCache.get(rawId);
+  let entry = isHighRes ? null : snapshotCache.get(normalizedId) || snapshotCache.get(rawId);
   if (!entry || Date.now() - entry.timestamp >= 3e3) {
     const dev = discoveryService.getDevices().find(
       (d) => normalizeTarget(d.mac) === normalizedId || d.ip === rawId || d.hostname === rawId
@@ -27533,18 +27530,25 @@ app.get(["/api/snapshot/:id", "/api/snapshot"], async (req, res) => {
     if (dev && dev.ip) {
       const port = dev.port || 8080;
       try {
-        const agentUrl = `http://${dev.ip}:${port}/api/snapshot`;
+        const queryParam = isHighRes ? "?full=1" : "";
+        const agentUrl = `http://${dev.ip}:${port}/snapshot${queryParam}`;
         const controller = new AbortController();
-        const timeout = setTimeout(() => controller.abort(), 1200);
+        const timeout = setTimeout(() => controller.abort(), 2e3);
         const resp = await fetch(agentUrl, { signal: controller.signal });
         clearTimeout(timeout);
         if (resp.ok) {
           const ab = await resp.arrayBuffer();
           const buffer = Buffer.from(ab);
-          entry = { buffer, timestamp: Date.now() };
-          snapshotCache.set(normalizedId, entry);
-          if (dev.mac) snapshotCache.set(normalizeTarget(dev.mac), entry);
-          if (dev.ip) snapshotCache.set(dev.ip, entry);
+          if (!isHighRes) {
+            entry = { buffer, timestamp: Date.now() };
+            snapshotCache.set(normalizedId, entry);
+            if (dev.mac) snapshotCache.set(normalizeTarget(dev.mac), entry);
+            if (dev.ip) snapshotCache.set(dev.ip, entry);
+          } else {
+            res.setHeader("Content-Type", "image/jpeg");
+            res.setHeader("Cache-Control", "no-cache, no-store, must-revalidate");
+            return res.send(buffer);
+          }
         }
       } catch {
       }
@@ -27741,6 +27745,32 @@ app.get(["/download/gs-console.exe", "/gs-console.exe"], (req, res) => {
     res.sendFile(binaryPath);
   } else {
     res.status(404).json({ error: "gs-console.exe not found on server. Please run npm run build:windows first." });
+  }
+});
+var possiblePortablePaths = [
+  import_path2.default.resolve(currentDirname, "../../release/gridsight-console-portable.zip"),
+  import_path2.default.resolve(currentDirname, "../release/gridsight-console-portable.zip"),
+  import_path2.default.resolve(currentDirname, "release/gridsight-console-portable.zip"),
+  import_path2.default.resolve(currentDirname, "gridsight-console-portable.zip"),
+  import_path2.default.resolve(process.cwd(), "release/gridsight-console-portable.zip"),
+  import_path2.default.resolve(process.cwd(), "gridsight-console-portable.zip"),
+  "/app/release/gridsight-console-portable.zip",
+  "/app/downloads/gridsight-console-portable.zip"
+];
+var getPortableZipPath = () => {
+  for (const p of possiblePortablePaths) {
+    if (import_fs2.default.existsSync(p)) return p;
+  }
+  return null;
+};
+app.get(["/download/gridsight-console-portable.zip", "/download/console-portable.zip"], (req, res) => {
+  const zipPath = getPortableZipPath();
+  if (zipPath) {
+    res.setHeader("Content-Type", "application/zip");
+    res.setHeader("Content-Disposition", 'attachment; filename="gridsight-console-portable.zip"');
+    res.sendFile(zipPath);
+  } else {
+    res.status(404).json({ error: "gridsight-console-portable.zip not found on server. Please run npm run build:portable first." });
   }
 });
 var candidateDistPaths = [

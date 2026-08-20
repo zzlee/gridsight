@@ -239,13 +239,23 @@ void HttpServer::HandleClient(uintptr_t client_socket) {
 
     if (path.find("/snapshot") == 0) {
         std::vector<uint8_t> jpeg_to_send;
-        {
+
+        // On-demand High-Res (1:1 Original Screen Resolution) for Focus Mode
+        bool is_high_res = (path.find("full=1") != std::string::npos || path.find("highres=1") != std::string::npos);
+        if (is_high_res) {
+            FrameData frame;
+            if (capturer_->CaptureFrame(frame)) {
+                ImageEncoder::EncodeToJPEG(frame.bgra_buffer.data(), frame.width, frame.height, frame.width, frame.height, 85, jpeg_to_send);
+            }
+        }
+
+        if (jpeg_to_send.empty()) {
             std::lock_guard<std::mutex> lock(snapshot_mutex_);
             jpeg_to_send = cached_jpeg_data_;
         }
 
         if (!jpeg_to_send.empty()) {
-            // Immediate return from background snapshot cache (< 0.2ms latency!)
+            // Immediate return from snapshot cache or live high-res encoder
             SendResponse(client_socket, 200, "image/jpeg", jpeg_to_send);
         } else {
             // Cold start fallback

@@ -236,14 +236,14 @@ export const FocusModal: React.FC<FocusModalProps> = ({ device, onClose }) => {
         </div>
 
         {/* Video Canvas Area */}
-        <div className="flex-1 bg-black overflow-hidden relative">
+        <div className="flex-1 bg-black overflow-hidden relative flex items-center justify-center">
           {snapshotMode ? (
-            <div className="w-full h-full overflow-hidden flex items-center justify-center bg-slate-950 p-2">
+            <div className="w-full h-full overflow-hidden flex items-center justify-center bg-black">
               {snapshotUrl ? (
                 <img
                   src={snapshotUrl}
                   alt={`高解析度截圖 - ${device.hostname}`}
-                  className="max-w-full max-h-full object-contain select-none shadow-2xl"
+                  className="w-full h-full object-contain select-none bg-slate-950"
                   draggable={false}
                 />
               ) : (

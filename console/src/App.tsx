@@ -14,6 +14,7 @@ import { DevicePool } from './components/Toolbar/DevicePool';
 import { AuthLockModal } from './components/Auth/AuthLockModal';
 import { ChangePinModal } from './components/Auth/ChangePinModal';
 import { StudentConnectModal } from './components/Toolbar/StudentConnectModal';
+import { AlertSettingsModal, DEFAULT_OFFTASK_KEYWORDS } from './components/Toolbar/AlertSettingsModal';
 import { PollingManager, TrafficStats } from './services/pollingManager';
 import { LayoutStorage } from './services/layoutStorage';
 import { AuthService } from './services/authService';
@@ -41,6 +42,50 @@ export const App: React.FC = () => {
   const [isObstacleModalOpen, setIsObstacleModalOpen] = useState(false);
   const [isDevicePoolOpen, setIsDevicePoolOpen] = useState(false);
   const [isStudentConnectOpen, setIsStudentConnectOpen] = useState(false);
+  const [isAlertSettingsOpen, setIsAlertSettingsOpen] = useState(false);
+
+  // Off-Task Alert & Active Window Monitoring State
+  const [alertsEnabled, setAlertsEnabled] = useState<boolean>(() => {
+    try {
+      const saved = localStorage.getItem('gridsight_alerts_enabled');
+      if (saved !== null) return saved === 'true';
+    } catch {}
+    return true;
+  });
+
+  const [offTaskKeywords, setOffTaskKeywords] = useState<string[]>(() => {
+    try {
+      const saved = localStorage.getItem('gridsight_offtask_keywords');
+      if (saved) {
+        const parsed = JSON.parse(saved);
+        if (Array.isArray(parsed) && parsed.length > 0) return parsed;
+      }
+    } catch {}
+    return DEFAULT_OFFTASK_KEYWORDS;
+  });
+
+  const [filterOnlyOffTask, setFilterOnlyOffTask] = useState(false);
+
+  const handleUpdateKeywords = (kws: string[]) => {
+    setOffTaskKeywords(kws);
+    try {
+      localStorage.setItem('gridsight_offtask_keywords', JSON.stringify(kws));
+    } catch {}
+  };
+
+  const handleToggleAlertsEnabled = (enabled: boolean) => {
+    setAlertsEnabled(enabled);
+    try {
+      localStorage.setItem('gridsight_alerts_enabled', enabled.toString());
+    } catch {}
+  };
+
+  const isOffTaskMatch = (title?: string, kws: string[] = []): boolean => {
+    if (!title) return false;
+    const lower = title.toLowerCase();
+    return kws.some((k) => k.trim() && lower.includes(k.trim().toLowerCase()));
+  };
+
   // Viewport Zoom & Pan Persistence (localStorage)
   const [zoom, setZoom] = useState<number>(() => {
     try {
@@ -117,17 +162,23 @@ export const App: React.FC = () => {
         if (resp.ok) {
           const data = await resp.json();
           if (data.agents && Array.isArray(data.agents)) {
-            const discovered: StudentDevice[] = data.agents.map((a: any) => ({
-              id: a.mac || `dev-${a.ip.replace(/\./g, '-')}`,
-              hostname: a.hostname,
-              ip: a.ip,
-              mac: a.mac,
-              status: 'online',
-              token: a.token,
-              specs: a.specs,
-              gridX: 0,
-              gridY: 0,
-            }));
+            const discovered: StudentDevice[] = data.agents.map((a: any) => {
+              const activeWindow = a.activeWindow || a.specs?.active_window || a.window_title || '桌面 (Desktop)';
+              const isOff = alertsEnabled && isOffTaskMatch(activeWindow, offTaskKeywords);
+              return {
+                id: a.mac || `dev-${a.ip.replace(/\./g, '-')}`,
+                hostname: a.hostname,
+                ip: a.ip,
+                mac: a.mac,
+                status: 'online',
+                token: a.token,
+                activeWindow,
+                isOffTask: isOff,
+                specs: a.specs,
+                gridX: 0,
+                gridY: 0,
+              };
+            });
 
             // Match discovered agents to layout seats via strict MAC-First Primary Key Binding
             setLayout((prev) => {
@@ -146,12 +197,16 @@ export const App: React.FC = () => {
                 if (seatMacKey && discoveredMacMap.has(seatMacKey)) {
                   assignedMacs.add(seatMacKey);
                   const dev = discoveredMacMap.get(seatMacKey)!;
+                  const activeWindow = dev.activeWindow || seat.activeWindow || '桌面 (Desktop)';
+                  const isOff = alertsEnabled && isOffTaskMatch(activeWindow, offTaskKeywords);
                   return {
                     ...seat,
                     ip: dev.ip,
                     hostname: dev.hostname || seat.hostname,
                     token: dev.token || seat.token,
                     mac: dev.mac || seat.mac,
+                    activeWindow,
+                    isOffTask: isOff,
                     specs: dev.specs || seat.specs,
                     status: 'online' as const,
                   };
@@ -160,6 +215,7 @@ export const App: React.FC = () => {
                   return {
                     ...seat,
                     status: 'offline' as const,
+                    isOffTask: false,
                   };
                 }
               });
@@ -182,7 +238,7 @@ export const App: React.FC = () => {
     fetchAgents();
     const timer = setInterval(fetchAgents, 3000);
     return () => clearInterval(timer);
-  }, [isLocked]);
+  }, [isLocked, alertsEnabled, offTaskKeywords]);
 
   // 1 FPS Snapshot Polling & Periodic /status Telemetry with Viewport Culling & Circuit Breaker
   useEffect(() => {
@@ -192,11 +248,21 @@ export const App: React.FC = () => {
         (updated) => {
           setLayout((prev) => ({
             ...prev,
-            seats: prev.seats.map((s) => (s.id === updated.id ? { ...s, ...updated } : s)),
+            seats: prev.seats.map((s) => {
+              if (s.id !== updated.id) return s;
+              const activeWindow = updated.activeWindow || s.activeWindow || '桌面 (Desktop)';
+              const isOff = alertsEnabled && isOffTaskMatch(activeWindow, offTaskKeywords);
+              return { ...s, ...updated, activeWindow, isOffTask: isOff };
+            }),
           }));
 
           // Keep active modal device state up-to-date
-          setFocusDevice((prev) => (prev && prev.id === updated.id ? { ...prev, ...updated } : prev));
+          setFocusDevice((prev) => {
+            if (!prev || prev.id !== updated.id) return prev;
+            const activeWindow = updated.activeWindow || prev.activeWindow || '桌面 (Desktop)';
+            const isOff = alertsEnabled && isOffTaskMatch(activeWindow, offTaskKeywords);
+            return { ...prev, ...updated, activeWindow, isOffTask: isOff };
+          });
           setSpecsDevice((prev) => (prev && prev.id === updated.id ? { ...prev, ...updated } : prev));
         },
         1000,
@@ -212,7 +278,7 @@ export const App: React.FC = () => {
       pollingManager.stopPolling();
       setTrafficStats(null);
     };
-  }, [mode, isLocked]);
+  }, [mode, isLocked, alertsEnabled, offTaskKeywords]);
 
   const handleSelectStudent = (id: string, multi: boolean) => {
     setLayout((prev) => ({
@@ -680,145 +746,164 @@ export const App: React.FC = () => {
     return <StudentConnectModal isOpen={true} isStandalonePage={true} onClose={() => {}} />;
   }
 
-  return (
-    <div className="w-screen h-screen flex flex-col bg-slate-950 overflow-hidden">
-      <TopNav
-        mode={mode}
-        setMode={setMode}
-        layout={layout}
-        onOpenMatrixConfig={() => setIsMatrixConfigOpen(true)}
-        onOpenAisleConfig={() => setIsAisleConfigOpen(true)}
-        onOpenObstacleModal={() => setIsObstacleModalOpen(true)}
-        onOpenDevicePool={() => setIsDevicePoolOpen(true)}
-        onOpenStudentConnect={() => setIsStudentConnectOpen(true)}
-        unassignedCount={unassignedDevices.length}
-        zoom={zoom}
-        setZoom={setZoom}
-        onResetView={handleResetView}
-        onLock={() => setIsLocked(true)}
-        onOpenChangePin={() => setIsChangePinOpen(true)}
-        trafficStats={trafficStats}
-      />
+    const offTaskDevices = layout.seats.filter((s) => s.status !== 'offline' && s.isOffTask);
 
-      <GridCanvas
-        layout={layout}
-        mode={mode}
-        zoom={zoom}
-        pan={pan}
-        setPan={setPan}
-        setZoom={setZoom}
-        onSelectStudent={handleSelectStudent}
-        onBatchSelect={handleBatchSelect}
-        onClearSelection={handleClearSelection}
-        onSelectAll={handleSelectAll}
-        onFocusStudent={setFocusDevice}
-        onRefreshAuth={handleRefreshAuth}
-        onUnbindSeat={handleUnbindSeat}
-        onOpenSpecs={setSpecsDevice}
-        onEditSeat={(device) => setEditingSeat(device)}
-        onVisibleSeatsChange={(ids) => {
-          visibleDeviceIdsRef.current = ids;
-        }}
-        onSwapSeats={handleSwapSeats}
-        onMoveSeat={handleMoveSeat}
-        onAssignFromPool={handleAssignFromPool}
-        onEditObstacle={() => setIsObstacleModalOpen(true)}
-        onDeleteObstacle={handleDeleteObstacle}
-      />
+    return (
+      <div className="w-screen h-screen flex flex-col bg-slate-950 overflow-hidden">
+        <TopNav
+          mode={mode}
+          setMode={setMode}
+          layout={layout}
+          onOpenMatrixConfig={() => setIsMatrixConfigOpen(true)}
+          onOpenAisleConfig={() => setIsAisleConfigOpen(true)}
+          onOpenObstacleModal={() => setIsObstacleModalOpen(true)}
+          onOpenDevicePool={() => setIsDevicePoolOpen(true)}
+          onOpenStudentConnect={() => setIsStudentConnectOpen(true)}
+          onOpenAlertSettings={() => setIsAlertSettingsOpen(true)}
+          offTaskCount={offTaskDevices.length}
+          unassignedCount={unassignedDevices.length}
+          zoom={zoom}
+          setZoom={setZoom}
+          onResetView={handleResetView}
+          onLock={() => setIsLocked(true)}
+          onOpenChangePin={() => setIsChangePinOpen(true)}
+          trafficStats={trafficStats}
+        />
 
-      {/* Multi-Selection Batch Action Floating Toolbar */}
-      {mode === 'EDIT_LAYOUT' && (
-        <BatchActionToolbar
-          selectedSeats={layout.seats.filter((s) => s.selected)}
-          onReturnToPool={handleReturnToPool}
-          onOpenBatchEdit={() => setIsBatchEditOpen(true)}
-          onAutoRenumber={handleAutoRenumberSelected}
+        <GridCanvas
+          layout={layout}
+          mode={mode}
+          zoom={zoom}
+          pan={pan}
+          setPan={setPan}
+          setZoom={setZoom}
+          filterOnlyOffTask={filterOnlyOffTask}
+          onSelectStudent={handleSelectStudent}
+          onBatchSelect={handleBatchSelect}
           onClearSelection={handleClearSelection}
           onSelectAll={handleSelectAll}
-          totalSeatsCount={layout.seats.length}
+          onFocusStudent={setFocusDevice}
+          onRefreshAuth={handleRefreshAuth}
+          onUnbindSeat={handleUnbindSeat}
+          onOpenSpecs={setSpecsDevice}
+          onEditSeat={(device) => setEditingSeat(device)}
+          onVisibleSeatsChange={(ids) => {
+            visibleDeviceIdsRef.current = ids;
+          }}
+          onSwapSeats={handleSwapSeats}
+          onMoveSeat={handleMoveSeat}
+          onAssignFromPool={handleAssignFromPool}
+          onEditObstacle={() => setIsObstacleModalOpen(true)}
+          onDeleteObstacle={handleDeleteObstacle}
         />
-      )}
 
-      {/* Batch Edit Modal */}
-      <BatchEditModal
-        isOpen={isBatchEditOpen}
-        selectedSeats={layout.seats.filter((s) => s.selected)}
-        onClose={() => setIsBatchEditOpen(false)}
-        onApplyBatchEdit={handleApplyBatchEdit}
-      />
+        {/* Multi-Selection Batch Action Floating Toolbar */}
+        {mode === 'EDIT_LAYOUT' && (
+          <BatchActionToolbar
+            selectedSeats={layout.seats.filter((s) => s.selected)}
+            onReturnToPool={handleReturnToPool}
+            onOpenBatchEdit={() => setIsBatchEditOpen(true)}
+            onAutoRenumber={handleAutoRenumberSelected}
+            onClearSelection={handleClearSelection}
+            onSelectAll={handleSelectAll}
+            totalSeatsCount={layout.seats.length}
+          />
+        )}
 
-      {/* Aisle Configuration Modal */}
-      <AisleConfigModal
-        isOpen={isAisleConfigOpen}
-        onClose={() => setIsAisleConfigOpen(false)}
-        layout={layout}
-        onSaveAisles={handleSaveAisles}
-      />
+        {/* Batch Edit Modal */}
+        <BatchEditModal
+          isOpen={isBatchEditOpen}
+          selectedSeats={layout.seats.filter((s) => s.selected)}
+          onClose={() => setIsBatchEditOpen(false)}
+          onApplyBatchEdit={handleApplyBatchEdit}
+        />
 
-      {/* Obstacles & Teacher Podium Modal */}
-      <ObstacleModal
-        isOpen={isObstacleModalOpen}
-        onClose={() => setIsObstacleModalOpen(false)}
-        layout={layout}
-        onSaveObstacles={handleSaveObstacles}
-      />
+        {/* Aisle Configuration Modal */}
+        <AisleConfigModal
+          isOpen={isAisleConfigOpen}
+          onClose={() => setIsAisleConfigOpen(false)}
+          layout={layout}
+          onSaveAisles={handleSaveAisles}
+        />
 
-      {/* Edit Single Seat Information Modal (SeatNo, Hostname, Username, MAC) */}
-      <EditSeatModal
-        isOpen={!!editingSeat}
-        seat={editingSeat}
-        unassignedDevices={unassignedDevices}
-        onClose={() => setEditingSeat(null)}
-        onSaveSeat={handleSaveSeatInfo}
-        onUnbindSeat={handleUnbindSeat}
-      />
+        {/* Obstacles & Teacher Podium Modal */}
+        <ObstacleModal
+          isOpen={isObstacleModalOpen}
+          onClose={() => setIsObstacleModalOpen(false)}
+          layout={layout}
+          onSaveObstacles={handleSaveObstacles}
+        />
 
-      {/* Focus 30FPS WebCodecs Viewer Modal */}
-      <FocusModal
-        device={focusDevice}
-        onClose={() => setFocusDevice(null)}
-      />
+        {/* Edit Single Seat Information Modal (SeatNo, Hostname, Username, MAC) */}
+        <EditSeatModal
+          isOpen={!!editingSeat}
+          seat={editingSeat}
+          unassignedDevices={unassignedDevices}
+          onClose={() => setEditingSeat(null)}
+          onSaveSeat={handleSaveSeatInfo}
+          onUnbindSeat={handleUnbindSeat}
+        />
 
-      {/* Hardware Specs & Telemetry Modal */}
-      <DeviceSpecsModal
-        device={specsDevice}
-        onClose={() => setSpecsDevice(null)}
-      />
+        {/* Focus 30FPS WebCodecs Viewer Modal */}
+        <FocusModal
+          device={focusDevice}
+          onClose={() => setFocusDevice(null)}
+        />
 
-      {/* X * Y Standard Matrix Customizer Modal */}
-      <MatrixConfigModal
-        isOpen={isMatrixConfigOpen}
-        onClose={() => setIsMatrixConfigOpen(false)}
-        currentLayout={layout}
-        onApplyMatrix={handleApplyMatrix}
-      />
+        {/* Hardware Specs & Telemetry Modal */}
+        <DeviceSpecsModal
+          device={specsDevice}
+          onClose={() => setSpecsDevice(null)}
+        />
 
-      {/* Device Pool Drawer (Two-Way Drag-and-Drop) */}
-      <DevicePool
-        isOpen={isDevicePoolOpen}
-        onClose={() => setIsDevicePoolOpen(false)}
-        unassignedDevices={unassignedDevices}
-        onAutoAssign={handleAutoAssign}
-        onReturnToPool={handleReturnToPool}
-        onAssignToFirstAvailable={handleAssignToFirstAvailable}
-      />
+        {/* X * Y Standard Matrix Customizer Modal */}
+        <MatrixConfigModal
+          isOpen={isMatrixConfigOpen}
+          onClose={() => setIsMatrixConfigOpen(false)}
+          currentLayout={layout}
+          onApplyMatrix={handleApplyMatrix}
+        />
 
-      {/* Change Teacher PIN Modal */}
-      <ChangePinModal
-        isOpen={isChangePinOpen}
-        onClose={() => setIsChangePinOpen(false)}
-      />
+        {/* Device Pool Drawer (Two-Way Drag-and-Drop) */}
+        <DevicePool
+          isOpen={isDevicePoolOpen}
+          onClose={() => setIsDevicePoolOpen(false)}
+          unassignedDevices={unassignedDevices}
+          onAutoAssign={handleAutoAssign}
+          onReturnToPool={handleReturnToPool}
+          onAssignToFirstAvailable={handleAssignToFirstAvailable}
+        />
 
-      {/* Student Fast Connect / Join Modal */}
-      <StudentConnectModal
-        isOpen={isStudentConnectOpen}
-        onClose={() => setIsStudentConnectOpen(false)}
-      />
+        {/* Change Teacher PIN Modal */}
+        <ChangePinModal
+          isOpen={isChangePinOpen}
+          onClose={() => setIsChangePinOpen(false)}
+        />
 
-      {/* Security Auth Lock Modal (PIN Entry) */}
-      {isLocked && (
-        <AuthLockModal onUnlock={() => setIsLocked(false)} />
-      )}
-    </div>
-  );
-};
+        {/* Student Fast Connect / Join Modal */}
+        <StudentConnectModal
+          isOpen={isStudentConnectOpen}
+          onClose={() => setIsStudentConnectOpen(false)}
+        />
+
+        {/* Off-Task Alert & Forbidden Keywords Settings Modal */}
+        <AlertSettingsModal
+          isOpen={isAlertSettingsOpen}
+          onClose={() => setIsAlertSettingsOpen(false)}
+          keywords={offTaskKeywords}
+          onUpdateKeywords={handleUpdateKeywords}
+          alertsEnabled={alertsEnabled}
+          onToggleAlertsEnabled={handleToggleAlertsEnabled}
+          offTaskDevices={offTaskDevices}
+          onFocusDevice={(d) => setFocusDevice(d)}
+          filterOnlyOffTask={filterOnlyOffTask}
+          onToggleFilterOnlyOffTask={setFilterOnlyOffTask}
+        />
+
+        {/* Security Auth Lock Modal (PIN Entry) */}
+        {isLocked && (
+          <AuthLockModal onUnlock={() => setIsLocked(false)} />
+        )}
+      </div>
+    );
+  };

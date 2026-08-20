@@ -27118,6 +27118,7 @@ var MulticastDiscoveryService = class {
             mac,
             username: payload.username || "Student",
             token,
+            activeWindow: payload.active_window || payload.window_title || "\u684C\u9762 (Desktop)",
             specs: payload.specs,
             lastSeen: Date.now()
           };
@@ -27507,8 +27508,19 @@ app.post(
   (req, res) => {
     const rawMac = req.headers["x-agent-mac"] || "";
     const ip = req.headers["x-agent-ip"] || req.ip?.replace(/^.*:/, "") || "";
+    const rawWin = req.headers["x-active-window"] || "";
     const mac = normalizeTarget(rawMac);
     const buffer = req.body;
+    if (rawWin) {
+      try {
+        const winTitle = Buffer.from(rawWin, "base64").toString("utf-8");
+        const dev = discoveryService.getDevices().find((d) => normalizeTarget(d.mac) === mac || d.ip === ip);
+        if (dev && winTitle) {
+          dev.activeWindow = winTitle;
+        }
+      } catch {
+      }
+    }
     if (buffer && buffer.length > 0) {
       if (mac) snapshotCache.set(mac, { buffer, timestamp: Date.now() });
       if (ip) snapshotCache.set(ip, { buffer, timestamp: Date.now() });

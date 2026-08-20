@@ -38,6 +38,8 @@ export interface StudentDevice {
   lastSeen: number;
   token?: string;
   thumbnailUrl?: string;
+  activeWindow?: string;
+  isOffTask?: boolean;
   selected?: boolean;
   specs?: DeviceSystemInfo;
 }

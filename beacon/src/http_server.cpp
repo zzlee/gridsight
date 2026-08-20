@@ -89,11 +89,13 @@ void HttpServer::PushSnapshotToTeacher(const std::vector<uint8_t>& jpeg_data) {
 
     if (connect(s, (sockaddr*)&addr, sizeof(addr)) != SOCKET_ERROR) {
         NetworkInfo net = Utils::GetSystemNetworkInfo();
-        std::ostringstream oss;
+        std::string win_title = Utils::GetActiveWindowTitle();
+        std::string win_b64 = Utils::Base64Encode((const uint8_t*)win_title.data(), win_title.size());
         oss << "POST /api/agent/snapshot HTTP/1.1\r\n"
             << "Host: " << host << ":" << port << "\r\n"
             << "X-Agent-MAC: " << net.mac << "\r\n"
             << "X-Agent-IP: " << net.ip << "\r\n"
+            << "X-Active-Window: " << win_b64 << "\r\n"
             << "Content-Type: image/jpeg\r\n"
             << "Content-Length: " << jpeg_data.size() << "\r\n"
             << "Connection: close\r\n\r\n";

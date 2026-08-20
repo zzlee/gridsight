@@ -62,6 +62,21 @@ def create_sample_jpeg(agent_id: int, hostname: str, width: int = 480, height: i
             b'\x00\x08\x01\x01\x00\x00?\x00\xbf\x00\xff\xd9'
         )
 
+SAMPLE_WINDOWS = [
+    "Visual Studio Code - main.py",
+    "Google Chrome - Python Tutorial",
+    "Dev-C++ - homework1.cpp",
+    "Visual Studio - C# ConsoleApp",
+    "Google Docs - 課堂隨堂筆記",
+    "CodeBlocks - algorithm.c",
+    "YouTube - 遊戲精華",
+    "Bilibili - 新番動畫播放",
+    "Roblox Player",
+    "Discord - 班級聊天",
+    "Sublime Text - index.html",
+    "PowerShell - Windows",
+]
+
 class MockAgent:
     def __init__(self, agent_index: int, local_ip: str, base_port: int):
         self.index = agent_index
@@ -70,6 +85,7 @@ class MockAgent:
         self.username = f"Student{self.index:02d}"
         self.mac = f"00:50:56:C0:{self.index//256:02X}:{self.index%256:02X}"
         self.ip = local_ip
+        self.active_window = SAMPLE_WINDOWS[(self.index - 1) % len(SAMPLE_WINDOWS)]
         self.metrics = {
             "cpu": random.randint(8, 35),
             "ram": random.randint(30, 60),
@@ -86,15 +102,16 @@ class MockAgent:
 
         return {
             "type": "BEACON",
-            "version": "5.3.0",
+            "version": "5.3.1",
             "hostname": self.hostname,
             "ip": self.ip,
             "port": self.port,
             "mac": self.mac,
             "username": self.username,
+            "active_window": self.active_window,
             "timestamp": int(time.time() * 1000),
             "specs": {
-                "agent_version": "5.3.0",
+                "agent_version": "5.3.1",
                 "os": "Windows 11 Pro (Mock)",
                 "uptime": 3600,
                 "cpu": {"model": "Intel Core i7-12700 (Mock)", "cores": 12, "usage_percent": self.metrics["cpu"]},

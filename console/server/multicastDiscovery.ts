@@ -33,6 +33,7 @@ export interface DiscoveredAgent {
   mac: string;
   username?: string;
   token?: string;
+  activeWindow?: string;
   specs?: DeviceSystemInfo;
   thumbnailBase64?: string;
   lastSeen: number;
@@ -93,6 +94,7 @@ export class MulticastDiscoveryService {
             mac,
             username: payload.username || 'Student',
             token,
+            activeWindow: payload.active_window || payload.window_title || '桌面 (Desktop)',
             specs: payload.specs,
             lastSeen: Date.now(),
           };

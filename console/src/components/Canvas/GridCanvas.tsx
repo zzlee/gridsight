@@ -25,6 +25,7 @@ interface GridCanvasProps {
   onSwapSeats?: (idA: string, idB: string) => void;
   onMoveSeat?: (id: string, newGridX: number, newGridY: number) => void;
   onAssignFromPool?: (deviceId: string, targetGridX: number, targetGridY: number) => void;
+  filterOnlyOffTask?: boolean;
   onEditObstacle?: (obstacle: GridObstacle) => void;
   onDeleteObstacle?: (id: string) => void;
 }
@@ -49,6 +50,7 @@ export const GridCanvas: React.FC<GridCanvasProps> = ({
   onSwapSeats,
   onMoveSeat,
   onAssignFromPool,
+  filterOnlyOffTask = false,
   onEditObstacle,
   onDeleteObstacle,
 }) => {
@@ -494,37 +496,43 @@ export const GridCanvas: React.FC<GridCanvasProps> = ({
         })}
 
         {/* Render Assigned Student Cards */}
-        {layout.seats.map((seat) => (
-          <div
-            key={seat.id}
-            style={{
-              position: 'absolute',
-              left: getVisualX(seat.gridX),
-              top: getVisualY(seat.gridY),
-              width: cardWidth,
-              height: cardHeight,
-              zIndex: draggedSeatId === seat.id ? 50 : 1,
-            }}
-          >
-            <StudentCard
-              device={seat}
-              isEditMode={mode === 'EDIT_LAYOUT'}
-              onSelect={onSelectStudent}
-              onDoubleClick={onFocusStudent}
-              onRefreshAuth={onRefreshAuth}
-              onUnbind={onUnbindSeat}
-              onOpenSpecs={onOpenSpecs}
-              onEditSeat={onEditSeat}
-              onDragStart={handleCardDragStart}
-              onDragEnd={handleCardDragEnd}
-              onDragOver={handleCardDragOver}
-              onDragLeave={handleCardDragLeave}
-              onDrop={handleCardDrop}
-              isDragging={draggedSeatId === seat.id}
-              isDragOver={dragOverSeatId === seat.id}
-            />
-          </div>
-        ))}
+        {layout.seats.map((seat) => {
+          const isDimmed = filterOnlyOffTask && !seat.isOffTask;
+          return (
+            <div
+              key={seat.id}
+              className={`transition-all duration-200 ${
+                isDimmed ? 'opacity-20 grayscale hover:opacity-100 hover:grayscale-0' : 'opacity-100'
+              }`}
+              style={{
+                position: 'absolute',
+                left: getVisualX(seat.gridX),
+                top: getVisualY(seat.gridY),
+                width: cardWidth,
+                height: cardHeight,
+                zIndex: draggedSeatId === seat.id ? 50 : 1,
+              }}
+            >
+              <StudentCard
+                device={seat}
+                isEditMode={mode === 'EDIT_LAYOUT'}
+                onSelect={onSelectStudent}
+                onDoubleClick={onFocusStudent}
+                onRefreshAuth={onRefreshAuth}
+                onUnbind={onUnbindSeat}
+                onOpenSpecs={onOpenSpecs}
+                onEditSeat={onEditSeat}
+                onDragStart={handleCardDragStart}
+                onDragEnd={handleCardDragEnd}
+                onDragOver={handleCardDragOver}
+                onDragLeave={handleCardDragLeave}
+                onDrop={handleCardDrop}
+                isDragging={draggedSeatId === seat.id}
+                isDragOver={dragOverSeatId === seat.id}
+              />
+            </div>
+          );
+        })}
       </div>
 
       {/* Marquee Drag-Box Selection Rectangle Overlay */}

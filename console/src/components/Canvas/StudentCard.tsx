@@ -1,6 +1,6 @@
 import React from 'react';
 import { StudentDevice } from '../../types';
-import { Monitor, Maximize2, RefreshCw, Cpu, Move, Edit2 } from 'lucide-react';
+import { Monitor, Maximize2, RefreshCw, Cpu, Move, Edit2, AppWindow, AlertTriangle } from 'lucide-react';
 
 interface StudentCardProps {
   device: StudentDevice;
@@ -14,7 +14,7 @@ interface StudentCardProps {
   onDragStart?: (e: React.DragEvent, id: string) => void;
   onDragEnd?: (e: React.DragEvent) => void;
   onDragOver?: (e: React.DragEvent, id: string) => void;
-  onDragLeave?: (e: React.DragEvent) => void;
+  onDragLeave?: (e: React.DragEvent, id: string) => void;
   onDrop?: (e: React.DragEvent, targetId: string) => void;
   isDragging?: boolean;
   isDragOver?: boolean;
@@ -57,7 +57,7 @@ export const StudentCard: React.FC<StudentCardProps> = ({
       onDragStart={(e) => isEditMode && onDragStart?.(e, device.id)}
       onDragEnd={(e) => isEditMode && onDragEnd?.(e)}
       onDragOver={(e) => isEditMode && onDragOver?.(e, device.id)}
-      onDragLeave={(e) => isEditMode && onDragLeave?.(e)}
+      onDragLeave={(e) => isEditMode && onDragLeave?.(e, device.id)}
       onDrop={(e) => isEditMode && onDrop?.(e, device.id)}
       onClick={(e) => onSelect(device.id, e.ctrlKey || e.metaKey)}
       onDoubleClick={() => (isEditMode ? onEditSeat?.(device) : onDoubleClick(device))}
@@ -68,14 +68,20 @@ export const StudentCard: React.FC<StudentCardProps> = ({
           ? 'ring-2 ring-sky-400 border-sky-400 bg-sky-950/60 scale-105 shadow-xl shadow-sky-500/30'
           : device.selected
           ? 'border-sky-500 ring-2 ring-sky-500/50 shadow-lg shadow-sky-500/20'
+          : device.isOffTask
+          ? 'border-rose-500 ring-2 ring-rose-500/70 shadow-lg shadow-rose-950/80 animate-pulse bg-rose-950/20'
           : 'border-slate-800 hover:border-slate-700 hover:shadow-md'
       } ${isEditMode ? 'cursor-grab active:cursor-grabbing hover:border-sky-500/60' : 'cursor-pointer'}`}
       style={{ width: '100%', height: '100%' }}
     >
       {/* Header Info Bar */}
-      <div className="flex items-center justify-between px-2.5 py-1 bg-slate-950/70 border-b border-slate-800/80 text-xs">
+      <div className={`flex items-center justify-between px-2.5 py-1 border-b text-xs transition-colors ${
+        device.isOffTask ? 'bg-rose-950/70 border-rose-800/80' : 'bg-slate-950/70 border-slate-800/80'
+      }`}>
         <div className="flex items-center space-x-1.5 font-semibold text-slate-200">
-          <span className="px-1.5 py-0.5 rounded bg-slate-800 text-sky-400 font-mono text-[11px]">
+          <span className={`px-1.5 py-0.5 rounded font-mono text-[11px] ${
+            device.isOffTask ? 'bg-rose-500 text-white font-bold' : 'bg-slate-800 text-sky-400'
+          }`}>
             {device.seatNo || '未分配'}
           </span>
           <span className="truncate max-w-[75px]" title={device.hostname}>
@@ -102,6 +108,11 @@ export const StudentCard: React.FC<StudentCardProps> = ({
             </div>
           ) : (
             <>
+              {device.isOffTask && (
+                <span className="text-rose-400 flex items-center gap-0.5 text-[10px] font-bold animate-pulse" title="疑似離題中">
+                  <AlertTriangle className="w-3 h-3" />
+                </span>
+              )}
               {device.status !== 'offline' && (
                 <span className="text-[10px] font-mono text-slate-400">
                   {device.latencyMs}ms
@@ -182,6 +193,32 @@ export const StudentCard: React.FC<StudentCardProps> = ({
               <span>編輯資訊</span>
             </button>
           </div>
+        )}
+      </div>
+
+      {/* Active Window Title Bar */}
+      <div
+        className={`flex items-center justify-between px-2 py-0.5 text-[10px] border-t transition-colors ${
+          device.isOffTask
+            ? 'bg-rose-950/90 border-rose-800/90 text-rose-200 font-semibold'
+            : 'bg-slate-950/90 border-slate-800/80 text-slate-300'
+        }`}
+      >
+        <div
+          className="flex items-center space-x-1 truncate max-w-[130px]"
+          title={`目前操作程式：${device.activeWindow || '桌面 (Desktop)'}`}
+        >
+          <AppWindow
+            className={`w-3 h-3 shrink-0 ${
+              device.isOffTask ? 'text-rose-400 animate-pulse' : 'text-slate-400'
+            }`}
+          />
+          <span className="truncate">{device.activeWindow || '桌面 (Desktop)'}</span>
+        </div>
+        {device.isOffTask && (
+          <span className="px-1 py-0.2 rounded bg-rose-600 text-white font-bold text-[9px] uppercase tracking-wider shrink-0 shadow-sm animate-pulse">
+            離題
+          </span>
         )}
       </div>
 

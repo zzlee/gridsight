@@ -454,4 +454,25 @@ uint64_t Utils::GetLastHeartbeat() {
     return 0;
 }
 
+std::string Utils::GetActiveWindowTitle() {
+#ifdef _WIN32
+    HWND hwnd = GetForegroundWindow();
+    if (!hwnd) return "桌面 (Desktop)";
+
+    wchar_t wtitle[256] = {0};
+    int len = GetWindowTextW(hwnd, wtitle, 255);
+    if (len <= 0) return "桌面 (Desktop)";
+
+    // Convert UTF-16 wchar_t to UTF-8
+    int utf8_len = WideCharToMultiByte(CP_UTF8, 0, wtitle, len, NULL, 0, NULL, NULL);
+    if (utf8_len <= 0) return "桌面 (Desktop)";
+
+    std::string utf8_title(utf8_len, '\0');
+    WideCharToMultiByte(CP_UTF8, 0, wtitle, len, &utf8_title[0], utf8_len, NULL, NULL);
+    return utf8_title;
+#else
+    return "Visual Studio Code";
+#endif
+}
+
 } // namespace GridSight

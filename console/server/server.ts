@@ -341,8 +341,19 @@ app.post(
   (req, res) => {
     const rawMac = (req.headers['x-agent-mac'] as string) || '';
     const ip = (req.headers['x-agent-ip'] as string) || req.ip?.replace(/^.*:/, '') || '';
+    const rawWin = (req.headers['x-active-window'] as string) || '';
     const mac = normalizeTarget(rawMac);
     const buffer = req.body as Buffer;
+
+    if (rawWin) {
+      try {
+        const winTitle = Buffer.from(rawWin, 'base64').toString('utf-8');
+        const dev = discoveryService.getDevices().find((d) => normalizeTarget(d.mac) === mac || d.ip === ip);
+        if (dev && winTitle) {
+          dev.activeWindow = winTitle;
+        }
+      } catch {}
+    }
 
     if (buffer && buffer.length > 0) {
       if (mac) snapshotCache.set(mac, { buffer, timestamp: Date.now() });

@@ -13,6 +13,7 @@ import {
   Footprints,
   Landmark,
   UserPlus,
+  AlertTriangle,
 } from 'lucide-react';
 
 interface TopNavProps {
@@ -24,6 +25,8 @@ interface TopNavProps {
   onOpenObstacleModal: () => void;
   onOpenDevicePool: () => void;
   onOpenStudentConnect: () => void;
+  onOpenAlertSettings?: () => void;
+  offTaskCount?: number;
   unassignedCount?: number;
   zoom: number;
   setZoom: React.Dispatch<React.SetStateAction<number>>;
@@ -42,6 +45,8 @@ export const TopNav: React.FC<TopNavProps> = ({
   onOpenObstacleModal,
   onOpenDevicePool,
   onOpenStudentConnect,
+  onOpenAlertSettings,
+  offTaskCount = 0,
   unassignedCount = 0,
   zoom,
   setZoom,
@@ -201,6 +206,27 @@ export const TopNav: React.FC<TopNavProps> = ({
           <UserPlus className="w-3.5 h-3.5 text-emerald-400" />
           <span>學生端連線</span>
         </button>
+
+        {/* Off-Task Alert Button */}
+        {onOpenAlertSettings && (
+          <button
+            onClick={onOpenAlertSettings}
+            className={`flex items-center space-x-1.5 px-3 py-1 rounded-lg border text-xs font-semibold transition-all active:scale-95 ${
+              (offTaskCount || 0) > 0
+                ? 'bg-rose-950/60 border-rose-500 text-rose-300 shadow-md shadow-rose-950/50 animate-pulse'
+                : 'bg-slate-900 hover:bg-slate-800 border-slate-800 text-slate-300 hover:text-white'
+            }`}
+            title="課堂離題關鍵字警示設定"
+          >
+            <AlertTriangle className={`w-3.5 h-3.5 ${(offTaskCount || 0) > 0 ? 'text-rose-400' : 'text-amber-400'}`} />
+            <span>離題警示</span>
+            {(offTaskCount || 0) > 0 && (
+              <span className="px-1.5 py-0.2 rounded-full bg-rose-600 text-white font-mono text-[10px] font-bold">
+                {offTaskCount}
+              </span>
+            )}
+          </button>
+        )}
 
         {/* Zoom Controls */}
         <div className="flex items-center space-x-1 bg-slate-900 p-0.5 rounded border border-slate-800 text-slate-400">

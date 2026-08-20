@@ -5,6 +5,8 @@
 
 namespace GridSight {
 
+void ConvertBGRAtoNV12_SIMD(const uint8_t* bgra_data, int width, int height, uint8_t* nv12_out);
+
 enum class JpegEngineType {
     AUTO = 0,
     WINDOWS_WIC,

@@ -96,7 +96,6 @@ export const WebCodecsPlayer = forwardRef<WebCodecsPlayerHandle, WebCodecsPlayer
             hardwareAcceleration: 'prefer-hardware',
           });
           setDecoderMode('WebCodecs GPU');
-          console.log('[WebCodecsPlayer] VideoDecoder configured (avc1.64002A).');
         } catch (err) {
           console.warn('[WebCodecsPlayer] Failed to configure VideoDecoder, falling back:', err);
           setDecoderMode('Canvas Fallback');
@@ -115,7 +114,6 @@ export const WebCodecsPlayer = forwardRef<WebCodecsPlayerHandle, WebCodecsPlayer
     const wsUrl = `${wsProtocol}//${window.location.host}/ws/stream/${encodeURIComponent(streamTarget)}?token=${device.token || ''}`;
     
     try {
-      console.log('[WebCodecsPlayer] Connecting to WS stream relay:', wsUrl);
       ws = new WebSocket(wsUrl);
       ws.binaryType = 'arraybuffer';
 
@@ -123,7 +121,6 @@ export const WebCodecsPlayer = forwardRef<WebCodecsPlayerHandle, WebCodecsPlayer
         if (!isSubscribed) return;
         setStreamStatus('Live 30FPS');
         setLatency(Math.floor(18 + Math.random() * 15));
-        console.log('[WebCodecsPlayer] WebSocket connected! Ready for 30FPS stream.');
       };
 
       ws.onmessage = (event) => {
@@ -181,10 +178,6 @@ export const WebCodecsPlayer = forwardRef<WebCodecsPlayerHandle, WebCodecsPlayer
 
         if (isKeyFrame) {
           hasReceivedKeyFrame = true;
-        }
-
-        if (packetCount === 1 || packetCount % 60 === 0) {
-          console.log(`[WebCodecsPlayer] Packet #${packetCount}: ${bytes.length} bytes, type=${nalTypeName}, isKey=${isKeyFrame}, hasKey=${hasReceivedKeyFrame}, decoderState=${decoder?.state}`);
         }
 
         setDebugStats((prev) => ({

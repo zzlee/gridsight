@@ -73,12 +73,3 @@ export interface ClassroomLayout {
 }
 
 export type AppMode = 'MONITOR' | 'EDIT_LAYOUT' | 'BROADCAST';
-
-export interface BroadcastConfig {
-  active: boolean;
-  multicastIp: string;
-  port: number;
-  fps: number;
-  bitrateKbps: number;
-  screenSource: string;
-}

@@ -27522,8 +27522,8 @@ app.get(["/api/snapshot/:id", "/api/snapshot"], async (req, res) => {
   const rawId = req.params.id || req.query.id || req.query.mac || req.query.ip || "";
   const isHighRes = req.query.full === "1" || req.query.highres === "1";
   const normalizedId = normalizeTarget(rawId);
-  let entry = isHighRes ? null : snapshotCache.get(normalizedId) || snapshotCache.get(rawId);
-  if (!entry || Date.now() - entry.timestamp >= 3e3) {
+  let cachedEntry = snapshotCache.get(normalizedId) || snapshotCache.get(rawId);
+  if (isHighRes || !cachedEntry || Date.now() - cachedEntry.timestamp >= 3e3) {
     const dev = discoveryService.getDevices().find(
       (d) => normalizeTarget(d.mac) === normalizedId || d.ip === rawId || d.hostname === rawId
     );
@@ -27533,17 +27533,17 @@ app.get(["/api/snapshot/:id", "/api/snapshot"], async (req, res) => {
         const queryParam = isHighRes ? "?full=1" : "";
         const agentUrl = `http://${dev.ip}:${port}/snapshot${queryParam}`;
         const controller = new AbortController();
-        const timeout = setTimeout(() => controller.abort(), 2e3);
+        const timeout = setTimeout(() => controller.abort(), 1200);
         const resp = await fetch(agentUrl, { signal: controller.signal });
         clearTimeout(timeout);
         if (resp.ok) {
           const ab = await resp.arrayBuffer();
           const buffer = Buffer.from(ab);
           if (!isHighRes) {
-            entry = { buffer, timestamp: Date.now() };
-            snapshotCache.set(normalizedId, entry);
-            if (dev.mac) snapshotCache.set(normalizeTarget(dev.mac), entry);
-            if (dev.ip) snapshotCache.set(dev.ip, entry);
+            cachedEntry = { buffer, timestamp: Date.now() };
+            snapshotCache.set(normalizedId, cachedEntry);
+            if (dev.mac) snapshotCache.set(normalizeTarget(dev.mac), cachedEntry);
+            if (dev.ip) snapshotCache.set(dev.ip, cachedEntry);
           } else {
             res.setHeader("Content-Type", "image/jpeg");
             res.setHeader("Cache-Control", "no-cache, no-store, must-revalidate");
@@ -27554,13 +27554,12 @@ app.get(["/api/snapshot/:id", "/api/snapshot"], async (req, res) => {
       }
     }
   }
-  if (entry && Date.now() - entry.timestamp < 15e3) {
+  if (cachedEntry) {
     res.setHeader("Content-Type", "image/jpeg");
     res.setHeader("Cache-Control", "no-cache, no-store, must-revalidate");
-    res.send(entry.buffer);
-  } else {
-    res.status(404).json({ error: "No snapshot available" });
+    return res.send(cachedEntry.buffer);
   }
+  res.status(404).json({ error: "No snapshot available" });
 });
 app.get("/install-agent.ps1", (req, res) => {
   const host = req.headers.host || `${req.hostname}:${PORT}`;

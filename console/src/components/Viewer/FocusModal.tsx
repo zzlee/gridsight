@@ -138,6 +138,19 @@ export const FocusModal: React.FC<FocusModalProps> = ({ device, onClose }) => {
   };
 
   const handleToggleSnapshotMode = () => {
+    if (!snapshotMode) {
+      // Instantly populate snapshotUrl from player canvas or thumbnail so there is ZERO waiting time
+      let currentFrame: string | null = null;
+      if (playerRef.current) {
+        currentFrame = playerRef.current.captureSnapshot();
+      }
+      if (!currentFrame && device?.thumbnailUrl) {
+        currentFrame = device.thumbnailUrl;
+      }
+      if (currentFrame) {
+        setSnapshotUrl(currentFrame);
+      }
+    }
     setSnapshotMode((prev) => !prev);
   };
 
@@ -225,12 +238,12 @@ export const FocusModal: React.FC<FocusModalProps> = ({ device, onClose }) => {
         {/* Video Canvas Area */}
         <div className="flex-1 bg-black overflow-hidden relative">
           {snapshotMode ? (
-            <div className="w-full h-full overflow-auto flex items-center justify-center bg-slate-950">
+            <div className="w-full h-full overflow-hidden flex items-center justify-center bg-slate-950 p-2">
               {snapshotUrl ? (
                 <img
                   src={snapshotUrl}
                   alt={`高解析度截圖 - ${device.hostname}`}
-                  className="max-w-none max-h-none select-none"
+                  className="max-w-full max-h-full object-contain select-none shadow-2xl"
                   draggable={false}
                 />
               ) : (

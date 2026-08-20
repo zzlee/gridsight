@@ -357,20 +357,18 @@ app.post(
 // Route: Serve cached JPEG snapshots to Teacher Browser UI (with on-demand proxy fallback)
 app.get(['/api/snapshot/:id', '/api/snapshot'], async (req, res) => {
   const rawId = req.params.id || (req.query.id as string) || (req.query.mac as string) || (req.query.ip as string) || '';
-  const isHighRes = req.query.full === '1' || req.query.highres === '1';
   const normalizedId = normalizeTarget(rawId);
   let cachedEntry = snapshotCache.get(normalizedId) || snapshotCache.get(rawId);
 
-  // If high-res or cache is stale/empty, try live fetch from agent
-  if (isHighRes || !cachedEntry || Date.now() - cachedEntry.timestamp >= 3000) {
+  // If not in cache or older than 3 seconds, perform fast on-demand proxy fetch from agent port
+  if (!cachedEntry || Date.now() - cachedEntry.timestamp >= 3000) {
     const dev = discoveryService.getDevices().find(
       (d) => normalizeTarget(d.mac) === normalizedId || d.ip === rawId || d.hostname === rawId
     );
     if (dev && dev.ip) {
       const port = dev.port || 8080;
       try {
-        const queryParam = isHighRes ? '?full=1' : '';
-        const agentUrl = `http://${dev.ip}:${port}/snapshot${queryParam}`;
+        const agentUrl = `http://${dev.ip}:${port}/snapshot`;
         const controller = new AbortController();
         const timeout = setTimeout(() => controller.abort(), 1200);
         const resp = await fetch(agentUrl, { signal: controller.signal });
@@ -378,24 +376,18 @@ app.get(['/api/snapshot/:id', '/api/snapshot'], async (req, res) => {
         if (resp.ok) {
           const ab = await resp.arrayBuffer();
           const buffer = Buffer.from(ab);
-          if (!isHighRes) {
-            cachedEntry = { buffer, timestamp: Date.now() };
-            snapshotCache.set(normalizedId, cachedEntry);
-            if (dev.mac) snapshotCache.set(normalizeTarget(dev.mac), cachedEntry);
-            if (dev.ip) snapshotCache.set(dev.ip, cachedEntry);
-          } else {
-            res.setHeader('Content-Type', 'image/jpeg');
-            res.setHeader('Cache-Control', 'no-cache, no-store, must-revalidate');
-            return res.send(buffer);
-          }
+          cachedEntry = { buffer, timestamp: Date.now() };
+          snapshotCache.set(normalizedId, cachedEntry);
+          if (dev.mac) snapshotCache.set(normalizeTarget(dev.mac), cachedEntry);
+          if (dev.ip) snapshotCache.set(dev.ip, cachedEntry);
         }
       } catch {
-        // Direct fetch failed (e.g. firewall or offline), will fallback to cachedEntry below
+        // Fall through to existing cache if available
       }
     }
   }
 
-  // Graceful fallback to background push snapshot cache
+  // Graceful return from snapshot cache
   if (cachedEntry) {
     res.setHeader('Content-Type', 'image/jpeg');
     res.setHeader('Cache-Control', 'no-cache, no-store, must-revalidate');

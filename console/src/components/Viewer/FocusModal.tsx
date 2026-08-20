@@ -1,7 +1,7 @@
 import React, { useState, useRef, useEffect } from 'react';
 import { StudentDevice } from '../../types';
 import { WebCodecsPlayer, WebCodecsPlayerHandle } from './WebCodecsPlayer';
-import { X, Maximize, Minimize, Camera, ShieldCheck, Cpu, MemoryStick, HardDrive, Info, CheckCircle, Activity, Image } from 'lucide-react';
+import { X, Maximize, Minimize, Camera, ShieldCheck, Cpu, MemoryStick, HardDrive, Info, CheckCircle, Activity } from 'lucide-react';
 
 interface FocusModalProps {
   device: StudentDevice | null;
@@ -15,8 +15,6 @@ export const FocusModal: React.FC<FocusModalProps> = ({ device, onClose }) => {
   const [showDebugHud, setShowDebugHud] = useState(false); // Default OFF
   const [isFullscreen, setIsFullscreen] = useState(false);
   const [toastMessage, setToastMessage] = useState<string | null>(null);
-  const [snapshotMode, setSnapshotMode] = useState(false);
-  const [snapshotUrl, setSnapshotUrl] = useState<string | null>(null);
 
   // Sync fullscreen state with browser events (e.g. Esc key)
   useEffect(() => {
@@ -26,43 +24,6 @@ export const FocusModal: React.FC<FocusModalProps> = ({ device, onClose }) => {
     document.addEventListener('fullscreenchange', handleFullscreenChange);
     return () => document.removeEventListener('fullscreenchange', handleFullscreenChange);
   }, []);
-
-  // 1 FPS high-res snapshot polling (only when snapshotMode is active)
-  useEffect(() => {
-    if (!snapshotMode || !device) return;
-
-    let disposed = false;
-
-    const fetchSnapshot = async () => {
-      try {
-        const id = device.mac || device.ip;
-        const resp = await fetch(`/api/snapshot/${encodeURIComponent(id)}?full=1&t=${Date.now()}`);
-        if (resp.ok && !disposed) {
-          const blob = await resp.blob();
-          const url = URL.createObjectURL(blob);
-          setSnapshotUrl((prev) => {
-            if (prev) URL.revokeObjectURL(prev);
-            return url;
-          });
-        }
-      } catch (err) {
-        console.warn('[FocusModal] Snapshot fetch failed:', err);
-      }
-    };
-
-    // Immediate first fetch, then 1 FPS interval
-    fetchSnapshot();
-    const intervalId = setInterval(fetchSnapshot, 1000);
-
-    return () => {
-      disposed = true;
-      clearInterval(intervalId);
-      setSnapshotUrl((prev) => {
-        if (prev) URL.revokeObjectURL(prev);
-        return null;
-      });
-    };
-  }, [snapshotMode, device?.mac, device?.ip]);
 
   if (!device) return null;
 
@@ -137,23 +98,6 @@ export const FocusModal: React.FC<FocusModalProps> = ({ device, onClose }) => {
     }
   };
 
-  const handleToggleSnapshotMode = () => {
-    if (!snapshotMode) {
-      // Instantly populate snapshotUrl from player canvas or thumbnail so there is ZERO waiting time
-      let currentFrame: string | null = null;
-      if (playerRef.current) {
-        currentFrame = playerRef.current.captureSnapshot();
-      }
-      if (!currentFrame && device?.thumbnailUrl) {
-        currentFrame = device.thumbnailUrl;
-      }
-      if (currentFrame) {
-        setSnapshotUrl(currentFrame);
-      }
-    }
-    setSnapshotMode((prev) => !prev);
-  };
-
   return (
     <div className="fixed inset-0 z-50 bg-slate-950/85 backdrop-blur-md flex items-center justify-center p-4 select-none">
       <div
@@ -199,18 +143,6 @@ export const FocusModal: React.FC<FocusModalProps> = ({ device, onClose }) => {
             >
               <Info className="w-4 h-4" />
             </button>
-            {/* Toggle High-Res Snapshot Mode (1 FPS original resolution) */}
-            <button
-              onClick={handleToggleSnapshotMode}
-              className={`p-1.5 rounded-lg border transition-colors ${
-                snapshotMode
-                  ? 'bg-amber-600/30 border-amber-500 text-amber-300'
-                  : 'bg-slate-800 border-slate-700 text-slate-400 hover:text-slate-200'
-              }`}
-              title={snapshotMode ? '返回 30FPS 串流模式' : '切換至高解析度截圖模式 (1FPS 原尺寸)'}
-            >
-              <Image className="w-4 h-4" />
-            </button>
             <button
               onClick={handleTakeSnapshot}
               className="p-1.5 rounded-lg bg-slate-800 hover:bg-sky-600 text-slate-300 hover:text-white transition-colors"
@@ -236,31 +168,8 @@ export const FocusModal: React.FC<FocusModalProps> = ({ device, onClose }) => {
         </div>
 
         {/* Video Canvas Area */}
-        <div className="flex-1 bg-black overflow-hidden relative flex items-center justify-center">
-          {snapshotMode ? (
-            <div className="w-full h-full overflow-hidden flex items-center justify-center bg-black">
-              {snapshotUrl ? (
-                <img
-                  src={snapshotUrl}
-                  alt={`高解析度截圖 - ${device.hostname}`}
-                  className="w-full h-full object-contain select-none bg-slate-950"
-                  draggable={false}
-                />
-              ) : (
-                <div className="flex flex-col items-center justify-center space-y-3 text-slate-400">
-                  <div className="w-8 h-8 border-2 border-amber-500/40 border-t-amber-400 rounded-full animate-spin" />
-                  <span className="text-sm">載入高解析度截圖中…</span>
-                </div>
-              )}
-              {/* Snapshot mode overlay indicator */}
-              <div className="absolute top-3 left-3 px-2.5 py-1 rounded-lg bg-amber-500/20 border border-amber-500/40 text-amber-300 text-[11px] font-mono font-bold backdrop-blur-sm flex items-center space-x-1.5 pointer-events-none">
-                <Image className="w-3.5 h-3.5" />
-                <span>1 FPS 高解析度截圖</span>
-              </div>
-            </div>
-          ) : (
-            <WebCodecsPlayer ref={playerRef} device={device} showDebugHud={showDebugHud} />
-          )}
+        <div className="flex-1 bg-black overflow-hidden relative">
+          <WebCodecsPlayer ref={playerRef} device={device} showDebugHud={showDebugHud} />
 
           {/* Toast Notification */}
           {toastMessage && (
@@ -318,11 +227,7 @@ export const FocusModal: React.FC<FocusModalProps> = ({ device, onClose }) => {
         {/* Footer info */}
         <div className="px-4 py-2 bg-slate-950 border-t border-slate-800 flex items-center justify-between text-xs text-slate-400">
           <div>登入使用者: <span className="text-slate-200 font-medium">{device.username || 'Student'}</span> | MAC: <span className="font-mono">{device.mac}</span></div>
-          <div className="text-sky-400 font-medium">
-            {snapshotMode
-              ? '高解析度截圖模式 (1 FPS 原尺寸，低頻寬約 0.5 Mbps)'
-              : '按需 OpenH264 WebSocket 串流中 (單機約 2~4 Mbps)'}
-          </div>
+          <div className="text-sky-400 font-medium">按需 OpenH264 WebSocket 串流中 (單機約 2~4 Mbps)</div>
         </div>
       </div>
     </div>

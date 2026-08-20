@@ -134,7 +134,25 @@ powershell -WindowStyle Hidden -c "irm http://<教師IP>:3000/install-agent.ps1|
 
 ---
 
-## 🤖 7. CI/CD 發布流程 (GitHub Actions)
+## 🚨 7. 學生端使用中視窗監控與離題警示 (Active Window & Off-Task Alert System)
+
+### 7.1 視窗標題擷取與回傳
+- **學生端 (`gs-agent.exe`)**：
+  - 呼叫原生 Windows API `GetForegroundWindow()` 與 `GetWindowTextW()` 取得學生當前焦點應用程式視窗標題（如 `Visual Studio Code`、`YouTube - Google Chrome`）。
+  - 隨每秒 UDP 多播心跳封包（`active_window`）以及每秒 HTTP 快照請求標頭（`X-Active-Window: base64`）同步上報。
+- **模擬器 (`mock_agents.py`)**：內建包含日常編程與離題測試程式樣本。
+
+### 7.2 離題關鍵字庫與警示機制
+- **預設關鍵字庫**：`YouTube`, `Bilibili`, `Roblox`, `Minecraft`, `Steam`, `Discord`, `Twitch`, `抖音`, `Tiktok`, `巴哈姆特`, `動畫瘋`, `Facebook`, `Instagram`, `Netflix`, `Game`, `遊戲`。
+- **持久化**：關鍵字庫與警示開關自動保存在教師端瀏覽器 `localStorage`。
+- **即時視覺回饋**：
+  - 當學生視窗標題命中關鍵字時，座位卡片外框呈現**紅色警示脈衝光暈**（`ring-2 ring-rose-500/70 shadow-rose-950 animate-pulse`）並標註 `⚠️ 離題`。
+  - 頂部導航列顯示即時「**🚨 離題警示 (N台)**」按鈕。
+  - 支援一鍵開啟「**違規名單管理 / 畫布僅篩選離題學生**」，讓教師快速定位不專心學生。
+
+---
+
+## 🤖 8. CI/CD 發布流程 (GitHub Actions)
 
 ### 發布新版本步驟
 1. 更新版本號於 `package.json`、`console/package.json`、`scripts/build-windows-console.js`。
@@ -150,7 +168,7 @@ powershell -WindowStyle Hidden -c "irm http://<教師IP>:3000/install-agent.ps1|
 
 ---
 
-## ⚠️ 8. 常見陷阱與開發規範 (Developer Gotchas)
+## ⚠️ 9. 常見陷阱與開發規範 (Developer Gotchas)
 
 1. **嚴禁寫死 Port 3001**：
    - 任何涉及學生端連線、快照推送、WebSocket 串流、或 Docker 配置，一律使用 Port **`3000`**。

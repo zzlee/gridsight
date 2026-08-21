@@ -180,6 +180,97 @@ void HttpServer::ListenLoop() {
     }
 }
 
+bool HttpServer::AuthenticateRequest(std::istringstream& stream) {
+    std::string token_header;
+    std::string line;
+    while (std::getline(stream, line) && line != "\r" && line != "") {
+        if (line.find("X-Auth-Token:") == 0 || line.find("x-auth-token:") == 0) {
+            size_t colon = line.find(':');
+            if (colon != std::string::npos) {
+                token_header = line.substr(colon + 1);
+                while (!token_header.empty() && (token_header.front() == ' ' || token_header.front() == '\t'))
+                    token_header.erase(0, 1);
+                while (!token_header.empty() && (token_header.back() == '\r' || token_header.back() == '\n' || token_header.back() == ' '))
+                    token_header.pop_back();
+            }
+        }
+    }
+
+    if (TokenManager::Instance().HasValidToken()) {
+        return TokenManager::Instance().ValidateToken(token_header);
+    }
+    return true;
+}
+
+void HttpServer::HandleSnapshotRequest(uintptr_t client_socket, const std::string& path) {
+    std::vector<uint8_t> jpeg_to_send;
+
+    // On-demand High-Res (1:1 Original Screen Resolution) for Focus Mode
+    bool is_high_res = (path.find("full=1") != std::string::npos || path.find("highres=1") != std::string::npos);
+    if (is_high_res) {
+        FrameData frame;
+        if (capturer_->CaptureFrame(frame)) {
+            ImageEncoder::EncodeToJPEG(frame.bgra_buffer.data(), frame.width, frame.height, frame.width, frame.height, 85, jpeg_to_send);
+        }
+    }
+
+    if (jpeg_to_send.empty()) {
+        std::lock_guard<std::mutex> lock(snapshot_mutex_);
+        jpeg_to_send = cached_jpeg_data_;
+    }
+
+    if (!jpeg_to_send.empty()) {
+        // Immediate return from snapshot cache or live high-res encoder
+        SendResponse(client_socket, 200, "image/jpeg", jpeg_to_send);
+    } else {
+        // Cold start fallback
+        FrameData frame;
+        if (capturer_->CaptureFrame(frame)) {
+            std::vector<uint8_t> jpeg_data;
+            ImageEncoder::EncodeToJPEG(frame.bgra_buffer.data(), frame.width, frame.height, 480, 270, 70, jpeg_data);
+            SendResponse(client_socket, 200, "image/jpeg", jpeg_data);
+        } else {
+            std::string err = "{\"error\":\"Capture failed\"}";
+            SendResponse(client_socket, 500, "application/json", std::vector<uint8_t>(err.begin(), err.end()));
+        }
+    }
+}
+
+void HttpServer::HandleStatusRequest(uintptr_t client_socket) {
+    SystemHardwareInfo hw = Utils::GetSystemHardwareInfo();
+    std::ostringstream json;
+    json << "{"
+         << "\"status\":\"ok\","
+         << "\"service\":\"GridSight Beacon\","
+         << "\"hostname\":\"" << hw.hostname << "\","
+         << "\"os\":\"" << hw.os_name << "\","
+         << "\"uptime\":" << hw.uptime_seconds << ","
+         << "\"cpu\":{"
+         <<   "\"model\":\"" << hw.cpu_model << "\","
+         <<   "\"cores\":" << hw.cpu_cores << ","
+         <<   "\"usage_percent\":" << hw.cpu_usage_percent
+         << "},"
+         << "\"ram\":{"
+         <<   "\"total_mb\":" << hw.ram_total_mb << ","
+         <<   "\"avail_mb\":" << hw.ram_avail_mb << ","
+         <<   "\"usage_percent\":" << hw.ram_usage_percent
+         << "},"
+         << "\"disk\":{"
+         <<   "\"drive\":\"" << hw.disk_drive << "\","
+         <<   "\"total_gb\":" << hw.disk_total_gb << ","
+         <<   "\"free_gb\":" << hw.disk_free_gb << ","
+         <<   "\"usage_percent\":" << hw.disk_usage_percent
+         << "}"
+         << "}";
+    std::string json_str = json.str();
+    SendResponse(client_socket, 200, "application/json", std::vector<uint8_t>(json_str.begin(), json_str.end()));
+}
+
+void HttpServer::HandlePingRequest(uintptr_t client_socket) {
+    std::string json = "{\"status\":\"ok\",\"service\":\"GridSight Beacon\"}";
+    SendResponse(client_socket, 200, "application/json", std::vector<uint8_t>(json.begin(), json.end()));
+}
+
 void HttpServer::HandleClient(uintptr_t client_socket) {
     SOCKET s = (SOCKET)client_socket;
 
@@ -215,94 +306,19 @@ void HttpServer::HandleClient(uintptr_t client_socket) {
         return;
     }
 
-    // Check token authentication header if token set
-    std::string token_header;
-    std::string line;
-    while (std::getline(stream, line) && line != "\r" && line != "") {
-        if (line.find("X-Auth-Token:") == 0 || line.find("x-auth-token:") == 0) {
-            size_t colon = line.find(':');
-            if (colon != std::string::npos) {
-                token_header = line.substr(colon + 1);
-                while (!token_header.empty() && (token_header.front() == ' ' || token_header.front() == '\t'))
-                    token_header.erase(0, 1);
-                while (!token_header.empty() && (token_header.back() == '\r' || token_header.back() == '\n' || token_header.back() == ' '))
-                    token_header.pop_back();
-            }
-        }
-    }
-
-    if (TokenManager::Instance().HasValidToken()) {
-        if (!TokenManager::Instance().ValidateToken(token_header)) {
-            std::string err = "{\"error\":\"Unauthorized: Invalid X-Auth-Token\"}";
-            SendResponse(client_socket, 401, "application/json", std::vector<uint8_t>(err.begin(), err.end()));
-            closesocket(s);
-            return;
-        }
+    if (!AuthenticateRequest(stream)) {
+        std::string err = "{\"error\":\"Unauthorized: Invalid X-Auth-Token\"}";
+        SendResponse(client_socket, 401, "application/json", std::vector<uint8_t>(err.begin(), err.end()));
+        closesocket(s);
+        return;
     }
 
     if (path.find("/snapshot") == 0) {
-        std::vector<uint8_t> jpeg_to_send;
-
-        // On-demand High-Res (1:1 Original Screen Resolution) for Focus Mode
-        bool is_high_res = (path.find("full=1") != std::string::npos || path.find("highres=1") != std::string::npos);
-        if (is_high_res) {
-            FrameData frame;
-            if (capturer_->CaptureFrame(frame)) {
-                ImageEncoder::EncodeToJPEG(frame.bgra_buffer.data(), frame.width, frame.height, frame.width, frame.height, 85, jpeg_to_send);
-            }
-        }
-
-        if (jpeg_to_send.empty()) {
-            std::lock_guard<std::mutex> lock(snapshot_mutex_);
-            jpeg_to_send = cached_jpeg_data_;
-        }
-
-        if (!jpeg_to_send.empty()) {
-            // Immediate return from snapshot cache or live high-res encoder
-            SendResponse(client_socket, 200, "image/jpeg", jpeg_to_send);
-        } else {
-            // Cold start fallback
-            FrameData frame;
-            if (capturer_->CaptureFrame(frame)) {
-                std::vector<uint8_t> jpeg_data;
-                ImageEncoder::EncodeToJPEG(frame.bgra_buffer.data(), frame.width, frame.height, 480, 270, 70, jpeg_data);
-                SendResponse(client_socket, 200, "image/jpeg", jpeg_data);
-            } else {
-                std::string err = "{\"error\":\"Capture failed\"}";
-                SendResponse(client_socket, 500, "application/json", std::vector<uint8_t>(err.begin(), err.end()));
-            }
-        }
+        HandleSnapshotRequest(client_socket, path);
     } else if (path == "/status" || path == "/api/status") {
-        SystemHardwareInfo hw = Utils::GetSystemHardwareInfo();
-        std::ostringstream json;
-        json << "{"
-             << "\"status\":\"ok\","
-             << "\"service\":\"GridSight Beacon\","
-             << "\"hostname\":\"" << hw.hostname << "\","
-             << "\"os\":\"" << hw.os_name << "\","
-             << "\"uptime\":" << hw.uptime_seconds << ","
-             << "\"cpu\":{"
-             <<   "\"model\":\"" << hw.cpu_model << "\","
-             <<   "\"cores\":" << hw.cpu_cores << ","
-             <<   "\"usage_percent\":" << hw.cpu_usage_percent
-             << "},"
-             << "\"ram\":{"
-             <<   "\"total_mb\":" << hw.ram_total_mb << ","
-             <<   "\"avail_mb\":" << hw.ram_avail_mb << ","
-             <<   "\"usage_percent\":" << hw.ram_usage_percent
-             << "},"
-             << "\"disk\":{"
-             <<   "\"drive\":\"" << hw.disk_drive << "\","
-             <<   "\"total_gb\":" << hw.disk_total_gb << ","
-             <<   "\"free_gb\":" << hw.disk_free_gb << ","
-             <<   "\"usage_percent\":" << hw.disk_usage_percent
-             << "}"
-             << "}";
-        std::string json_str = json.str();
-        SendResponse(client_socket, 200, "application/json", std::vector<uint8_t>(json_str.begin(), json_str.end()));
+        HandleStatusRequest(client_socket);
     } else if (path == "/ping") {
-        std::string json = "{\"status\":\"ok\",\"service\":\"GridSight Beacon\"}";
-        SendResponse(client_socket, 200, "application/json", std::vector<uint8_t>(json.begin(), json.end()));
+        HandlePingRequest(client_socket);
     } else {
         std::string not_found = "{\"error\":\"Not found\"}";
         SendResponse(client_socket, 404, "application/json", std::vector<uint8_t>(not_found.begin(), not_found.end()));

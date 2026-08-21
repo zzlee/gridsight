@@ -27635,7 +27635,7 @@ app.get("/api/health", (req, res) => {
 });
 app.get("/api/server-info", (req, res) => {
   res.json({
-    version: "5.4.1",
+    version: "5.4.2",
     teacherIp: activeTeacherIp,
     port: PORT,
     nicName: activeNicName
@@ -27749,7 +27749,7 @@ app.get("/install-agent.ps1", (req, res) => {
     host = `${activeTeacherIp}:${PORT}`;
   }
   const script = `# ========================================================
-# GridSight Agent One-Click Pull & Launch Script (v5.4.1)
+# GridSight Agent One-Click Pull & Launch Script (v5.4.2)
 # ========================================================
 $ErrorActionPreference = "SilentlyContinue"
 $serverHost = "${host}"
@@ -27758,7 +27758,7 @@ $destDir = "$env:TEMP"
 $destPath = "$destDir\\gs-agent.exe"
 
 Write-Host "=======================================================" -ForegroundColor Cyan
-Write-Host "  GridSight Student Agent v5.4.1 \u90E8\u7F72\u8207\u555F\u52D5\u7A0B\u5E8F" -ForegroundColor Cyan
+Write-Host "  GridSight Student Agent v5.4.2 \u90E8\u7F72\u8207\u555F\u52D5\u7A0B\u5E8F" -ForegroundColor Cyan
 Write-Host "=======================================================" -ForegroundColor Cyan
 Write-Host "[GridSight] \u6B63\u5728\u7D42\u6B62\u820A\u7248 gs-agent \u884C\u7A0B..." -ForegroundColor Yellow
 
@@ -27778,13 +27778,13 @@ try {
     netsh advfirewall firewall add rule name="GridSight Agent Out" dir=out action=allow program="$destPath" enable=yes profile=any protocol=any 2>$null | Out-Null
 } catch {}
 
-Write-Host "[GridSight] \u6B63\u5728\u555F\u52D5\u6700\u65B0\u7248 gs-agent.exe (v5.4.1)..." -ForegroundColor Green
+Write-Host "[GridSight] \u6B63\u5728\u555F\u52D5\u6700\u65B0\u7248 gs-agent.exe (v5.4.2)..." -ForegroundColor Green
 Start-Process -FilePath $destPath -WindowStyle Hidden
 
 Start-Sleep -Seconds 1
 $proc = Get-Process -Name "gs-agent" -ErrorAction SilentlyContinue
 if ($proc) {
-    Write-Host "[GridSight] \u2705 \u5B78\u751F\u7AEF\u4EE3\u7406\u7A0B\u5F0F (v5.4.1) \u5DF2\u6210\u529F\u5728\u80CC\u666F\u555F\u52D5\uFF01 (PID: $($proc[0].Id))" -ForegroundColor Green
+    Write-Host "[GridSight] \u2705 \u5B78\u751F\u7AEF\u4EE3\u7406\u7A0B\u5F0F (v5.4.2) \u5DF2\u6210\u529F\u5728\u80CC\u666F\u555F\u52D5\uFF01 (PID: $($proc[0].Id))" -ForegroundColor Green
 } else {
     Write-Host "[GridSight] \u26A0\uFE0F \u8B66\u544A\uFF1A\u7121\u6CD5\u78BA\u8A8D\u80CC\u666F\u884C\u7A0B\u72C0\u614B\uFF0C\u8ACB\u6AA2\u67E5\u9632\u6BD2\u8EDF\u9AD4\u6216\u6B0A\u9650\u8A2D\u5B9A\u3002" -ForegroundColor Yellow
 }
@@ -27990,26 +27990,27 @@ async function bootstrap() {
     const localUrl = `http://localhost:${PORT}`;
     const lanUrl = `http://${activeTeacherIp}:${PORT}`;
     logger.info(`=============================================================`);
-    logger.info(`  \u{1F680} GridSight Teacher Console v5.4.1`);
+    logger.info(`  \u{1F680} GridSight Teacher Console v5.4.2`);
     logger.info(`  \u7D81\u5B9A\u7DB2\u8DEF\u5361 (NIC): ${activeNicName} (${activeTeacherIp})`);
     logger.info(`  \u672C\u6A5F\u63A7\u5236\u53F0\u7DB2\u5740:   ${localUrl}`);
     logger.info(`  \u5B78\u751F\u9023\u7DDA\u7DB2\u5740:     ${lanUrl}/join`);
     logger.info(`  \u591A\u64AD\u52D5\u614B\u63A2\u7D22:     239.255.42.99:8888`);
     logger.info(`=============================================================`);
     if (!process.argv.includes("--no-open") && !process.env.NO_OPEN) {
+      const targetUrl = activeTeacherIp && activeTeacherIp !== "127.0.0.1" && activeTeacherIp !== "0.0.0.0" ? lanUrl : localUrl;
       const platform = process.platform;
       let cmd = "";
       if (platform === "win32") {
-        cmd = `start "" "${localUrl}"`;
+        cmd = `start "" "${targetUrl}"`;
       } else if (platform === "darwin") {
-        cmd = `open "${localUrl}"`;
+        cmd = `open "${targetUrl}"`;
       } else {
-        cmd = `xdg-open "${localUrl}"`;
+        cmd = `xdg-open "${targetUrl}"`;
       }
       import("child_process").then(({ exec }) => {
         exec(cmd, (err) => {
           if (!err) {
-            logger.info(`[Browser] \u{1F310} \u5DF2\u81EA\u52D5\u958B\u555F\u700F\u89BD\u5668\u5C0E\u5411\u63A7\u5236\u53F0: ${localUrl}`);
+            logger.info(`[Browser] \u{1F310} \u5DF2\u81EA\u52D5\u958B\u555F\u700F\u89BD\u5668\u5C0E\u5411\u63A7\u5236\u53F0: ${targetUrl}`);
           }
         });
       }).catch(() => {

@@ -94,36 +94,43 @@ if (fs.existsSync(toolsSrc)) {
 console.log('[5/5] 📝 Generating Windows batch launchers & readme...');
 
 // Start Launcher (.bat)
-const startBatContent = `@echo off
-chcp 65001 >nul
-cd /d "%~dp0"
-title GridSight Teacher Console
-echo ===============================================================
-echo   🚀 GridSight 教師端控制台 (官方簽名 0 防毒誤報 綠色版)
-echo ===============================================================
-echo   提示: 關閉此視窗或執行「stop-console.bat」即可關閉服務。
-echo ===============================================================
-"%~dp0bin\\node.exe" "%~dp0server\\server.cjs"
-if %errorlevel% neq 0 (
-  pause
-)
-`;
+const startBatContent = [
+  '@echo off',
+  'chcp 65001 >nul',
+  'cd /d "%~dp0"',
+  'title GridSight Teacher Console',
+  'echo ===============================================================',
+  'echo   GridSight Teacher Console (Portable Edition)',
+  'echo ===============================================================',
+  'echo   Starting GridSight Console server...',
+  'echo   Tip: Run stop-console.bat or close this window to stop.',
+  'echo ===============================================================',
+  '"%~dp0bin\\node.exe" "%~dp0server\\server.cjs"',
+  'if %errorlevel% neq 0 (',
+  '  pause',
+  ')',
+  '',
+].join('\r\n');
+
 fs.writeFileSync(path.resolve(portableDir, 'start-console.bat'), startBatContent, 'utf-8');
 fs.writeFileSync(path.resolve(portableDir, 'START_CONSOLE.bat'), startBatContent, 'utf-8');
 
 // Stop Launcher (.bat)
-const stopBatContent = `@echo off
-chcp 65001 >nul
-cd /d "%~dp0"
-echo ===============================================================
-echo   🛑 正在停止 GridSight 教師端控制台...
-echo ===============================================================
-for /f "tokens=5" %%a in ('netstat -aon ^| findstr ":3000" ^| findstr "LISTENING"') do (
-    taskkill /f /pid %%a 2>nul
-)
-echo [GridSight] ✅ 控制台已成功停止！
-timeout /t 2 >nul
-`;
+const stopBatContent = [
+  '@echo off',
+  'chcp 65001 >nul',
+  'cd /d "%~dp0"',
+  'echo ===============================================================',
+  'echo   Stopping GridSight Teacher Console...',
+  'echo ===============================================================',
+  'for /f "tokens=5" %%a in (\'netstat -aon ^| findstr ":3000" ^| findstr "LISTENING"\') do (',
+  '    taskkill /f /pid %%a 2>nul',
+  ')',
+  'echo [GridSight] Console stopped successfully.',
+  'timeout /t 2 >nul',
+  '',
+].join('\r\n');
+
 fs.writeFileSync(path.resolve(portableDir, 'stop-console.bat'), stopBatContent, 'utf-8');
 fs.writeFileSync(path.resolve(portableDir, 'STOP_CONSOLE.bat'), stopBatContent, 'utf-8');
 

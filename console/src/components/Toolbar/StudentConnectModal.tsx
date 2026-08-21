@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { X, Copy, Check, Download, Terminal, PowerOff, Sparkles, ExternalLink, QrCode, Monitor } from 'lucide-react';
 
 interface StudentConnectModalProps {
@@ -13,10 +13,29 @@ export const StudentConnectModal: React.FC<StudentConnectModalProps> = ({
   isStandalonePage = false,
 }) => {
   const [copiedType, setCopiedType] = useState<string | null>(null);
+  const [currentHost, setCurrentHost] = useState<string>(() => {
+    return window.location.host || '192.168.1.200:3000';
+  });
+
+  useEffect(() => {
+    // If opened via localhost or 127.0.0.1 on teacher PC, query /api/server-info to show real LAN IP
+    const hostname = window.location.hostname;
+    const isLocal = hostname === 'localhost' || hostname === '127.0.0.1';
+
+    fetch('/api/server-info')
+      .then((res) => res.json())
+      .then((data) => {
+        if (data?.teacherIp && data.teacherIp !== '127.0.0.1' && data.teacherIp !== '0.0.0.0') {
+          if (isLocal) {
+            setCurrentHost(`${data.teacherIp}:${data.port || 3000}`);
+          }
+        }
+      })
+      .catch(() => {});
+  }, []);
 
   if (!isOpen) return null;
 
-  const currentHost = window.location.host || '192.168.1.200:3000';
   const joinUrl = `${window.location.protocol}//${currentHost}/join`;
 
   // Win + R one-liner (executes powershell silently in background)

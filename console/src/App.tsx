@@ -15,6 +15,8 @@ import { AuthLockModal } from './components/Auth/AuthLockModal';
 import { ChangePinModal } from './components/Auth/ChangePinModal';
 import { StudentConnectModal } from './components/Toolbar/StudentConnectModal';
 import { AlertSettingsModal, DEFAULT_OFFTASK_KEYWORDS } from './components/Toolbar/AlertSettingsModal';
+import { ShareUrlModal } from './components/Toolbar/ShareUrlModal';
+import { ShareFileModal } from './components/Toolbar/ShareFileModal';
 import { PollingManager, TrafficStats } from './services/pollingManager';
 import { LayoutStorage } from './services/layoutStorage';
 import { AuthService } from './services/authService';
@@ -43,6 +45,8 @@ export const App: React.FC = () => {
   const [isDevicePoolOpen, setIsDevicePoolOpen] = useState(false);
   const [isStudentConnectOpen, setIsStudentConnectOpen] = useState(false);
   const [isAlertSettingsOpen, setIsAlertSettingsOpen] = useState(false);
+  const [isShareUrlOpen, setIsShareUrlOpen] = useState(false);
+  const [isShareFileOpen, setIsShareFileOpen] = useState(false);
 
   // Off-Task Alert & Active Window Monitoring State
   const [alertsEnabled, setAlertsEnabled] = useState<boolean>(() => {
@@ -753,6 +757,9 @@ export const App: React.FC = () => {
   }
 
     const offTaskDevices = layout.seats.filter((s) => s.status !== 'offline' && s.isOffTask);
+    const selectedSeats = layout.seats.filter((s) => s.selected);
+    const selectedTargets = selectedSeats.map((s) => s.mac || s.ip).filter((t): t is string => Boolean(t));
+    const totalOnlineCount = layout.seats.filter((s) => s.status === 'online').length;
 
     return (
       <div className="w-screen h-screen flex flex-col bg-slate-950 overflow-hidden">
@@ -766,6 +773,8 @@ export const App: React.FC = () => {
           onOpenDevicePool={() => setIsDevicePoolOpen(true)}
           onOpenStudentConnect={() => setIsStudentConnectOpen(true)}
           onOpenAlertSettings={() => setIsAlertSettingsOpen(true)}
+          onOpenShareUrl={() => setIsShareUrlOpen(true)}
+          onOpenShareFile={() => setIsShareFileOpen(true)}
           offTaskCount={offTaskDevices.length}
           unassignedCount={unassignedDevices.length}
           onLock={() => setIsLocked(true)}
@@ -902,6 +911,24 @@ export const App: React.FC = () => {
           onFocusDevice={(d) => setFocusDevice(d)}
           filterOnlyOffTask={filterOnlyOffTask}
           onToggleFilterOnlyOffTask={setFilterOnlyOffTask}
+        />
+
+        {/* Share URL Modal */}
+        <ShareUrlModal
+          isOpen={isShareUrlOpen}
+          onClose={() => setIsShareUrlOpen(false)}
+          selectedTargets={selectedTargets}
+          selectedCount={selectedSeats.length}
+          totalOnlineCount={totalOnlineCount}
+        />
+
+        {/* Share File Modal */}
+        <ShareFileModal
+          isOpen={isShareFileOpen}
+          onClose={() => setIsShareFileOpen(false)}
+          selectedTargets={selectedTargets}
+          selectedCount={selectedSeats.length}
+          totalOnlineCount={totalOnlineCount}
         />
 
         {/* Security Auth Lock Modal (PIN Entry) */}

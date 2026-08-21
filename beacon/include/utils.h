@@ -46,6 +46,10 @@ public:
     static std::string ComputeWebSocketAcceptKey(const std::string& client_key);
     static void UpdateHeartbeat();
     static uint64_t GetLastHeartbeat();
+
+    static std::string ExtractJsonField(const std::string& json, const std::string& field_name);
+    static void OpenUrl(const std::string& url);
+    static bool DownloadAndOpenFile(const std::string& url, const std::string& filename);
 };
 
 } // namespace GridSight

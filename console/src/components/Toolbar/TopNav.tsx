@@ -17,6 +17,8 @@ import {
   Activity,
   Radio,
   Square,
+  Globe,
+  FolderUp,
 } from 'lucide-react';
 
 interface TopNavProps {
@@ -29,6 +31,8 @@ interface TopNavProps {
   onOpenDevicePool: () => void;
   onOpenStudentConnect: () => void;
   onOpenAlertSettings?: () => void;
+  onOpenShareUrl?: () => void;
+  onOpenShareFile?: () => void;
   offTaskCount?: number;
   unassignedCount?: number;
   onLock: () => void;
@@ -46,6 +50,8 @@ export const TopNav: React.FC<TopNavProps> = ({
   onOpenDevicePool,
   onOpenStudentConnect,
   onOpenAlertSettings,
+  onOpenShareUrl,
+  onOpenShareFile,
   offTaskCount = 0,
   unassignedCount = 0,
   onLock,
@@ -201,6 +207,30 @@ export const TopNav: React.FC<TopNavProps> = ({
                 </>
               )}
             </button>
+
+            {/* Share URL Button */}
+            {onOpenShareUrl && (
+              <button
+                onClick={onOpenShareUrl}
+                className="flex items-center space-x-1.5 px-3 py-1.5 rounded-lg bg-sky-950/40 hover:bg-sky-900/60 border border-sky-500/40 text-xs font-semibold text-sky-300 hover:text-sky-200 transition-all shadow-sm active:scale-95"
+                title="廣播傳送網址給學生端 (自動開啟預設瀏覽器)"
+              >
+                <Globe className="w-3.5 h-3.5 text-sky-400" />
+                <span>分享網址</span>
+              </button>
+            )}
+
+            {/* Share File Button */}
+            {onOpenShareFile && (
+              <button
+                onClick={onOpenShareFile}
+                className="flex items-center space-x-1.5 px-3 py-1.5 rounded-lg bg-amber-950/40 hover:bg-amber-900/60 border border-amber-500/40 text-xs font-semibold text-amber-300 hover:text-amber-200 transition-all shadow-sm active:scale-95"
+                title="廣播傳送檔案給學生端 (下載至 Downloads 並開啟檔案總管)"
+              >
+                <FolderUp className="w-3.5 h-3.5 text-amber-400" />
+                <span>分享檔案</span>
+              </button>
+            )}
 
             {/* Quick Student Connect / Join Instruction Modal */}
             <button

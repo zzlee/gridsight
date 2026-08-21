@@ -224,12 +224,24 @@ const defaultSeatsFile = isStandalone
   : '/data/seats.json';
 const SEATS_FILE = process.env.SEATS_FILE || defaultSeatsFile;
 
+const UPLOADS_DIR = isStandalone
+  ? path.resolve(process.cwd(), 'data', 'uploads')
+  : '/data/uploads';
+
 const ensureSeatsDirectory = async () => {
   const dir = path.dirname(SEATS_FILE);
   try {
     await fs.promises.mkdir(dir, { recursive: true });
   } catch (err) {
     logger.warn(`[Seats] Failed to create directory ${dir}: ${err}`);
+  }
+};
+
+const ensureUploadsDirectory = async () => {
+  try {
+    await fs.promises.mkdir(UPLOADS_DIR, { recursive: true });
+  } catch (err) {
+    logger.warn(`[Share] Failed to create uploads directory ${UPLOADS_DIR}: ${err}`);
   }
 };
 
@@ -353,6 +365,151 @@ app.post('/api/broadcast/stop', requireTeacherAuth, (req, res) => {
 
 app.get('/api/broadcast/status', requireTeacherAuth, (req, res) => {
   res.json({ active: broadcastStreamer.isActive() });
+});
+
+// Route: Share URL to Student Agents (Opens Default Browser)
+app.post('/api/share/url', requireTeacherAuth, (req, res) => {
+  let { url, targets } = req.body || {};
+  if (!url || typeof url !== 'string' || !url.trim()) {
+    return res.status(400).json({ error: '請提供有效的網址' });
+  }
+
+  let finalUrl = url.trim();
+  if (!/^https?:\/\//i.test(finalUrl)) {
+    finalUrl = 'http://' + finalUrl;
+  }
+
+  const payload = JSON.stringify({ action: 'OPEN_URL', url: finalUrl });
+
+  let targetMacs: string[] = [];
+  if (Array.isArray(targets) && targets.length > 0) {
+    targetMacs = targets.map((t) => normalizeTarget(t)).filter(Boolean);
+  }
+
+  let count = 0;
+  if (targetMacs.length === 0 || targetMacs.includes('ALL')) {
+    agentSockets.forEach((ws, mac) => {
+      if (ws.readyState === WebSocket.OPEN) {
+        ws.send(payload);
+        count++;
+      }
+    });
+  } else {
+    targetMacs.forEach((mac) => {
+      const ws = agentSockets.get(mac);
+      if (ws && ws.readyState === WebSocket.OPEN) {
+        ws.send(payload);
+        count++;
+      }
+    });
+  }
+
+  logger.info(`[Share] Shared URL "${finalUrl}" to ${count} student agents`);
+  res.json({ success: true, count, url: finalUrl, message: `已將網址發送至 ${count} 台學生機` });
+});
+
+// Route: Share File to Student Agents (Downloads to Downloads directory & opens File Explorer)
+app.post(
+  '/api/share/file',
+  requireTeacherAuth,
+  express.raw({ type: '*/*', limit: '100mb' }),
+  async (req, res) => {
+    try {
+      await ensureUploadsDirectory();
+
+      const rawFilename = (req.headers['x-filename'] as string) || (req.query.filename as string) || 'shared_file';
+      let filename = 'shared_file';
+      try {
+        filename = decodeURIComponent(rawFilename);
+      } catch {
+        filename = rawFilename;
+      }
+      const safeFilename = path.basename(filename).replace(/[/\\?%*:|"<>]/g, '_');
+
+      const rawTargets = (req.headers['x-targets'] as string) || (req.query.targets as string) || '';
+      let targets: string[] = [];
+      if (rawTargets) {
+        try {
+          targets = JSON.parse(rawTargets);
+        } catch {
+          targets = rawTargets.split(',').map((t) => t.trim());
+        }
+      }
+
+      const fileBuffer = req.body as Buffer;
+      if (!fileBuffer || fileBuffer.length === 0) {
+        return res.status(400).json({ error: '檔案內容不可為空' });
+      }
+
+      const fileId = Date.now().toString(36) + Math.random().toString(36).substring(2, 6);
+      const savedPath = path.join(UPLOADS_DIR, `${fileId}_${safeFilename}`);
+
+      await fs.promises.writeFile(savedPath, fileBuffer);
+      logger.info(`[Share] File saved to ${savedPath} (${fileBuffer.length} bytes)`);
+
+      const host = req.headers.host || `${activeTeacherIp}:${PORT}`;
+      const teacherHost = (activeTeacherIp && activeTeacherIp !== '127.0.0.1') ? `${activeTeacherIp}:${PORT}` : host;
+      const downloadUrl = `http://${teacherHost}/api/share/download/${fileId}/${encodeURIComponent(safeFilename)}`;
+
+      const payload = JSON.stringify({
+        action: 'SHARE_FILE',
+        url: downloadUrl,
+        filename: safeFilename,
+        fileSize: fileBuffer.length,
+      });
+
+      let targetMacs: string[] = [];
+      if (Array.isArray(targets) && targets.length > 0) {
+        targetMacs = targets.map((t) => normalizeTarget(t)).filter(Boolean);
+      }
+
+      let count = 0;
+      if (targetMacs.length === 0 || targetMacs.includes('ALL')) {
+        agentSockets.forEach((ws, mac) => {
+          if (ws.readyState === WebSocket.OPEN) {
+            ws.send(payload);
+            count++;
+          }
+        });
+      } else {
+        targetMacs.forEach((mac) => {
+          const ws = agentSockets.get(mac);
+          if (ws && ws.readyState === WebSocket.OPEN) {
+            ws.send(payload);
+            count++;
+          }
+        });
+      }
+
+      logger.info(`[Share] Shared file "${safeFilename}" to ${count} student agents via ${downloadUrl}`);
+      res.json({
+        success: true,
+        count,
+        fileId,
+        filename: safeFilename,
+        downloadUrl,
+        message: `已將檔案 "${safeFilename}" 發送至 ${count} 台學生機`,
+      });
+    } catch (err: any) {
+      logger.error(`[Share] Error sharing file: ${err.message || err}`);
+      res.status(500).json({ error: '伺服器處理檔案分享失敗' });
+    }
+  }
+);
+
+// Route: Download Shared File for Student Agents
+app.get('/api/share/download/:fileId/:filename', async (req, res) => {
+  const { fileId, filename } = req.params;
+  const safeFilename = path.basename(filename).replace(/[/\\?%*:|"<>]/g, '_');
+  const filePath = path.join(UPLOADS_DIR, `${fileId}_${safeFilename}`);
+
+  if (fs.existsSync(filePath)) {
+    res.setHeader('Content-Type', 'application/octet-stream');
+    res.setHeader('Content-Disposition', `attachment; filename="${encodeURIComponent(filename)}"`);
+    res.sendFile(filePath);
+  } else {
+    res.status(404).json({ error: '找不到分享之檔案' });
+  }
 });
 
 // Route: Receive outbound JPEG snapshots pushed from student agents (100% firewall proof)

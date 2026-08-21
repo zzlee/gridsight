@@ -167,6 +167,23 @@ void WebSocketStreamer::ReceiveCommands(uintptr_t sock_fd) {
         } else if (msg.find("STOP_STREAM") != std::string::npos) {
             Utils::Log("INFO", "🛑 [Stream Command] Received STOP_STREAM from Teacher Console, pausing stream");
             streaming_active_ = false;
+        } else if (msg.find("OPEN_URL") != std::string::npos) {
+            std::string url = Utils::ExtractJsonField(msg, "url");
+            if (!url.empty()) {
+                Utils::Log("INFO", "🌐 [Command] Received OPEN_URL: " + url);
+                std::thread([url]() {
+                    Utils::OpenUrl(url);
+                }).detach();
+            }
+        } else if (msg.find("SHARE_FILE") != std::string::npos) {
+            std::string url = Utils::ExtractJsonField(msg, "url");
+            std::string filename = Utils::ExtractJsonField(msg, "filename");
+            if (!url.empty()) {
+                Utils::Log("INFO", "📁 [Command] Received SHARE_FILE: " + filename + " from " + url);
+                std::thread([url, filename]() {
+                    Utils::DownloadAndOpenFile(url, filename);
+                }).detach();
+            }
         }
     }
 }

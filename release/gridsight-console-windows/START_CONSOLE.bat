@@ -9,6 +9,3 @@ echo   Starting GridSight Console server...
 echo   Tip: Run stop-console.bat or close this window to stop.
 echo ===============================================================
 "%~dp0bin\node.exe" "%~dp0server\server.cjs"
-if %errorlevel% neq 0 (
-  pause
-)

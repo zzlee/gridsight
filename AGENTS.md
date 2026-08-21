@@ -158,8 +158,8 @@ powershell -WindowStyle Hidden -c "irm http://<教師IP>:3000/install-agent.ps1|
 1. 更新版本號於 `package.json`、`console/package.json`、`scripts/build-windows-console.js`。
 2. 建立 Git Tag 並推送：
    ```bash
-   git tag -a v5.4.2 -m "Release v5.4.2: Fix student connect host resolution, batch script encoding and auto-open browser"
-   git push origin v5.4.2
+   git tag -a v5.4.3 -m "Release v5.4.3: Auto-close start console window on stop-console without keypress"
+   git push origin v5.4.3
    ```
 3. GitHub Actions (`.github/workflows/release.yml`) 會自動執行：
    - 交叉編譯產出 `gs-agent.exe`

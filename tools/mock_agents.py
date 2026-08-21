@@ -102,7 +102,7 @@ class MockAgent:
 
         return {
             "type": "BEACON",
-            "version": "5.4.2",
+            "version": "5.4.3",
             "hostname": self.hostname,
             "ip": self.ip,
             "port": self.port,
@@ -111,7 +111,7 @@ class MockAgent:
             "active_window": self.active_window,
             "timestamp": int(time.time() * 1000),
             "specs": {
-                "agent_version": "5.4.2",
+                "agent_version": "5.4.3",
                 "os": "Windows 11 Pro (Mock)",
                 "uptime": 3600,
                 "cpu": {"model": "Intel Core i7-12700 (Mock)", "cores": 12, "usage_percent": self.metrics["cpu"]},

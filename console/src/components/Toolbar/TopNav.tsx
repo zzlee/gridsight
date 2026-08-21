@@ -1,6 +1,8 @@
 import React from 'react';
 import { AppMode, ClassroomLayout } from '../../types';
 import { TrafficStats } from '../../services/pollingManager';
+import { useState, useEffect } from 'react';
+import { AuthService } from '../../services/authService';
 import {
   Edit3,
   Eye,
@@ -13,6 +15,8 @@ import {
   Lock,
   KeyRound,
   Activity,
+  Radio,
+  Square,
 } from 'lucide-react';
 
 interface TopNavProps {
@@ -51,6 +55,50 @@ export const TopNav: React.FC<TopNavProps> = ({
   const activeSeatCount = layout.seats.length;
   const cols = layout.cols;
   const rows = layout.rows;
+
+  const [isBroadcasting, setIsBroadcasting] = useState(false);
+  const [broadcastLoading, setBroadcastLoading] = useState(false);
+
+  // Check broadcast status periodically
+  useEffect(() => {
+    const checkBroadcastStatus = async () => {
+      try {
+        const resp = await AuthService.fetchWithAuth('/api/broadcast/status');
+        if (resp.ok) {
+          const data = await resp.json();
+          setIsBroadcasting(!!data.active);
+        }
+      } catch {}
+    };
+
+    checkBroadcastStatus();
+    const interval = setInterval(checkBroadcastStatus, 3000);
+    return () => clearInterval(interval);
+  }, []);
+
+  const handleToggleBroadcast = async () => {
+    setBroadcastLoading(true);
+    try {
+      if (isBroadcasting) {
+        const resp = await AuthService.fetchWithAuth('/api/broadcast/stop', { method: 'POST' });
+        if (resp.ok) {
+          setIsBroadcasting(false);
+        }
+      } else {
+        const resp = await AuthService.fetchWithAuth('/api/broadcast/start', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ fps: 30, bitrateKbps: 5000 }),
+        });
+        if (resp.ok) {
+          setIsBroadcasting(true);
+        }
+      }
+    } catch {
+    } finally {
+      setBroadcastLoading(false);
+    }
+  };
 
   return (
     <header className="h-14 bg-slate-950 border-b border-slate-800 px-4 flex items-center justify-between z-30 select-none">
@@ -129,6 +177,30 @@ export const TopNav: React.FC<TopNavProps> = ({
                 </div>
               </div>
             )}
+
+            {/* H.264 RTP Multicast Screen Broadcast Button */}
+            <button
+              onClick={handleToggleBroadcast}
+              disabled={broadcastLoading}
+              className={`flex items-center space-x-1.5 px-3 py-1.5 rounded-lg border text-xs font-semibold transition-all active:scale-95 ${
+                isBroadcasting
+                  ? 'bg-red-600 hover:bg-red-700 border-red-500 text-white ring-2 ring-red-500/50 shadow-lg shadow-red-950/50 animate-pulse'
+                  : 'bg-purple-950/40 hover:bg-purple-900/60 border border-purple-500/40 text-purple-300 hover:text-purple-200'
+              }`}
+              title={isBroadcasting ? '停止教師畫面全體廣播' : '啟動教師畫面全體廣播 (H.264 UDP Multicast)'}
+            >
+              {isBroadcasting ? (
+                <>
+                  <Square className="w-3.5 h-3.5 fill-current text-white animate-bounce" />
+                  <span>停止廣播</span>
+                </>
+              ) : (
+                <>
+                  <Radio className="w-3.5 h-3.5 text-purple-400" />
+                  <span>廣播畫面</span>
+                </>
+              )}
+            </button>
 
             {/* Quick Student Connect / Join Instruction Modal */}
             <button

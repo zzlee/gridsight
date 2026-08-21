@@ -16,12 +16,14 @@
 #include <ws2tcpip.h>
 #include <iphlpapi.h>
 #include <windows.h>
-#include <shlobj.h>
+#include <initguid.h>
 #include <knownfolders.h>
+#include <shlobj.h>
 #include <shellapi.h>
 #pragma comment(lib, "iphlpapi.lib")
 #pragma comment(lib, "ws2_32.lib")
 #pragma comment(lib, "shell32.lib")
+#pragma comment(lib, "uuid.lib")
 #else
 #include <sys/socket.h>
 #include <netinet/in.h>

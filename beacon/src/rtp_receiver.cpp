@@ -159,29 +159,129 @@ void RTPReceiver::ReceiveLoop() {
 }
 
 #ifdef _WIN32
+static void ToggleFullscreen(HWND hwnd) {
+    LONG style = GetWindowLongA(hwnd, GWL_STYLE);
+    if (style & WS_OVERLAPPEDWINDOW) {
+        // Switch to Fullscreen mode
+        MONITORINFO mi = { sizeof(mi) };
+        if (GetMonitorInfoA(MonitorFromWindow(hwnd, MONITOR_DEFAULTTOPRIMARY), &mi)) {
+            SetWindowLongA(hwnd, GWL_STYLE, WS_POPUP | WS_VISIBLE);
+            SetWindowPos(hwnd, HWND_TOPMOST,
+                         mi.rcMonitor.left, mi.rcMonitor.top,
+                         mi.rcMonitor.right - mi.rcMonitor.left,
+                         mi.rcMonitor.bottom - mi.rcMonitor.top,
+                         SWP_NOOWNERZORDER | SWP_FRAMECHANGED);
+        }
+    } else {
+        // Switch to Windowed mode
+        SetWindowLongA(hwnd, GWL_STYLE, WS_OVERLAPPEDWINDOW | WS_VISIBLE);
+        int screen_w = GetSystemMetrics(SM_CXSCREEN);
+        int screen_h = GetSystemMetrics(SM_CYSCREEN);
+        int win_w = 1280;
+        int win_h = 720;
+        int x = (screen_w - win_w) / 2;
+        int y = (screen_h - win_h) / 2;
+        SetWindowPos(hwnd, HWND_NOTOPMOST, x, y, win_w, win_h, SWP_NOOWNERZORDER | SWP_FRAMECHANGED);
+    }
+}
+
 static LRESULT CALLBACK OverlayWndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) {
-    if (msg == WM_PAINT) {
+    switch (msg) {
+    case WM_LBUTTONDBLCLK:
+        ToggleFullscreen(hwnd);
+        return 0;
+
+    case WM_KEYDOWN:
+        if (wParam == 'F' || wParam == 'f' || wParam == VK_F11) {
+            ToggleFullscreen(hwnd);
+            return 0;
+        } else if (wParam == VK_ESCAPE) {
+            LONG style = GetWindowLongA(hwnd, GWL_STYLE);
+            if (!(style & WS_OVERLAPPEDWINDOW)) {
+                ToggleFullscreen(hwnd);
+            }
+            return 0;
+        }
+        break;
+
+    case WM_SIZE:
+        InvalidateRect(hwnd, NULL, FALSE);
+        return 0;
+
+    case WM_PAINT: {
         PAINTSTRUCT ps;
         HDC hdc = BeginPaint(hwnd, &ps);
         RECT rc;
         GetClientRect(hwnd, &rc);
-        HBRUSH br = CreateSolidBrush(RGB(15, 23, 42)); // Slate-900 background
-        FillRect(hdc, &rc, br);
-        DeleteObject(br);
 
-        SetBkMode(hdc, TRANSPARENT);
-        SetTextColor(hdc, RGB(56, 189, 248)); // Sky blue
-        HFONT hFont = CreateFontA(24, 0, 0, 0, FW_BOLD, FALSE, FALSE, FALSE, DEFAULT_CHARSET,
-                                  OUT_DEFAULT_PRECIS, CLIP_DEFAULT_PRECIS, DEFAULT_QUALITY,
-                                  DEFAULT_PITCH | FF_SWISS, "Segoe UI");
-        HFONT hOldFont = (HFONT)SelectObject(hdc, hFont);
-        const char* title = "GridSight 教師畫面實時全體廣播中 (IGMP Multicast RTP)";
-        DrawTextA(hdc, title, -1, &rc, DT_CENTER | DT_VCENTER | DT_SINGLELINE);
-        SelectObject(hdc, hOldFont);
-        DeleteObject(hFont);
+        HBRUSH bgBrush = CreateSolidBrush(RGB(15, 23, 42)); // Slate-900 background
+        FillRect(hdc, &rc, bgBrush);
+        DeleteObject(bgBrush);
+
+        int client_w = rc.right - rc.left;
+        int client_h = rc.bottom - rc.top;
+        if (client_w > 0 && client_h > 0) {
+            double target_aspect = 16.0 / 9.0;
+            double client_aspect = (double)client_w / (double)client_h;
+
+            int view_w, view_h, view_x, view_y;
+            if (client_aspect > target_aspect) {
+                // Pillarbox (black bars on left and right)
+                view_h = client_h;
+                view_w = (int)(client_h * target_aspect);
+                view_x = (client_w - view_w) / 2;
+                view_y = 0;
+            } else {
+                // Letterbox (black bars on top and bottom)
+                view_w = client_w;
+                view_h = (int)(client_w / target_aspect);
+                view_x = 0;
+                view_y = (client_h - view_h) / 2;
+            }
+
+            // Draw inner presentation area maintaining original 16:9 aspect ratio
+            RECT view_rc = { view_x, view_y, view_x + view_w, view_y + view_h };
+            HBRUSH viewBrush = CreateSolidBrush(RGB(30, 41, 59));
+            FillRect(hdc, &view_rc, viewBrush);
+            DeleteObject(viewBrush);
+
+            HPEN hPen = CreatePen(PS_SOLID, 2, RGB(56, 189, 248));
+            HPEN hOldPen = (HPEN)SelectObject(hdc, hPen);
+            HBRUSH hOldBrush = (HBRUSH)SelectObject(hdc, GetStockObject(HOLLOW_BRUSH));
+            Rectangle(hdc, view_x, view_y, view_x + view_w, view_y + view_h);
+            SelectObject(hdc, hOldBrush);
+            SelectObject(hdc, hOldPen);
+            DeleteObject(hPen);
+
+            SetBkMode(hdc, TRANSPARENT);
+            SetTextColor(hdc, RGB(56, 189, 248)); // Sky blue
+            HFONT hFont = CreateFontA(22, 0, 0, 0, FW_BOLD, FALSE, FALSE, FALSE, DEFAULT_CHARSET,
+                                      OUT_DEFAULT_PRECIS, CLIP_DEFAULT_PRECIS, DEFAULT_QUALITY,
+                                      DEFAULT_PITCH | FF_SWISS, "Segoe UI");
+            HFONT hOldFont = (HFONT)SelectObject(hdc, hFont);
+
+            const char* title = "GridSight 教師畫面實時全體廣播中 (H.264 UDP Multicast)";
+            DrawTextA(hdc, title, -1, &view_rc, DT_CENTER | DT_VCENTER | DT_SINGLELINE);
+
+            SetTextColor(hdc, RGB(148, 163, 184)); // Slate-400
+            HFONT hSubFont = CreateFontA(14, 0, 0, 0, FW_NORMAL, FALSE, FALSE, FALSE, DEFAULT_CHARSET,
+                                         OUT_DEFAULT_PRECIS, CLIP_DEFAULT_PRECIS, DEFAULT_QUALITY,
+                                         DEFAULT_PITCH | FF_SWISS, "Segoe UI");
+            SelectObject(hdc, hSubFont);
+
+            RECT hint_rc = view_rc;
+            hint_rc.top = hint_rc.bottom - 40;
+            const char* hint = "提示：雙擊畫面或按 [F] / [F11] 可切換全螢幕與視窗模式 (ESC 退出全螢幕)";
+            DrawTextA(hdc, hint, -1, &hint_rc, DT_CENTER | DT_SINGLELINE);
+
+            SelectObject(hdc, hOldFont);
+            DeleteObject(hFont);
+            DeleteObject(hSubFont);
+        }
 
         EndPaint(hwnd, &ps);
         return 0;
+    }
     }
     return DefWindowProc(hwnd, msg, wParam, lParam);
 }
@@ -189,11 +289,12 @@ static LRESULT CALLBACK OverlayWndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARA
 
 void RTPReceiver::CreateFullScreenOverlayWindow() {
     if (overlay_active_.exchange(true)) return;
-    Utils::Log("INFO", "Broadcast received! Activating full-screen topmost presentation overlay.");
+    Utils::Log("INFO", "Broadcast received! Activating presentation popup window.");
 
 #ifdef _WIN32
     HINSTANCE hInstance = GetModuleHandle(NULL);
     WNDCLASSA wc = {0};
+    wc.style = CS_DBLCLKS; // Enable double-click messages
     wc.lpfnWndProc = OverlayWndProc;
     wc.hInstance = hInstance;
     wc.lpszClassName = "GridSightOverlayClass";
@@ -202,19 +303,23 @@ void RTPReceiver::CreateFullScreenOverlayWindow() {
 
     int screen_w = GetSystemMetrics(SM_CXSCREEN);
     int screen_h = GetSystemMetrics(SM_CYSCREEN);
+    int win_w = 1280;
+    int win_h = 720;
+    int x = (screen_w - win_w) / 2;
+    int y = (screen_h - win_h) / 2;
 
     HWND hwnd = CreateWindowExA(
-        WS_EX_TOPMOST | WS_EX_TOOLWINDOW,
+        WS_EX_TOPMOST,
         "GridSightOverlayClass",
-        "GridSight Broadcast Screen",
-        WS_POPUP | WS_VISIBLE,
-        0, 0, screen_w, screen_h,
+        "GridSight 教師廣播畫面 (雙擊或按 F 切換全螢幕)",
+        WS_OVERLAPPEDWINDOW | WS_VISIBLE,
+        x, y, win_w, win_h,
         NULL, NULL, hInstance, NULL
     );
 
     if (hwnd) {
-        SetWindowPos(hwnd, HWND_TOPMOST, 0, 0, screen_w, screen_h, SWP_SHOWWINDOW);
         hwnd_overlay_ = (void*)hwnd;
+        ShowWindow(hwnd, SW_SHOW);
         UpdateWindow(hwnd);
     }
 #endif

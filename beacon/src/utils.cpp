@@ -24,6 +24,72 @@
 
 namespace GridSight {
 
+#ifdef _WIN32
+namespace {
+
+std::string GetWindowsHostname() {
+    char comp_name[MAX_COMPUTERNAME_LENGTH + 1] = {0};
+    DWORD comp_name_len = sizeof(comp_name);
+    if (GetComputerNameA(comp_name, &comp_name_len) && comp_name_len > 0) {
+        return comp_name;
+    }
+
+    char host[256] = {0};
+    DWORD host_len = sizeof(host);
+    if (GetComputerNameExA(ComputerNamePhysicalDnsHostname, host, &host_len) && host_len > 0) {
+        return host;
+    }
+
+    if (gethostname(host, sizeof(host)) == 0 && strlen(host) > 0) {
+        return host;
+    }
+
+    return "DESKTOP-UNKNOWN";
+}
+
+std::string GetWindowsUsername() {
+    char user[256] = {0};
+    DWORD user_len = sizeof(user);
+    if (GetUserNameA(user, &user_len) && user_len > 0) {
+        return user;
+    }
+    return "Student";
+}
+
+void GetWindowsIpAndMac(std::string& ip, std::string& mac) {
+    ULONG outBufLen = 15000;
+    PIP_ADAPTER_ADDRESSES pAddresses = (IP_ADAPTER_ADDRESSES*)malloc(outBufLen);
+    if (!pAddresses) {
+        return;
+    }
+
+    if (GetAdaptersAddresses(AF_INET, GAA_FLAG_INCLUDE_PREFIX, NULL, pAddresses, &outBufLen) == NO_ERROR) {
+        for (PIP_ADAPTER_ADDRESSES pCurr = pAddresses; pCurr; pCurr = pCurr->Next) {
+            if (pCurr->IfType == IF_TYPE_ETHERNET_CSMACD || pCurr->IfType == IF_TYPE_IEEE80211) {
+                if (pCurr->OperStatus == IfOperStatusUp && pCurr->FirstUnicastAddress) {
+                    sockaddr_in* sa_in = (sockaddr_in*)pCurr->FirstUnicastAddress->Address.lpSockaddr;
+                    char ip_str[INET_ADDRSTRLEN];
+                    inet_ntop(AF_INET, &(sa_in->sin_addr), ip_str, INET_ADDRSTRLEN);
+                    if (strcmp(ip_str, "127.0.0.1") != 0) {
+                        ip = ip_str;
+                        char mac_buf[32];
+                        snprintf(mac_buf, sizeof(mac_buf), "%02X:%02X:%02X:%02X:%02X:%02X",
+                                 pCurr->PhysicalAddress[0], pCurr->PhysicalAddress[1],
+                                 pCurr->PhysicalAddress[2], pCurr->PhysicalAddress[3],
+                                 pCurr->PhysicalAddress[4], pCurr->PhysicalAddress[5]);
+                        mac = mac_buf;
+                        break;
+                    }
+                }
+            }
+        }
+    }
+    free(pAddresses);
+}
+
+} // anonymous namespace
+#endif
+
 NetworkInfo Utils::GetSystemNetworkInfo() {
     NetworkInfo info;
     info.ip = "127.0.0.1";
@@ -32,54 +98,9 @@ NetworkInfo Utils::GetSystemNetworkInfo() {
     info.username = "Student";
 
 #ifdef _WIN32
-    // 1. Native Windows Computer Name (Kernel32 API - 100% reliable, no WinSock dependency)
-    char comp_name[MAX_COMPUTERNAME_LENGTH + 1] = {0};
-    DWORD comp_name_len = sizeof(comp_name);
-    if (GetComputerNameA(comp_name, &comp_name_len) && comp_name_len > 0) {
-        info.hostname = comp_name;
-    } else {
-        char host[256] = {0};
-        DWORD host_len = sizeof(host);
-        if (GetComputerNameExA(ComputerNamePhysicalDnsHostname, host, &host_len) && host_len > 0) {
-            info.hostname = host;
-        } else if (gethostname(host, sizeof(host)) == 0 && strlen(host) > 0) {
-            info.hostname = host;
-        }
-    }
-
-    char user[256] = {0};
-    DWORD user_len = sizeof(user);
-    if (GetUserNameA(user, &user_len) && user_len > 0) {
-        info.username = user;
-    }
-
-    // Get IP and MAC from GetAdaptersInfo / GetAdaptersAddresses
-    ULONG outBufLen = 15000;
-    PIP_ADAPTER_ADDRESSES pAddresses = (IP_ADAPTER_ADDRESSES*)malloc(outBufLen);
-    if (pAddresses) {
-        if (GetAdaptersAddresses(AF_INET, GAA_FLAG_INCLUDE_PREFIX, NULL, pAddresses, &outBufLen) == NO_ERROR) {
-            for (PIP_ADAPTER_ADDRESSES pCurr = pAddresses; pCurr; pCurr = pCurr->Next) {
-                if (pCurr->IfType == IF_TYPE_ETHERNET_CSMACD || pCurr->IfType == IF_TYPE_IEEE80211) {
-                    if (pCurr->OperStatus == IfOperStatusUp && pCurr->FirstUnicastAddress) {
-                        sockaddr_in* sa_in = (sockaddr_in*)pCurr->FirstUnicastAddress->Address.lpSockaddr;
-                        char ip_str[INET_ADDRSTRLEN];
-                        inet_ntop(AF_INET, &(sa_in->sin_addr), ip_str, INET_ADDRSTRLEN);
-                        if (strcmp(ip_str, "127.0.0.1") != 0) {
-                            info.ip = ip_str;
-                            char mac_buf[32];
-                            snprintf(mac_buf, sizeof(mac_buf), "%02X:%02X:%02X:%02X:%02X:%02X",
-                                     pCurr->PhysicalAddress[0], pCurr->PhysicalAddress[1],
-                                     pCurr->PhysicalAddress[2], pCurr->PhysicalAddress[3],
-                                     pCurr->PhysicalAddress[4], pCurr->PhysicalAddress[5]);
-                            info.mac = mac_buf;
-                            break;
-                        }
-                    }
-                }
-            }
-        }
-        free(pAddresses);
-    }
+    info.hostname = GetWindowsHostname();
+    info.username = GetWindowsUsername();
+    GetWindowsIpAndMac(info.ip, info.mac);
 #endif
     return info;
 }

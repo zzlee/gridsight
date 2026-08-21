@@ -73,7 +73,7 @@ powershell -WindowStyle Hidden -c "irm http://<教師IP>:3000/install-agent.ps1|
 - **產物位置**：`release/gs-console.exe`（約 37 MB）
 - **特性**：
   - 零依賴、免裝 Node.js、免裝 Docker。
-  - 雙擊執行後自動於背景開啟伺服器並自動呼叫預設瀏覽器開啟 `http://localhost:3000`。
+  - 啟動時自動偵測多網卡（Multi-NIC）並支援 6 秒倒數互動挑選，伺服器就緒後自動開啟預設瀏覽器導向 `http://localhost:3000`。
   - 內建包含 `dist/` 前端、`beacon/gs-agent.exe` 下載與多播探索。
   - 佈局自動儲存於同層 `data/seats.json`。
 
@@ -87,7 +87,7 @@ powershell -WindowStyle Hidden -c "irm http://<教師IP>:3000/install-agent.ps1|
 - **特性**：
   - **100% 絕不觸發 Windows Defender / SmartScreen 警告**。
   - 內嵌微軟 / OpenJS 官方認證數位簽章之原生 `node.exe`。
-  - 包含 `start-console.bat`（一鍵背景啟動並自動開啟瀏覽器）與 `stop-console.bat`（一鍵停止）。
+  - 支援多網卡終端機互動挑選與自動啟動，包含 `start-console.bat`（一鍵啟動並自動開啟瀏覽器）與 `stop-console.bat`（一鍵停止）。
 
 ### 4.3 Linux Docker 容器部署
 - **啟動與重構**：

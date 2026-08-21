@@ -158,8 +158,8 @@ powershell -WindowStyle Hidden -c "irm http://<教師IP>:3000/install-agent.ps1|
 1. 更新版本號於 `package.json`、`console/package.json`、`scripts/build-windows-console.js`。
 2. 建立 Git Tag 並推送：
    ```bash
-   git tag -a v5.4.0 -m "Release v5.4.0: Active window title tracking, off-task alert system, SIMD NV12 encoder, multi-NIC selection, browser auto-launch"
-   git push origin v5.4.0
+   git tag -a v5.4.1 -m "Release v5.4.1: Active window title tracking, off-task alert system, SIMD NV12 encoder, multi-NIC selection, browser auto-launch"
+   git push origin v5.4.1
    ```
 3. GitHub Actions (`.github/workflows/release.yml`) 會自動執行：
    - 交叉編譯產出 `gs-agent.exe`

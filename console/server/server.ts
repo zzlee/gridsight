@@ -10,6 +10,7 @@ import { TokenAuthority } from './tokenAuthority.js';
 import { MulticastDiscoveryService } from './multicastDiscovery.js';
 import { TeacherBroadcastStreamer } from './broadcastStreamer.js';
 import { logger } from './logger.js';
+import { promptSelectNic } from './nicSelector.js';
 
 const currentDirname = typeof __dirname !== 'undefined' ? __dirname : path.dirname(fileURLToPath(import.meta.url || 'file:///'));
 
@@ -20,6 +21,9 @@ const wss = new WebSocketServer({ server });
 const PORT = process.env.API_PORT || process.env.PORT ? parseInt(process.env.API_PORT || process.env.PORT || '3000', 10) : 3000;
 const HOST = process.env.API_HOST || '0.0.0.0';
 
+let activeTeacherIp = '127.0.0.1';
+let activeNicName = 'Default';
+
 app.use(cors());
 app.use(express.json());
 
@@ -28,8 +32,6 @@ const broadcastStreamer = new TeacherBroadcastStreamer();
 const discoveryService = new MulticastDiscoveryService(tokenAuth, (device) => {
   logger.info(`[Discovery] New Beacon: ${device.hostname} (${device.ip})`);
 });
-
-discoveryService.start();
 
 // Teacher PIN authentication state
 let teacherPin = process.env.TEACHER_PIN || '888888';
@@ -298,6 +300,15 @@ app.get('/api/health', (req, res) => {
   res.json({ status: 'ok', time: Date.now(), seatsFile: SEATS_FILE });
 });
 
+app.get('/api/server-info', (req, res) => {
+  res.json({
+    version: '5.3.3',
+    teacherIp: activeTeacherIp,
+    port: PORT,
+    nicName: activeNicName,
+  });
+});
+
 app.get('/api/layout', async (req, res) => {
   const layout = await loadSeatsLayout();
   res.json({ success: true, layout, file: SEATS_FILE });
@@ -420,7 +431,10 @@ app.get(['/api/snapshot/:id', '/api/snapshot'], async (req, res) => {
 
 // Route: One-click PowerShell installation script for Student PCs
 app.get('/install-agent.ps1', (req, res) => {
-  const host = req.headers.host || `${req.hostname}:${PORT}`;
+  let host = req.headers.host || `${req.hostname}:${PORT}`;
+  if (activeTeacherIp && activeTeacherIp !== '127.0.0.1' && (host.startsWith('localhost') || host.startsWith('127.0.0.1'))) {
+    host = `${activeTeacherIp}:${PORT}`;
+  }
   const script = `# ========================================================
 # GridSight Agent One-Click Pull & Launch Script (v5.3.3)
 # ========================================================
@@ -678,17 +692,49 @@ if (staticDistPath) {
   logger.info(`[GridSight Server] Serving web console UI from ${staticDistPath}`);
 }
 
-server.listen(PORT, HOST, () => {
-  const localUrl = `http://localhost:${PORT}`;
-  logger.info(`=============================================================`);
-  logger.info(`  GridSight Teacher Console v5.3.3`);
-  logger.info(`  Web Console UI: ${localUrl}`);
-  logger.info(`  Multicast Beacon Discovery: 239.255.42.99:8888`);
-  logger.info(`=============================================================`);
+async function bootstrap() {
+  // 1. Interactive Multi-NIC Detection and Selection
+  const nicResult = await promptSelectNic();
+  activeTeacherIp = nicResult.ip;
+  activeNicName = nicResult.nicName;
+  const boundHost = nicResult.host || HOST;
 
-  if (process.platform === 'win32' && !process.argv.includes('--no-open')) {
-    import('child_process').then(({ exec }) => {
-      exec(`start ${localUrl}`);
-    }).catch(() => {});
-  }
-});
+  // 2. Start Multicast Discovery Service on selected interface & all routes
+  discoveryService.start(activeTeacherIp);
+
+  // 3. Start HTTP & WebSocket Server
+  server.listen(PORT, boundHost, () => {
+    const localUrl = `http://localhost:${PORT}`;
+    const lanUrl = `http://${activeTeacherIp}:${PORT}`;
+
+    logger.info(`=============================================================`);
+    logger.info(`  🚀 GridSight Teacher Console v5.3.3`);
+    logger.info(`  綁定網路卡 (NIC): ${activeNicName} (${activeTeacherIp})`);
+    logger.info(`  本機控制台網址:   ${localUrl}`);
+    logger.info(`  學生連線網址:     ${lanUrl}/join`);
+    logger.info(`  多播動態探索:     239.255.42.99:8888`);
+    logger.info(`=============================================================`);
+
+    // 4. Auto-launch browser directly to web console
+    if (!process.argv.includes('--no-open') && !process.env.NO_OPEN) {
+      const platform = process.platform;
+      let cmd = '';
+      if (platform === 'win32') {
+        cmd = `start "" "${localUrl}"`;
+      } else if (platform === 'darwin') {
+        cmd = `open "${localUrl}"`;
+      } else {
+        cmd = `xdg-open "${localUrl}"`;
+      }
+      import('child_process').then(({ exec }) => {
+        exec(cmd, (err) => {
+          if (!err) {
+            logger.info(`[Browser] 🌐 已自動開啟瀏覽器導向控制台: ${localUrl}`);
+          }
+        });
+      }).catch(() => {});
+    }
+  });
+}
+
+bootstrap();

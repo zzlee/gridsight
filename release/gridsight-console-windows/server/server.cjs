@@ -34,7 +34,7 @@ var require_main = __commonJS({
   "console/server/node_modules/dotenv/lib/main.js"(exports2, module2) {
     var fs3 = require("fs");
     var path3 = require("path");
-    var os2 = require("os");
+    var os4 = require("os");
     var crypto2 = require("crypto");
     var TIPS = [
       "\u25C8 encrypted .env [www.dotenvx.com]",
@@ -180,7 +180,7 @@ var require_main = __commonJS({
       return null;
     }
     function _resolveHome(envPath) {
-      return envPath[0] === "~" ? path3.join(os2.homedir(), envPath.slice(1)) : envPath;
+      return envPath[0] === "~" ? path3.join(os4.homedir(), envPath.slice(1)) : envPath;
     }
     function _configVault(options) {
       const debug = parseBoolean(process.env.DOTENV_CONFIG_DEBUG || options && options.debug);
@@ -27042,6 +27042,7 @@ var TokenAuthority = class {
 
 // console/server/multicastDiscovery.ts
 var import_dgram = __toESM(require("dgram"), 1);
+var import_os = __toESM(require("os"), 1);
 
 // console/server/logger.ts
 var import_fs = __toESM(require("fs"), 1);
@@ -27087,15 +27088,40 @@ var MulticastDiscoveryService = class {
     this.tokenAuth = tokenAuth2;
     this.onDeviceDiscovered = onDeviceDiscovered;
   }
-  start() {
+  start(selectedInterfaceIp) {
     this.server = import_dgram.default.createSocket({ type: "udp4", reuseAddr: true });
     this.server.on("listening", () => {
+      let joinedCount = 0;
+      if (selectedInterfaceIp && selectedInterfaceIp !== "0.0.0.0" && selectedInterfaceIp !== "127.0.0.1") {
+        try {
+          this.server?.addMembership(this.multicastAddress, selectedInterfaceIp);
+          joinedCount++;
+        } catch (err) {
+          logger.warn(`[Discovery] Add membership on ${selectedInterfaceIp} failed: ${err.message}`);
+        }
+      }
+      try {
+        const interfaces = import_os.default.networkInterfaces();
+        for (const [name, addrs] of Object.entries(interfaces)) {
+          if (!addrs) continue;
+          for (const addr of addrs) {
+            if (addr.family === "IPv4" && !addr.internal && addr.address !== selectedInterfaceIp) {
+              try {
+                this.server?.addMembership(this.multicastAddress, addr.address);
+                joinedCount++;
+              } catch {
+              }
+            }
+          }
+        }
+      } catch {
+      }
       try {
         this.server?.addMembership(this.multicastAddress);
-        logger.info(`[Discovery] Multicast listener joined ${this.multicastAddress}:${this.port}`);
-      } catch (err) {
-        logger.warn(`[Discovery] Note: Multicast membership add failed (${err.message}). Listening on UDP port.`);
+        joinedCount++;
+      } catch {
       }
+      logger.info(`[Discovery] Multicast listener joined ${this.multicastAddress}:${this.port} across ${joinedCount} network route(s)`);
     });
     this.server.on("message", (msg, rinfo) => {
       try {
@@ -27155,7 +27181,7 @@ var MulticastDiscoveryService = class {
 
 // console/server/broadcastStreamer.ts
 var import_child_process = require("child_process");
-var import_os = __toESM(require("os"), 1);
+var import_os2 = __toESM(require("os"), 1);
 var TeacherBroadcastStreamer = class {
   process = null;
   isStreaming = false;
@@ -27167,7 +27193,7 @@ var TeacherBroadcastStreamer = class {
     const bitrate = options.bitrateKbps || 5e3;
     logger.info(`[Broadcast] Initiating RTP Multicast Stream -> ${multicastIp}:${port} @ ${fps}fps (${bitrate}kbps)`);
     let inputArgs = [];
-    const platform = import_os.default.platform();
+    const platform = import_os2.default.platform();
     if (platform === "win32") {
       inputArgs = ["-f", "gdigrab", "-framerate", String(fps), "-i", "desktop"];
     } else if (platform === "darwin") {
@@ -27236,6 +27262,127 @@ var TeacherBroadcastStreamer = class {
   }
 };
 
+// console/server/nicSelector.ts
+var import_os3 = __toESM(require("os"), 1);
+var import_readline = __toESM(require("readline"), 1);
+function detectNetworkInterfaces() {
+  const interfaces = import_os3.default.networkInterfaces();
+  const list = [];
+  for (const [name, addrs] of Object.entries(interfaces)) {
+    if (!addrs) continue;
+    for (const addr of addrs) {
+      if (addr.family === "IPv4" && !addr.internal) {
+        const lowerName = name.toLowerCase();
+        const isVirtual = lowerName.includes("vethernet") || lowerName.includes("wsl") || lowerName.includes("virtualbox") || lowerName.includes("vmware") || lowerName.includes("zerotier") || lowerName.includes("tailscale") || lowerName.includes("docker") || lowerName.includes("loopback") || lowerName.includes("npcap");
+        const isRecommended = !isVirtual && (lowerName.includes("eth") || lowerName.includes("lan") || lowerName.includes("\u4EE5\u592A") || lowerName.includes("\u4E59\u592A") || lowerName.includes("\u5340\u57DF\u9023\u7DDA") || lowerName.includes("wi-fi") || lowerName.includes("wlan") || lowerName.includes("\u7121\u7DDA") || addr.address.startsWith("192.168.") || addr.address.startsWith("10."));
+        list.push({
+          name,
+          ip: addr.address,
+          mac: addr.mac,
+          isVirtual,
+          isRecommended
+        });
+      }
+    }
+  }
+  list.sort((a, b) => {
+    if (a.isRecommended && !b.isRecommended) return -1;
+    if (!a.isRecommended && b.isRecommended) return 1;
+    if (!a.isVirtual && b.isVirtual) return -1;
+    if (a.isVirtual && !b.isVirtual) return 1;
+    return a.name.localeCompare(b.name);
+  });
+  return list;
+}
+async function promptSelectNic(timeoutSec = 6) {
+  const nics = detectNetworkInterfaces();
+  if (process.env.TEACHER_IP) {
+    const found = nics.find((n) => n.ip === process.env.TEACHER_IP);
+    return {
+      host: "0.0.0.0",
+      ip: process.env.TEACHER_IP,
+      nicName: found ? found.name : "Manual Config"
+    };
+  }
+  if (nics.length === 0) {
+    return { host: "0.0.0.0", ip: "127.0.0.1", nicName: "Loopback" };
+  }
+  if (nics.length === 1) {
+    console.log(`[Network] \u5075\u6E2C\u5230\u55AE\u4E00\u7DB2\u8DEF\u4ECB\u9762: ${nics[0].name} (${nics[0].ip})\uFF0C\u5DF2\u81EA\u52D5\u9078\u5B9A\u3002`);
+    return { host: "0.0.0.0", ip: nics[0].ip, nicName: nics[0].name };
+  }
+  if (!process.stdin.isTTY || process.argv.includes("--no-prompt")) {
+    const best = nics[0];
+    console.log(`[Network] \u975E\u4E92\u52D5\u74B0\u5883\uFF0C\u5DF2\u81EA\u52D5\u9078\u5B9A\u4E3B\u8981\u7DB2\u5361: ${best.name} (${best.ip})`);
+    return { host: "0.0.0.0", ip: best.ip, nicName: best.name };
+  }
+  console.log("\n===============================================================");
+  console.log("  \u{1F310} GridSight \u4F3A\u670D\u5668\u555F\u52D5 - \u5075\u6E2C\u5230\u591A\u5F35\u7DB2\u8DEF\u5361 (Multi-NIC)");
+  console.log("===============================================================");
+  nics.forEach((nic, idx) => {
+    const tag = idx === 0 ? " \u2B50 [\u63A8\u85A6/\u9810\u8A2D]" : nic.isVirtual ? " (\u865B\u64EC\u7DB2\u5361)" : "";
+    console.log(`  [${idx + 1}] ${nic.name.padEnd(22)} -> ${nic.ip.padEnd(16)} ${tag}`);
+  });
+  console.log(`  [0] \u5168\u90E8\u7DB2\u5361\u540C\u6642\u76E3\u807D (0.0.0.0)`);
+  console.log("---------------------------------------------------------------");
+  return new Promise((resolve) => {
+    let remaining = timeoutSec;
+    let timer = null;
+    let resolved = false;
+    const rl = import_readline.default.createInterface({
+      input: process.stdin,
+      output: process.stdout
+    });
+    const finalize = (choice) => {
+      if (resolved) return;
+      resolved = true;
+      if (timer) clearInterval(timer);
+      rl.close();
+      if (choice === 0) {
+        console.log(`
+  \u2705 \u5DF2\u9078\u64C7: \u5168\u90E8\u7DB2\u5361 (0.0.0.0) - \u5B78\u751F\u7AEF\u9023\u7DDA\u9810\u8A2D\u4F7F\u7528 ${nics[0].ip}
+`);
+        resolve({ host: "0.0.0.0", ip: nics[0].ip, nicName: "\u5168\u90E8\u7DB2\u5361 (0.0.0.0)" });
+      } else {
+        const selected = nics[choice - 1] || nics[0];
+        console.log(`
+  \u2705 \u5DF2\u9078\u5B9A\u7DB2\u5361: [${selected.name}] -> ${selected.ip}
+`);
+        resolve({ host: "0.0.0.0", ip: selected.ip, nicName: selected.name });
+      }
+    };
+    process.stdout.write(`\u8ACB\u8F38\u5165\u6B32\u63D0\u4F9B\u5B78\u751F\u9023\u7DDA\u7684\u7DB2\u5361\u7DE8\u865F [1-${nics.length}, 0] (\u5012\u6578 ${remaining} \u79D2\u81EA\u52D5\u9078\u64C7 1): `);
+    timer = setInterval(() => {
+      remaining--;
+      if (remaining <= 0) {
+        import_readline.default.cursorTo(process.stdout, 0);
+        process.stdout.write(`
+\u23F0 \u5012\u6578\u7D50\u675F\uFF0C\u81EA\u52D5\u9078\u5B9A\u9810\u8A2D\u7DB2\u5361 [1] ${nics[0].name} (${nics[0].ip})
+`);
+        finalize(1);
+      } else {
+        import_readline.default.cursorTo(process.stdout, 0);
+        process.stdout.write(`\u8ACB\u8F38\u5165\u6B32\u63D0\u4F9B\u5B78\u751F\u9023\u7DDA\u7684\u7DB2\u5361\u7DE8\u865F [1-${nics.length}, 0] (\u5012\u6578 ${remaining} \u79D2\u81EA\u52D5\u9078\u64C7 1): `);
+      }
+    }, 1e3);
+    rl.on("line", (line) => {
+      const input = line.trim();
+      if (input === "") {
+        finalize(1);
+      } else {
+        const num = parseInt(input, 10);
+        if (!isNaN(num) && num >= 0 && num <= nics.length) {
+          finalize(num);
+        } else {
+          console.log(`
+\u8F38\u5165\u7121\u6548\uFF0C\u5C07\u4F7F\u7528\u9810\u8A2D\u7DB2\u5361 [1] ${nics[0].name} (${nics[0].ip})`);
+          finalize(1);
+        }
+      }
+    });
+  });
+}
+
 // console/server/server.ts
 var import_meta = {};
 var currentDirname = typeof __dirname !== "undefined" ? __dirname : import_path2.default.dirname((0, import_url.fileURLToPath)(import_meta.url || "file:///"));
@@ -27244,6 +27391,8 @@ var server = (0, import_http.createServer)(app);
 var wss = new import_websocket_server.default({ server });
 var PORT = process.env.API_PORT || process.env.PORT ? parseInt(process.env.API_PORT || process.env.PORT || "3000", 10) : 3e3;
 var HOST = process.env.API_HOST || "0.0.0.0";
+var activeTeacherIp = "127.0.0.1";
+var activeNicName = "Default";
 app.use((0, import_cors.default)());
 app.use(import_express.default.json());
 var tokenAuth = new TokenAuthority();
@@ -27251,7 +27400,6 @@ var broadcastStreamer = new TeacherBroadcastStreamer();
 var discoveryService = new MulticastDiscoveryService(tokenAuth, (device) => {
   logger.info(`[Discovery] New Beacon: ${device.hostname} (${device.ip})`);
 });
-discoveryService.start();
 var teacherPin = process.env.TEACHER_PIN || "888888";
 var teacherSessions = /* @__PURE__ */ new Map();
 var generateTeacherToken = () => {
@@ -27485,6 +27633,14 @@ var loadSeatsLayout = async () => {
 app.get("/api/health", (req, res) => {
   res.json({ status: "ok", time: Date.now(), seatsFile: SEATS_FILE });
 });
+app.get("/api/server-info", (req, res) => {
+  res.json({
+    version: "5.3.3",
+    teacherIp: activeTeacherIp,
+    port: PORT,
+    nicName: activeNicName
+  });
+});
 app.get("/api/layout", async (req, res) => {
   const layout = await loadSeatsLayout();
   res.json({ success: true, layout, file: SEATS_FILE });
@@ -27588,7 +27744,10 @@ app.get(["/api/snapshot/:id", "/api/snapshot"], async (req, res) => {
   res.status(404).json({ error: "No snapshot available" });
 });
 app.get("/install-agent.ps1", (req, res) => {
-  const host = req.headers.host || `${req.hostname}:${PORT}`;
+  let host = req.headers.host || `${req.hostname}:${PORT}`;
+  if (activeTeacherIp && activeTeacherIp !== "127.0.0.1" && (host.startsWith("localhost") || host.startsWith("127.0.0.1"))) {
+    host = `${activeTeacherIp}:${PORT}`;
+  }
   const script = `# ========================================================
 # GridSight Agent One-Click Pull & Launch Script (v5.3.3)
 # ========================================================
@@ -27821,20 +27980,44 @@ if (staticDistPath) {
   });
   logger.info(`[GridSight Server] Serving web console UI from ${staticDistPath}`);
 }
-server.listen(PORT, HOST, () => {
-  const localUrl = `http://localhost:${PORT}`;
-  logger.info(`=============================================================`);
-  logger.info(`  GridSight Teacher Console v5.3.3`);
-  logger.info(`  Web Console UI: ${localUrl}`);
-  logger.info(`  Multicast Beacon Discovery: 239.255.42.99:8888`);
-  logger.info(`=============================================================`);
-  if (process.platform === "win32" && !process.argv.includes("--no-open")) {
-    import("child_process").then(({ exec }) => {
-      exec(`start ${localUrl}`);
-    }).catch(() => {
-    });
-  }
-});
+async function bootstrap() {
+  const nicResult = await promptSelectNic();
+  activeTeacherIp = nicResult.ip;
+  activeNicName = nicResult.nicName;
+  const boundHost = nicResult.host || HOST;
+  discoveryService.start(activeTeacherIp);
+  server.listen(PORT, boundHost, () => {
+    const localUrl = `http://localhost:${PORT}`;
+    const lanUrl = `http://${activeTeacherIp}:${PORT}`;
+    logger.info(`=============================================================`);
+    logger.info(`  \u{1F680} GridSight Teacher Console v5.3.3`);
+    logger.info(`  \u7D81\u5B9A\u7DB2\u8DEF\u5361 (NIC): ${activeNicName} (${activeTeacherIp})`);
+    logger.info(`  \u672C\u6A5F\u63A7\u5236\u53F0\u7DB2\u5740:   ${localUrl}`);
+    logger.info(`  \u5B78\u751F\u9023\u7DDA\u7DB2\u5740:     ${lanUrl}/join`);
+    logger.info(`  \u591A\u64AD\u52D5\u614B\u63A2\u7D22:     239.255.42.99:8888`);
+    logger.info(`=============================================================`);
+    if (!process.argv.includes("--no-open") && !process.env.NO_OPEN) {
+      const platform = process.platform;
+      let cmd = "";
+      if (platform === "win32") {
+        cmd = `start "" "${localUrl}"`;
+      } else if (platform === "darwin") {
+        cmd = `open "${localUrl}"`;
+      } else {
+        cmd = `xdg-open "${localUrl}"`;
+      }
+      import("child_process").then(({ exec }) => {
+        exec(cmd, (err) => {
+          if (!err) {
+            logger.info(`[Browser] \u{1F310} \u5DF2\u81EA\u52D5\u958B\u555F\u700F\u89BD\u5668\u5C0E\u5411\u63A7\u5236\u53F0: ${localUrl}`);
+          }
+        });
+      }).catch(() => {
+      });
+    }
+  });
+}
+bootstrap();
 /*! Bundled license information:
 
 depd/index.js:

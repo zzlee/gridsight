@@ -1,4 +1,5 @@
 import dgram from 'dgram';
+import os from 'os';
 import { TokenAuthority } from './tokenAuthority.js';
 import { logger } from './logger.js';
 
@@ -56,16 +57,47 @@ export class MulticastDiscoveryService {
     this.onDeviceDiscovered = onDeviceDiscovered;
   }
 
-  start() {
+  start(selectedInterfaceIp?: string) {
     this.server = dgram.createSocket({ type: 'udp4', reuseAddr: true });
 
     this.server.on('listening', () => {
+      let joinedCount = 0;
+
+      // 1. Join specifically on the user selected Interface IP if provided
+      if (selectedInterfaceIp && selectedInterfaceIp !== '0.0.0.0' && selectedInterfaceIp !== '127.0.0.1') {
+        try {
+          this.server?.addMembership(this.multicastAddress, selectedInterfaceIp);
+          joinedCount++;
+        } catch (err: any) {
+          logger.warn(`[Discovery] Add membership on ${selectedInterfaceIp} failed: ${err.message}`);
+        }
+      }
+
+      // 2. Also join on all valid IPv4 non-internal adapters for redundancy
+      try {
+        const interfaces = os.networkInterfaces();
+        for (const [name, addrs] of Object.entries(interfaces)) {
+          if (!addrs) continue;
+          for (const addr of addrs) {
+            if (addr.family === 'IPv4' && !addr.internal && addr.address !== selectedInterfaceIp) {
+              try {
+                this.server?.addMembership(this.multicastAddress, addr.address);
+                joinedCount++;
+              } catch {
+                // Some virtual adapters may reject IGMP join, ignore
+              }
+            }
+          }
+        }
+      } catch {}
+
+      // 3. Fallback default addMembership
       try {
         this.server?.addMembership(this.multicastAddress);
-        logger.info(`[Discovery] Multicast listener joined ${this.multicastAddress}:${this.port}`);
-      } catch (err: any) {
-        logger.warn(`[Discovery] Note: Multicast membership add failed (${err.message}). Listening on UDP port.`);
-      }
+        joinedCount++;
+      } catch {}
+
+      logger.info(`[Discovery] Multicast listener joined ${this.multicastAddress}:${this.port} across ${joinedCount} network route(s)`);
     });
 
     this.server.on('message', (msg, rinfo) => {

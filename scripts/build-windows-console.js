@@ -56,7 +56,7 @@ if (fs.existsSync(agentSrc)) {
 // Create staging package.json for pkg
 const stagingPackageJson = {
   name: 'gridsight-console',
-  version: '5.3.3',
+  version: '5.4.0',
   bin: 'server.cjs',
   main: 'server.cjs',
   pkg: {

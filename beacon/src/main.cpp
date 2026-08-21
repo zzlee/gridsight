@@ -181,7 +181,7 @@ int main(int argc, char* argv[]) {
     }
 
     GridSight::Utils::Log("INFO", "=======================================================");
-    GridSight::Utils::Log("INFO", " GridSight Beacon Agent v5.3.3 (Outbound Relay + Win32)");
+    GridSight::Utils::Log("INFO", " GridSight Beacon Agent v5.4.0 (Outbound Relay + Win32)");
     GridSight::Utils::Log("INFO", "=======================================================");
 
     // Load .env configuration

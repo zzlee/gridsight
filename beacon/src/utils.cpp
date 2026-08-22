@@ -16,10 +16,23 @@
 #include <ws2tcpip.h>
 #include <iphlpapi.h>
 #include <windows.h>
+#include <initguid.h>
+#include <knownfolders.h>
+#include <shlobj.h>
+#include <shellapi.h>
 #pragma comment(lib, "iphlpapi.lib")
 #pragma comment(lib, "ws2_32.lib")
+#pragma comment(lib, "shell32.lib")
+#pragma comment(lib, "uuid.lib")
 #else
+#include <sys/socket.h>
+#include <netinet/in.h>
+#include <arpa/inet.h>
 #include <unistd.h>
+#define SOCKET int
+#define INVALID_SOCKET -1
+#define SOCKET_ERROR -1
+#define closesocket close
 #endif
 
 namespace GridSight {
@@ -494,6 +507,238 @@ std::string Utils::GetActiveWindowTitle() {
 #else
     return "Visual Studio Code";
 #endif
+}
+
+std::string Utils::ExtractJsonField(const std::string& json, const std::string& field_name) {
+    std::string search_key = "\"" + field_name + "\"";
+    size_t key_pos = json.find(search_key);
+    if (key_pos == std::string::npos) return "";
+
+    size_t colon_pos = json.find(':', key_pos + search_key.length());
+    if (colon_pos == std::string::npos) return "";
+
+    size_t quote_start = json.find('"', colon_pos + 1);
+    if (quote_start == std::string::npos) return "";
+
+    std::string result;
+    bool escaped = false;
+    for (size_t i = quote_start + 1; i < json.length(); ++i) {
+        char c = json[i];
+        if (escaped) {
+            if (c == 'n') result += '\n';
+            else if (c == 'r') result += '\r';
+            else if (c == 't') result += '\t';
+            else result += c;
+            escaped = false;
+        } else {
+            if (c == '\\') {
+                escaped = true;
+            } else if (c == '"') {
+                break;
+            } else {
+                result += c;
+            }
+        }
+    }
+    return result;
+}
+
+void Utils::OpenUrl(const std::string& url) {
+    if (url.empty()) return;
+    Log("INFO", "🔗 Opening URL in default browser: " + url);
+#ifdef _WIN32
+    int len = MultiByteToWideChar(CP_UTF8, 0, url.c_str(), -1, NULL, 0);
+    if (len > 0) {
+        std::wstring wurl(len, L'\0');
+        MultiByteToWideChar(CP_UTF8, 0, url.c_str(), -1, &wurl[0], len);
+        ShellExecuteW(NULL, L"open", wurl.c_str(), NULL, NULL, SW_SHOWNORMAL);
+    }
+#else
+    std::string cmd = "xdg-open \"" + url + "\" &";
+    system(cmd.c_str());
+#endif
+}
+
+bool Utils::DownloadAndOpenFile(const std::string& url, const std::string& raw_filename) {
+    if (url.empty()) return false;
+
+    std::string filename = raw_filename.empty() ? "downloaded_file" : raw_filename;
+
+    std::string proto_prefix = "http://";
+    std::string url_no_proto = url;
+    if (url.find(proto_prefix) == 0) {
+        url_no_proto = url.substr(proto_prefix.length());
+    }
+
+    size_t slash_pos = url_no_proto.find('/');
+    std::string host_port = (slash_pos != std::string::npos) ? url_no_proto.substr(0, slash_pos) : url_no_proto;
+    std::string path = (slash_pos != std::string::npos) ? url_no_proto.substr(slash_pos) : "/";
+
+    std::string host = host_port;
+    int port = 80;
+    size_t colon_pos = host_port.find(':');
+    if (colon_pos != std::string::npos) {
+        host = host_port.substr(0, colon_pos);
+        try {
+            port = std::stoi(host_port.substr(colon_pos + 1));
+        } catch (...) {
+            port = 80;
+        }
+    }
+
+#ifdef _WIN32
+    std::wstring downloads_dir;
+    PWSTR pPath = NULL;
+    if (SUCCEEDED(SHGetKnownFolderPath(FOLDERID_Downloads, 0, NULL, &pPath))) {
+        downloads_dir = pPath;
+        CoTaskMemFree(pPath);
+    } else {
+        const wchar_t* userprofile = _wgetenv(L"USERPROFILE");
+        if (userprofile) {
+            downloads_dir = std::wstring(userprofile) + L"\\Downloads";
+        } else {
+            downloads_dir = L"C:\\Downloads";
+        }
+    }
+
+    int wfn_len = MultiByteToWideChar(CP_UTF8, 0, filename.c_str(), -1, NULL, 0);
+    std::wstring wfilename = L"downloaded_file";
+    if (wfn_len > 0) {
+        wfilename.resize(wfn_len - 1);
+        MultiByteToWideChar(CP_UTF8, 0, filename.c_str(), -1, &wfilename[0], wfn_len);
+    }
+
+    std::wstring ext;
+    std::wstring name_part = wfilename;
+    size_t dot_pos = wfilename.find_last_of(L'.');
+    if (dot_pos != std::wstring::npos) {
+        name_part = wfilename.substr(0, dot_pos);
+        ext = wfilename.substr(dot_pos);
+    }
+
+    std::wstring target_path = downloads_dir + L"\\" + wfilename;
+    int counter = 1;
+    while (GetFileAttributesW(target_path.c_str()) != INVALID_FILE_ATTRIBUTES) {
+        target_path = downloads_dir + L"\\" + name_part + L" (" + std::to_wstring(counter) + L")" + ext;
+        counter++;
+    }
+
+    int target_utf8_len = WideCharToMultiByte(CP_UTF8, 0, target_path.c_str(), -1, NULL, 0, NULL, NULL);
+    std::string target_path_utf8;
+    if (target_utf8_len > 0) {
+        target_path_utf8.resize(target_utf8_len - 1);
+        WideCharToMultiByte(CP_UTF8, 0, target_path.c_str(), -1, &target_path_utf8[0], target_utf8_len, NULL, NULL);
+    }
+#else
+    std::string downloads_dir = "/tmp";
+    const char* home = std::getenv("HOME");
+    if (home) downloads_dir = std::string(home) + "/Downloads";
+    std::string target_path_utf8 = downloads_dir + "/" + filename;
+#endif
+
+    Log("INFO", "📥 Downloading shared file from " + host + ":" + std::to_string(port) + path + " to " + target_path_utf8);
+
+    SOCKET s = socket(AF_INET, SOCK_STREAM, 0);
+    if (s == INVALID_SOCKET) {
+        Log("ERROR", "Failed to create socket for downloading file");
+        return false;
+    }
+
+#ifdef _WIN32
+    DWORD timeout = 10000;
+    setsockopt(s, SOL_SOCKET, SO_RCVTIMEO, (const char*)&timeout, sizeof(timeout));
+    setsockopt(s, SOL_SOCKET, SO_SNDTIMEO, (const char*)&timeout, sizeof(timeout));
+#else
+    struct timeval timeout = { 10, 0 };
+    setsockopt(s, SOL_SOCKET, SO_RCVTIMEO, &timeout, sizeof(timeout));
+    setsockopt(s, SOL_SOCKET, SO_SNDTIMEO, &timeout, sizeof(timeout));
+#endif
+
+    sockaddr_in addr = {0};
+    addr.sin_family = AF_INET;
+    addr.sin_port = htons(port);
+    inet_pton(AF_INET, host.c_str(), &addr.sin_addr);
+
+    if (connect(s, (sockaddr*)&addr, sizeof(addr)) == SOCKET_ERROR) {
+        Log("ERROR", "Failed to connect to teacher server for file download");
+        closesocket(s);
+        return false;
+    }
+
+    std::ostringstream req;
+    req << "GET " << path << " HTTP/1.1\r\n"
+        << "Host: " << host << ":" << port << "\r\n"
+        << "User-Agent: GridSight-Beacon\r\n"
+        << "Connection: close\r\n\r\n";
+    std::string req_str = req.str();
+    send(s, req_str.c_str(), (int)req_str.length(), 0);
+
+    std::ofstream outfile;
+#ifdef _WIN32
+    outfile.open(target_path.c_str(), std::ios::binary);
+#else
+    outfile.open(target_path_utf8.c_str(), std::ios::binary);
+#endif
+
+    if (!outfile.is_open()) {
+        Log("ERROR", "Failed to open output file: " + target_path_utf8);
+        closesocket(s);
+        return false;
+    }
+
+    char buf[8192];
+    bool header_parsed = false;
+    std::string header_buf;
+    size_t total_saved = 0;
+
+    while (true) {
+        int bytes = recv(s, buf, sizeof(buf), 0);
+        if (bytes <= 0) break;
+
+        if (!header_parsed) {
+            header_buf.append(buf, bytes);
+            size_t header_end = header_buf.find("\r\n\r\n");
+            if (header_end != std::string::npos) {
+                if (header_buf.find("200 OK") == std::string::npos && header_buf.find("HTTP/1.1 200") == std::string::npos && header_buf.find("HTTP/1.0 200") == std::string::npos) {
+                    Log("ERROR", "Teacher server returned non-200 status for file download");
+                    outfile.close();
+                    closesocket(s);
+                    return false;
+                }
+
+                header_parsed = true;
+                size_t body_start = header_end + 4;
+                if (body_start < header_buf.length()) {
+                    outfile.write(header_buf.data() + body_start, header_buf.length() - body_start);
+                    total_saved += (header_buf.length() - body_start);
+                }
+            }
+        } else {
+            outfile.write(buf, bytes);
+            total_saved += bytes;
+        }
+    }
+
+    outfile.close();
+    closesocket(s);
+
+    if (total_saved == 0) {
+        Log("ERROR", "Downloaded file is empty (0 bytes)");
+        return false;
+    }
+
+    Log("INFO", "✅ File successfully saved to Downloads directory (" + std::to_string(total_saved) + " bytes): " + target_path_utf8);
+
+#ifdef _WIN32
+    std::wstring params = L"/select,\"" + target_path + L"\"";
+    ShellExecuteW(NULL, L"open", L"explorer.exe", params.c_str(), NULL, SW_SHOWNORMAL);
+    Log("INFO", "📂 Opened File Explorer highlighting: " + target_path_utf8);
+#else
+    std::string cmd = "xdg-open \"" + downloads_dir + "\" &";
+    system(cmd.c_str());
+#endif
+
+    return true;
 }
 
 } // namespace GridSight

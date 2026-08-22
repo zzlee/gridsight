@@ -9,9 +9,10 @@ export interface WebCodecsPlayerHandle {
 interface WebCodecsPlayerProps {
   device: StudentDevice;
   showDebugHud?: boolean;
+  onStreamStatusChange?: (status: 'Connecting' | 'Live 30FPS' | 'Snapshot Fallback' | 'Offline', packets: number, rendered: number) => void;
 }
 
-export const WebCodecsPlayer = forwardRef<WebCodecsPlayerHandle, WebCodecsPlayerProps>(({ device, showDebugHud = false }, ref) => {
+export const WebCodecsPlayer = forwardRef<WebCodecsPlayerHandle, WebCodecsPlayerProps>(({ device, showDebugHud = false, onStreamStatusChange }, ref) => {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const [fps, setFps] = useState(0);
   const [latency, setLatency] = useState(0);
@@ -58,6 +59,9 @@ export const WebCodecsPlayer = forwardRef<WebCodecsPlayerHandle, WebCodecsPlayer
       const now = performance.now();
       const delta = (now - lastTime) / 1000;
       setFps(Math.round(renderCount / delta));
+      if (onStreamStatusChange) {
+        onStreamStatusChange(streamStatus, packetCount, renderCount);
+      }
       renderCount = 0;
       lastTime = now;
     }, 1000);
@@ -121,6 +125,7 @@ export const WebCodecsPlayer = forwardRef<WebCodecsPlayerHandle, WebCodecsPlayer
         if (!isSubscribed) return;
         setStreamStatus('Live 30FPS');
         setLatency(Math.floor(18 + Math.random() * 15));
+        if (onStreamStatusChange) onStreamStatusChange('Live 30FPS', packetCount, 0);
       };
 
       ws.onmessage = (event) => {
@@ -206,15 +211,18 @@ export const WebCodecsPlayer = forwardRef<WebCodecsPlayerHandle, WebCodecsPlayer
         if (!isSubscribed) return;
         console.warn('[WebCodecsPlayer] WebSocket error:', e);
         setStreamStatus('Snapshot Fallback');
+        if (onStreamStatusChange) onStreamStatusChange('Snapshot Fallback', packetCount, 0);
       };
 
       ws.onclose = (e) => {
         if (!isSubscribed) return;
         console.warn('[WebCodecsPlayer] WebSocket closed:', e.code, e.reason);
         setStreamStatus('Snapshot Fallback');
+        if (onStreamStatusChange) onStreamStatusChange('Snapshot Fallback', packetCount, 0);
       };
     } catch (wsErr) {
       setStreamStatus('Snapshot Fallback');
+      if (onStreamStatusChange) onStreamStatusChange('Snapshot Fallback', 0, 0);
     }
 
     // 4. Initial placeholder snapshot while waiting for live stream

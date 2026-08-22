@@ -586,6 +586,55 @@ app.get(['/api/snapshot/:id', '/api/snapshot'], async (req, res) => {
   res.status(404).json({ error: 'No snapshot available' });
 });
 
+// Route: Fetch/Proxy failure logs from student agent
+app.get(['/api/agent/:id/logs', '/api/agent/logs'], requireTeacherAuth, async (req, res) => {
+  const rawId = req.params.id || (req.query.id as string) || (req.query.mac as string) || (req.query.ip as string) || '';
+  const normalizedId = normalizeTarget(rawId);
+
+  const dev = discoveryService.getDevices().find(
+    (d) =>
+      normalizeTarget(d.mac) === normalizedId ||
+      d.ip === rawId ||
+      d.hostname === rawId ||
+      d.id === rawId ||
+      d.mac === rawId
+  );
+
+  if (!dev || !dev.ip) {
+    return res.status(404).json({
+      error: '找不到指定的學生端裝置',
+      message: `無法找到與 ID '${rawId}' 對應的學生機。`,
+    });
+  }
+
+  const port = dev.port || 8080;
+  const agentUrl = `http://${dev.ip}:${port}/logs`;
+
+  try {
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), 3000);
+    const resp = await fetch(agentUrl, { signal: controller.signal });
+    clearTimeout(timeout);
+
+    if (resp.ok) {
+      const logs = await resp.text();
+      res.setHeader('Content-Type', 'text/plain; charset=utf-8');
+      return res.send(logs);
+    } else {
+      return res.status(resp.status).json({
+        error: '學生端回應錯誤',
+        message: `學生端 HTTP 回應狀態碼 ${resp.status}`,
+      });
+    }
+  } catch (err: any) {
+    logger.warn(`[Agent Logs] Failed to fetch logs from ${agentUrl}: ${err.message || err}`);
+    return res.status(502).json({
+      error: '無法連線至學生端抓取日誌',
+      message: `目標學生機 (${dev.hostname} - ${dev.ip}:${port}) 尚未回應，可能連線中斷或受防火牆阻擋。`,
+    });
+  }
+});
+
 // Route: One-click PowerShell installation script for Student PCs
 app.get('/install-agent.ps1', (req, res) => {
   let host = req.headers.host || `${req.hostname}:${PORT}`;

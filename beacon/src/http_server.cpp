@@ -271,6 +271,30 @@ void HttpServer::HandlePingRequest(uintptr_t client_socket) {
     SendResponse(client_socket, 200, "application/json", std::vector<uint8_t>(json.begin(), json.end()));
 }
 
+void HttpServer::HandleLogsRequest(uintptr_t client_socket) {
+    std::ifstream log_file("gs-agent.log", std::ios::binary);
+    std::string content;
+    if (log_file.is_open()) {
+        log_file.seekg(0, std::ios::end);
+        size_t size = log_file.tellg();
+        size_t max_bytes = 256 * 1024;
+        if (size > max_bytes) {
+            log_file.seekg(size - max_bytes, std::ios::beg);
+            content = "[... Log Truncated to Last 256KB ...]\n";
+        } else {
+            log_file.seekg(0, std::ios::beg);
+        }
+        std::string buffer(size > max_bytes ? max_bytes : size, '\0');
+        log_file.read(&buffer[0], buffer.size());
+        content += buffer;
+        log_file.close();
+    } else {
+        content = "[GridSight Agent Log]\nNo log file (gs-agent.log) found or log is empty.\n";
+    }
+
+    SendResponse(client_socket, 200, "text/plain; charset=utf-8", std::vector<uint8_t>(content.begin(), content.end()));
+}
+
 void HttpServer::HandleClient(uintptr_t client_socket) {
     SOCKET s = (SOCKET)client_socket;
 
@@ -317,6 +341,8 @@ void HttpServer::HandleClient(uintptr_t client_socket) {
         HandleSnapshotRequest(client_socket, path);
     } else if (path == "/status" || path == "/api/status") {
         HandleStatusRequest(client_socket);
+    } else if (path == "/logs" || path == "/api/logs") {
+        HandleLogsRequest(client_socket);
     } else if (path == "/ping") {
         HandlePingRequest(client_socket);
     } else {

@@ -13,8 +13,8 @@ import json
 import subprocess
 import os
 
-PORT = 3000
-BASE_URL = f"http://127.0.0.1:{PORT}"
+PORT = os.environ.get("PORT", "3000")
+BASE_URL = os.environ.get("BASE_URL", f"http://127.0.0.1:{PORT}")
 
 def test_health():
     url = f"{BASE_URL}/api/health"
@@ -79,6 +79,33 @@ def test_install_script():
         assert "gs-agent.exe" in content, "Install script missing executable name"
     print("✅ GET /install-agent.ps1 test passed.")
 
+def test_agent_logs():
+    # 1. Test unauthorized request without auth token
+    url = f"{BASE_URL}/api/agent/UNKNOWN_MAC/logs"
+    req = urllib.request.Request(url)
+    try:
+        with urllib.request.urlopen(req, timeout=3) as resp:
+            assert False, "Expected 401 Unauthorized for logs endpoint without token"
+    except urllib.error.HTTPError as err:
+        assert err.code == 401, f"Expected 401, got {err.code}"
+
+    # 2. Test authorized request with PIN login
+    login_url = f"{BASE_URL}/api/auth/login"
+    login_payload = json.dumps({"pin": "888888"}).encode("utf-8")
+    login_req = urllib.request.Request(login_url, data=login_payload, headers={"Content-Type": "application/json"}, method="POST")
+    with urllib.request.urlopen(login_req, timeout=3) as resp:
+        token = json.loads(resp.read().decode("utf-8")).get("token")
+
+    auth_logs_url = f"{BASE_URL}/api/agent/NON_EXISTENT_AGENT/logs"
+    auth_req = urllib.request.Request(auth_logs_url, headers={"Authorization": f"Bearer {token}"})
+    try:
+        with urllib.request.urlopen(auth_req, timeout=3) as resp:
+            assert False, "Expected 404 for non-existent agent logs"
+    except urllib.error.HTTPError as err:
+        assert err.code == 404, f"Expected 404 for non-existent agent, got {err.code}"
+
+    print("✅ GET /api/agent/:id/logs test passed.")
+
 def main():
     print("Starting GridSight Protocol Specification Integration Tests...")
     try:
@@ -86,6 +113,7 @@ def main():
         test_server_info()
         test_agent_snapshot_push_and_fetch()
         test_install_script()
+        test_agent_logs()
         print("\n🎉 ALL PROTOCOL INTEGRATION TESTS PASSED SUCCESSFULLY!")
         return 0
     except Exception as e:

@@ -123,7 +123,7 @@ void HttpServer::SnapshotWorkerLoop() {
                     cached_jpeg_data_ = jpeg_data;
                     cached_jpeg_timestamp_ = Utils::GetCurrentTimestampMs();
                 }
-                // Outbound push to teacher console (100% bypasses student firewall)
+                // Outbound push to teacher console (initiated by student agent to avoid inbound firewall blocks)
                 PushSnapshotToTeacher(jpeg_data);
             }
         }

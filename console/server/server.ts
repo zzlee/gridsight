@@ -512,7 +512,7 @@ app.get('/api/share/download/:fileId/:filename', async (req, res) => {
   }
 });
 
-// Route: Receive outbound JPEG snapshots pushed from student agents (100% firewall proof)
+// Route: Receive outbound JPEG snapshots pushed from student agents
 app.post(
   '/api/agent/snapshot',
   express.raw({ type: ['image/jpeg', 'application/octet-stream', '*/*'], limit: '2mb' }),

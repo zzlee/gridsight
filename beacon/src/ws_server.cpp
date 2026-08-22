@@ -351,7 +351,7 @@ void WebSocketStreamer::StreamLoop() {
 
                     std::lock_guard<std::mutex> lock(client_mutex_);
 
-                    // 1. Send to Outbound Teacher Relay (Firewall Bypassing)
+                    // 1. Send to Outbound Teacher Relay (Outbound reverse WebSocket connection)
                     if (outbound_sock_ != 0) {
                         SendWsClientBinary(outbound_sock_, payload.data(), payload.size());
                     }

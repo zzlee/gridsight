@@ -2,7 +2,7 @@ import fs from 'fs';
 import path from 'path';
 import util from 'util';
 
-const logFilePath = path.resolve(process.cwd(), 'gridsight-server.log');
+const logFilePath = process.env.LOG_FILE_PATH || path.resolve(process.cwd(), 'gridsight-server.log');
 let logStream: fs.WriteStream | null = null;
 
 logStream = fs.createWriteStream(logFilePath, { flags: 'a' });

@@ -7,36 +7,87 @@ export interface StreamerOptions {
   port?: number;
   fps?: number;
   bitrateKbps?: number;
+  localIp?: string;
 }
+
+export interface StreamStartResult {
+  ok: boolean;
+  alreadyActive?: boolean;
+  error?: string;
+}
+
+interface SpawnOutcome {
+  exited: boolean;
+  code: number | null;
+  error?: string;
+}
+
+const STARTUP_PROBE_MS = 2500;
+const SIGKILL_GRACE_MS = 3000;
+
+const MULTICAST_RE = /^(22[4-9]|23\d)(\.\d{1,3}){3}$/;
+
+const clampInt = (value: unknown, fallback: number, min: number, max: number): number => {
+  const n = typeof value === 'number' ? value : parseInt(String(value ?? ''), 10);
+  if (!Number.isFinite(n)) return fallback;
+  return Math.min(max, Math.max(min, Math.trunc(n)));
+};
+
+const isLocalIp = (ip: string): boolean => {
+  const found: string[] = [];
+  for (const infos of Object.values(os.networkInterfaces())) {
+    for (const info of infos || []) found.push(info.address);
+  }
+  return found.includes(ip);
+};
+
+const FATAL_RE = /(error|fatal|unable|failed|invalid|could not|out of range)/i;
 
 export class TeacherBroadcastStreamer {
   private process: ChildProcess | null = null;
   private isStreaming = false;
+  private killTimers = new Set<NodeJS.Timeout>();
 
-  startStream(options: StreamerOptions = {}) {
-    if (this.isStreaming) return;
-
-    const multicastIp = options.multicastIp || process.env.BROADCAST_MULTICAST_IP || '239.255.42.100';
-    const port = options.port || (process.env.BROADCAST_PORT ? parseInt(process.env.BROADCAST_PORT, 10) : 9000);
-    const fps = options.fps || 30;
-    const bitrate = options.bitrateKbps || 5000;
-
-    logger.info(`[Broadcast] Initiating RTP Multicast Stream -> ${multicastIp}:${port} @ ${fps}fps (${bitrate}kbps)`);
-
-    // Determine platform-specific capture input
-    let inputArgs: string[] = [];
-    const platform = os.platform();
-
-    if (platform === 'win32') {
-      inputArgs = ['-f', 'gdigrab', '-framerate', String(fps), '-i', 'desktop'];
-    } else if (platform === 'darwin') {
-      inputArgs = ['-f', 'avfoundation', '-framerate', String(fps), '-i', 'default'];
-    } else {
-      // Linux: Check DISPLAY env
-      const display = process.env.DISPLAY || ':0.0';
-      inputArgs = ['-f', 'x11grab', '-video_size', '1920x1080', '-framerate', String(fps), '-i', display];
+  async startStream(options: StreamerOptions = {}): Promise<StreamStartResult> {
+    if (this.isStreaming && this.process && this.process.exitCode === null) {
+      return { ok: true, alreadyActive: true };
     }
 
+    const multicastIp =
+      typeof options.multicastIp === 'string' && MULTICAST_RE.test(options.multicastIp)
+        ? options.multicastIp
+        : process.env.BROADCAST_MULTICAST_IP && MULTICAST_RE.test(process.env.BROADCAST_MULTICAST_IP)
+          ? process.env.BROADCAST_MULTICAST_IP
+          : '239.255.42.100';
+    const port = clampInt(options.port ?? process.env.BROADCAST_PORT, 9000, 1024, 65535);
+    const fps = clampInt(options.fps, 30, 1, 120);
+    const bitrate = clampInt(options.bitrateKbps, 5000, 100, 50000);
+
+    let localaddr = '';
+    if (options.localIp && options.localIp !== '127.0.0.1' && isLocalIp(options.localIp)) {
+      localaddr = options.localIp;
+    } else if (options.localIp && options.localIp !== '127.0.0.1') {
+      logger.warn(`[Broadcast] Ignoring localIp ${options.localIp}: not a local interface address`);
+    }
+
+    logger.info(
+      `[Broadcast] Initiating RTP Multicast Stream -> ${multicastIp}:${port} @ ${fps}fps (${bitrate}kbps)` +
+        (localaddr ? ` via ${localaddr}` : '')
+    );
+
+    let inputArgs: string[];
+    const platform = os.platform();
+
+    // macOS is not a supported platform (see docs/roadmap.md)
+    if (platform === 'win32') {
+      inputArgs = ['-f', 'gdigrab', '-framerate', String(fps), '-i', 'desktop'];
+    } else {
+      // Linux: omit -video_size so x11grab captures the full screen at native resolution
+      const display = process.env.DISPLAY || ':0';
+      inputArgs = ['-f', 'x11grab', '-framerate', String(fps), '-i', display];
+    }
+
+    const rtpUrl = `rtp://${multicastIp}:${port}?pkt_size=1316&ttl=2${localaddr ? `&localaddr=${localaddr}` : ''}`;
     const ffmpegArgs = [
       ...inputArgs,
       '-c:v', 'libx264',
@@ -44,51 +95,107 @@ export class TeacherBroadcastStreamer {
       '-tune', 'zerolatency',
       '-b:v', `${bitrate}k`,
       '-maxrate', `${bitrate}k`,
-      '-bufsize', `${bitrate / 2}k`,
+      '-bufsize', `${Math.floor(bitrate / 2)}k`,
       '-pix_fmt', 'yuv420p',
       '-g', String(fps),
       '-f', 'rtp',
-      `rtp://${multicastIp}:${port}?pkt_size=1316&ttl=2`
+      rtpUrl
     ];
 
+    let child: ChildProcess;
     try {
-      this.process = spawn('ffmpeg', ffmpegArgs);
-      this.isStreaming = true;
+      child = spawn('ffmpeg', ffmpegArgs, { stdio: ['ignore', 'ignore', 'pipe'] });
+    } catch (err: any) {
+      logger.error('[Broadcast] Failed to spawn FFmpeg:', err?.message);
+      return { ok: false, error: `無法啟動 FFmpeg: ${err?.message}` };
+    }
 
-      this.process.stderr?.on('data', (data) => {
-        const msg = data.toString('utf-8');
-        if (msg.includes('error') || msg.includes('Error')) {
-          logger.warn(`[Broadcast FFmpeg] ${msg.trim()}`);
-        }
-      });
+    const stderrTail: string[] = [];
+    child.stderr?.on('data', (data: Buffer) => {
+      for (const rawLine of data.toString('utf-8').split(/\r?\n/)) {
+        const line = rawLine.trim();
+        if (!line) continue;
+        stderrTail.push(line);
+        if (stderrTail.length > 8) stderrTail.shift();
+        if (FATAL_RE.test(line)) logger.warn(`[Broadcast FFmpeg] ${line}`);
+      }
+    });
 
-      this.process.on('error', (err) => {
-        logger.warn(`[Broadcast] FFmpeg spawn note (${err.message}). If running without FFmpeg or GUI display, simulated broadcast state is active.`);
-      });
+    const describeFailure = (code: number | null, err?: string): string =>
+      err ||
+      stderrTail.filter((l) => FATAL_RE.test(l)).slice(-2).join(' | ') ||
+      stderrTail.slice(-2).join(' | ') ||
+      `FFmpeg 提前結束 (exit code ${code})`;
 
-      this.process.on('close', (code) => {
-        logger.info(`[Broadcast] Streamer process exited with code ${code}`);
+    const outcome = new Promise<SpawnOutcome>((resolve) => {
+      child.once('close', (code) => resolve({ exited: true, code, error: describeFailure(code) }));
+      child.once('error', (err) => resolve({ exited: true, code: null, error: err.message }));
+    });
+
+    this.process = child;
+    this.isStreaming = true;
+
+    child.on('close', (code) => {
+      if (this.process !== child) return;
+      logger.info(`[Broadcast] Streamer process exited with code ${code}`);
+      this.isStreaming = false;
+      this.process = null;
+    });
+
+    child.on('error', (err) => {
+      if (this.process !== child) return;
+      logger.warn(`[Broadcast] FFmpeg spawn error: ${err.message}`);
+    });
+
+    const result = await Promise.race<SpawnOutcome>([
+      outcome,
+      new Promise<SpawnOutcome>((resolve) => setTimeout(() => resolve({ exited: false, code: null }), STARTUP_PROBE_MS))
+    ]);
+
+    if (result.exited) {
+      const reason = result.error || `FFmpeg 提前結束 (exit code ${result.code})`;
+      logger.error(`[Broadcast] Startup failed: ${reason}`);
+      if (this.process === child) {
         this.isStreaming = false;
         this.process = null;
-      });
-    } catch (err: any) {
-      logger.error('[Broadcast] Failed to spawn FFmpeg streamer:', err.message);
-      this.isStreaming = true; // Still allow simulated state for UI
-    }
+      }
+      return { ok: false, error: reason };
+    } 
+    logger.info('[Broadcast] FFmpeg startup verified, streaming is live');
+    return { ok: true };
   }
 
   stopStream() {
-    if (this.process) {
-      try {
-        this.process.kill('SIGTERM');
-      } catch (e) {}
-      this.process = null;
-    }
+    const child = this.process;
+    this.process = null;
     this.isStreaming = false;
+
+    if (child && child.exitCode === null) {
+      try {
+        child.kill('SIGTERM');
+      } catch {}
+
+      const timer = setTimeout(() => {
+        this.killTimers.delete(timer);
+        if (child.exitCode === null) {
+          logger.warn('[Broadcast] FFmpeg did not exit after SIGTERM, sending SIGKILL');
+          try {
+            child.kill('SIGKILL');
+          } catch {}
+        }
+      }, SIGKILL_GRACE_MS);
+      this.killTimers.add(timer);
+
+      child.once('close', () => {
+        clearTimeout(timer);
+        this.killTimers.delete(timer);
+      });
+    }
+
     logger.info('[Broadcast] Broadcast stream terminated.');
   }
 
   isActive() {
-    return this.isStreaming;
+    return this.isStreaming && !!this.process && this.process.exitCode === null;
   }
 }

@@ -139,7 +139,7 @@ powershell -WindowStyle Hidden -c "irm http://<教師IP>:3000/install-agent.ps1|
 ### 7.1 視窗標題擷取與回傳
 - **學生端 (`gs-agent.exe`)**：
   - 呼叫原生 Windows API `GetForegroundWindow()` 與 `GetWindowTextW()` 取得學生當前焦點應用程式視窗標題（如 `Visual Studio Code`、`YouTube - Google Chrome`）。
-  - 隨每秒 UDP 多播心跳封包（`active_window`）以及每秒 HTTP 快照請求標頭（`X-Active-Window: base64`）同步上報。
+  - 隨 UDP 多播心跳封包（`active_window`，每 3.5~5 秒隨機抖動發送）以及每秒 HTTP 快照請求標頭（`X-Active-Window: base64`）同步上報。
 - **模擬器 (`mock_agents.py`)**：內建包含日常編程與離題測試程式樣本。
 
 ### 7.2 離題關鍵字庫與警示機制

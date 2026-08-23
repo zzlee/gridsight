@@ -11,7 +11,7 @@ class HttpServer;
 
 class BeaconClient {
 public:
-    BeaconClient(const std::string& multicast_ip = "239.255.42.99", int port = 9001, std::shared_ptr<HttpServer> http_server = nullptr);
+    BeaconClient(const std::string& multicast_ip = "239.255.42.99", int port = 8888, std::shared_ptr<HttpServer> http_server = nullptr);
     ~BeaconClient();
 
     void Start();

@@ -9,10 +9,18 @@ services:
       dockerfile: Dockerfile.console
     container_name: gridsight-console
     network_mode: host
+    ipc: host
+    user: "1000:1000"
     restart: unless-stopped
     env_file:
       - .env
+    environment:
+      - DISPLAY=${DISPLAY:-:0}
+      - XAUTHORITY=/tmp/.Xauthority
+      - LOG_FILE_PATH=/tmp/gridsight-server.log
     volumes:
       - ./data:/data
-      - ./beacon/gs-agent.exe:/app/downloads/gs-agent.exe:ro
+      - ./beacon:/app/beacon:ro
       - ./tools:/app/tools:ro
+      - /tmp/.X11-unix:/tmp/.X11-unix:ro
+      - ${XAUTHORITY:-$HOME/.Xauthority}:/tmp/.Xauthority:ro

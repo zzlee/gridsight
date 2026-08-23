@@ -11,7 +11,7 @@ const http = require('http');
 
 const NUM_AGENTS = 70;
 const MULTICAST_GROUP = '239.255.42.99';
-const DISCOVERY_PORT = 9001;
+const DISCOVERY_PORT = 8888;
 const SNAPSHOT_PORT = 8080;
 
 // A tiny valid 1x1 PNG image in base64

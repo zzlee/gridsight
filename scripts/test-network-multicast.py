@@ -5,7 +5,7 @@ import time
 import json
 
 MULTICAST_GROUP = '239.255.42.99'
-PORT = 9001
+PORT = 8888
 
 def main():
     print(f"[Multicast Test] Sending Beacon Announcements to {MULTICAST_GROUP}:{PORT}...")

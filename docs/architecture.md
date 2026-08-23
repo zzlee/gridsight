@@ -43,7 +43,7 @@ GridSight 是專為 70 台具備還原卡之 Windows 電腦教室打造的螢幕
 - **運行環境**：Windows 10/11 x64 (透過 MinGW-w64 於 Linux 交叉編譯)
 - **核心職責**：
   1. **Session 1 背景運行**：透過 PowerShell 雲端熱拉取至 `%TEMP%` 於學生登入 Session 1 執行，徹底避開 Session 0 截圖隔離。
-  2. **主動上線宣告 (Beacon)**：啟動時向 `239.255.42.99:9001` 發送探索包，動態取得 RAM Token。
+  2. **主動上線宣告 (Beacon)**：啟動時向 `239.255.42.99:8888` 發送探索包，動態取得 RAM Token。
   3. **Native HTTP Snapshot 服務**：提供 `/snapshot` 接口，回傳 480×270 JPEG 影像。
   4. **按需 WebSocket H.264 串流**：當教師端焦點點選時，啟動 30 FPS 串流編碼。
   5. **D3D11 / SDL2 全螢幕置頂廣播接收**：接收組播 RTP 串流並以最上層無邊框視窗覆蓋顯示。

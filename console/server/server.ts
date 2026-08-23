@@ -353,8 +353,11 @@ app.get('/api/devices', requireTeacherAuth, (req, res) => {
   });
 });
 
-app.post('/api/broadcast/start', requireTeacherAuth, (req, res) => {
-  broadcastStreamer.startStream(req.body);
+app.post('/api/broadcast/start', requireTeacherAuth, async (req, res) => {
+  const result = await broadcastStreamer.startStream({ ...(req.body || {}), localIp: activeTeacherIp });
+  if (!result.ok) {
+    return res.status(500).json({ status: 'error', active: false, error: result.error || '廣播啟動失敗' });
+  }
   res.json({ status: 'streaming', active: true });
 });
 
@@ -500,14 +503,24 @@ app.post(
 // Route: Download Shared File for Student Agents
 app.get('/api/share/download/:fileId/:filename', async (req, res) => {
   const { fileId, filename } = req.params;
+  // fileId is server-generated (Date.now().toString(36) + base36 random) — reject anything else
+  // to prevent path traversal (e.g. "..%2F..%2F") escaping UPLOADS_DIR.
+  if (!/^[a-z0-9]+$/.test(fileId)) {
+    return res.status(400).json({ error: '非法的檔案識別碼' });
+  }
   const safeFilename = path.basename(filename).replace(/[/\\?%*:|"<>]/g, '_');
   const filePath = path.join(UPLOADS_DIR, `${fileId}_${safeFilename}`);
 
-  if (fs.existsSync(filePath)) {
+  try {
+    const resolved = path.resolve(filePath);
+    if (!resolved.startsWith(path.resolve(UPLOADS_DIR) + path.sep)) {
+      return res.status(400).json({ error: '非法的檔案路徑' });
+    }
+    await fs.promises.access(resolved);
     res.setHeader('Content-Type', 'application/octet-stream');
     res.setHeader('Content-Disposition', `attachment; filename="${encodeURIComponent(filename)}"`);
-    res.sendFile(filePath);
-  } else {
+    res.sendFile(resolved);
+  } catch {
     res.status(404).json({ error: '找不到分享之檔案' });
   }
 });
@@ -661,7 +674,30 @@ Start-Sleep -Milliseconds 500
 
 Write-Host "[GridSight] 正在從 $exeUrl 下載最新版 gs-agent.exe..." -ForegroundColor Cyan
 [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12 -bor [Net.SecurityProtocolType]::Tls11 -bor [Net.SecurityProtocolType]::Tls
-Invoke-WebRequest -Uri $exeUrl -OutFile $destPath -UseBasicParsing
+
+# Download agent binary with error handling
+try {
+    if (Test-Path $destPath) { Remove-Item $destPath -Force }
+    $oldEAP = $ErrorActionPreference
+    $ErrorActionPreference = "Stop"
+    Invoke-WebRequest -Uri $exeUrl -OutFile $destPath -UseBasicParsing
+    $ErrorActionPreference = $oldEAP
+} catch {
+    Write-Host "[GridSight] ❌ 下載學生端程式失敗！請確認與教師端伺服器 (http://$serverHost) 連線正常。" -ForegroundColor Red
+    Write-Host "[GridSight] 錯誤詳情: $_" -ForegroundColor Red
+    Exit
+}
+
+# Verify downloaded executable size (ensure it's not a small error page HTML/JSON)
+if (!(Test-Path $destPath) -or (Get-Item $destPath).Length -lt 10240) {
+    Write-Host "[GridSight] ❌ 下載學生端程式錯誤：下載的檔案無效或大小異常。" -ForegroundColor Red
+    if (Test-Path $destPath) {
+        $content = Get-Content $destPath -TotalCount 5
+        Write-Host "[GridSight] 伺服器回應內容: $content" -ForegroundColor Red
+        Remove-Item $destPath -Force
+    }
+    Exit
+}
 
 # Configure Firewall
 try {
@@ -755,6 +791,14 @@ python $destPath --count $mockCount --teacher-ip $teacherIp
   res.send(script);
 });
 
+const isExistingFile = (p: string): boolean => {
+  try {
+    return fs.existsSync(p) && fs.statSync(p).isFile();
+  } catch {
+    return false;
+  }
+};
+
 // Route: Serve mock_agents.py file
 const possibleMockScriptPaths = [
   path.resolve(currentDirname, '../../tools/mock_agents.py'),
@@ -766,7 +810,7 @@ const possibleMockScriptPaths = [
 
 const getMockScriptPath = () => {
   for (const p of possibleMockScriptPaths) {
-    if (fs.existsSync(p)) return p;
+    if (isExistingFile(p)) return p;
   }
   return null;
 };
@@ -795,7 +839,7 @@ const possibleAgentPaths = [
 
 const getAgentBinaryPath = () => {
   for (const p of possibleAgentPaths) {
-    if (fs.existsSync(p)) return p;
+    if (isExistingFile(p)) return p;
   }
   return null;
 };
@@ -825,7 +869,7 @@ const possibleConsolePaths = [
 
 const getConsoleBinaryPath = () => {
   for (const p of possibleConsolePaths) {
-    if (fs.existsSync(p)) return p;
+    if (isExistingFile(p)) return p;
   }
   return null;
 };
@@ -855,7 +899,7 @@ const possiblePortablePaths = [
 
 const getPortableZipPath = () => {
   for (const p of possiblePortablePaths) {
-    if (fs.existsSync(p)) return p;
+    if (isExistingFile(p)) return p;
   }
   return null;
 };
@@ -929,8 +973,6 @@ async function bootstrap() {
       let cmd = '';
       if (platform === 'win32') {
         cmd = `start "" "${targetUrl}"`;
-      } else if (platform === 'darwin') {
-        cmd = `open "${targetUrl}"`;
       } else {
         cmd = `xdg-open "${targetUrl}"`;
       }

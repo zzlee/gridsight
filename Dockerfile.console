@@ -40,8 +40,9 @@ COPY console/server/ ./
 # Copy built frontend assets from Stage 1
 COPY --from=frontend-builder /app/console/dist /app/console/dist
 
-# Expose Web Console / API port (3000) and UDP Discovery Multicast (9001) / RTP Broadcast (9000)
-EXPOSE 3000 9001/udp 9000/udp
+# Expose Web Console / API port (3000). Discovery multicast (239.255.42.99:8888) and
+# RTP broadcast (239.255.42.100:9000) are UDP multicast groups handled via host networking.
+EXPOSE 3000
 
 # Healthcheck
 HEALTHCHECK --interval=30s --timeout=5s --start-period=5s --retries=3 \

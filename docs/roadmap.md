@@ -60,7 +60,7 @@ graph TD
 
 ### 階段 2：P2 教師全體廣播串流閉環
 - [x] **Task 2.1**：在 `console/src/components/Broadcast/BroadcastControl.tsx` 與 `App.tsx` 中呼叫後端 `/api/broadcast/start` 與 `/api/broadcast/stop` API。
-- [x] **Task 2.2**：完善 Node.js 後端 `broadcastStreamer.ts`，支援跨平台（Windows / Linux / macOS）以 FFmpeg 啟動螢幕擷取並向 `239.255.42.100:9000` 進行 RTP H.264 多播推流。
+- [x] **Task 2.2**：完善 Node.js 後端 `broadcastStreamer.ts`，支援跨平台（Windows / Linux）以 FFmpeg 啟動螢幕擷取並向 `239.255.42.100:9000` 進行 RTP H.264 多播推流。（macOS 不在支援範圍：avfoundation 擷取路徑未經維護且無測試環境，已自實作中移除。）
 - [x] **Task 2.3**：在 `beacon/src/rtp_receiver.cpp` 中實作 IGMP 多播 Socket 監聽 (`IP_ADD_MEMBERSHIP`)，接收 RTP 數據包（含 RFC 6184 FU-A 解包），並建立全螢幕置頂覆蓋視窗。
 
 ### 階段 3：P3 安全鑑權閉環與系統健壯性

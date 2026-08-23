@@ -8,7 +8,7 @@
 
 | 協定 / 服務 | 連接埠 / 多播位址 | 發起方 (Initiator) | 接收方 (Listener) | 連線方向 | 目的與說明 | 防火牆與網路配置要求 |
 | :--- | :--- | :--- | :--- | :--- | :--- | :--- |
-| **UDP Multicast Beacon** | `239.255.42.99:8888` / `9001` | 學生端 (Agent) | 教師端 (Console) | 學生 ➔ 教師 (Multicast) | 學生端啟動時廣播心跳、硬體資訊及焦點視窗標題 | 需允許 UDP 239.255.42.99 入站/出站及網卡多播轉發 |
+| **UDP Multicast Beacon** | `239.255.42.99:8888` | 學生端 (Agent) | 教師端 (Console) | 學生 ➔ 教師 (Multicast) | 學生端啟動時廣播心跳、硬體資訊及焦點視窗標題 | 需允許 UDP 239.255.42.99 入站/出站及網卡多播轉發 |
 | **UDP Unicast Token Grant** | 動態 UDP 連接埠 (回傳 Port) | 教師端 (Console) | 學生端 (Agent) | 教師 ➔ 學生 (Unicast Response) | 教師端授予學生端 Session Token 與 Teacher IP | 需允許 UDP 單播回應 |
 | **HTTP Snapshot Push** | `TCP 3000` (`POST /api/agent/snapshot`) | 學生端 (Agent) | 教師端 (Console) | 學生 ➔ 教師 (Outbound HTTP) | 學生端每秒主動推送 480×270 JPEG 縮圖至教師端快取 | 學生端出站 TCP 3000，無需開啟學生端入站防護 |
 | **HTTP Snapshot Fetch** | `TCP 3000` (`GET /api/snapshot/:id`) | 前端瀏覽器 | 教師端 (Console) | 瀏覽器 ➔ 教師 (HTTP GET) | 前端監控面板向教師端後端讀取快取之最新學生縮圖 | 教師端 TCP 3000 入站允許 |
@@ -30,7 +30,7 @@ sequenceDiagram
     participant Student as 學生端 (gs-agent)
     participant Teacher as 教師端 (gs-console:3000)
 
-    Student->>Teacher: UDP Multicast (239.255.42.99:8888/9001)<br/>JSON Payload: Beacon Info, Specs, Active Window
+    Student->>Teacher: UDP Multicast (239.255.42.99:8888)<br/>JSON Payload: Beacon Info, Specs, Active Window
     Note over Teacher: 記錄學生機 MAC/IP/Specs<br/>生成動態 Session Token
     Teacher-->>Student: UDP Unicast Response<br/>JSON Payload: TOKEN_GRANT (token, teacherIp, sessionDurationSec)
     Note over Student: 學生端保存 Token 於 RAM<br/>設定 Teacher IP 供出站推流使用
@@ -119,7 +119,7 @@ sequenceDiagram
 ## 📄 3. 詳細 API 規格與資料格式 (Endpoints & Payloads)
 
 ### 3.1 學生端宣告 (Beacon Announcement)
-- **傳輸方式**：UDP Multicast (`239.255.42.99:8888` 或 `9001`)
+- **傳輸方式**：UDP Multicast (`239.255.42.99:8888`，可經 `MULTICAST_IP` / `MULTICAST_PORT` 環境變數覆寫)
 - **發送頻率**：啟動時發送，隨後 3~5 秒隨機抖動週期發送。
 - **Payload 格式 (JSON)**：
 ```json
@@ -194,7 +194,10 @@ sequenceDiagram
     - `{"action": "START_STREAM", "fps": 30, "bitrate": 2500}`
     - `{"action": "STOP_STREAM"}`
     - `{"action": "OPEN_URL", "url": "https://example.com"}`
-    - `{"action": "SHARE_FILE", "url": "http://.../download/...", "filename": "lesson1.pdf"}`
+    - `{"action": "SHARE_FILE", "url": "http://<TEACHER_IP>:3000/api/share/download/<fileId>/<filename>", "filename": "lesson1.pdf", "fileSize": 1048576}`
+      - `url`：教師端檔案下載端點（學生端以此發起 HTTP GET 下載，無需鑑權）。
+      - `filename`：伺服器端已消毒之檔名（`path.basename` + 非法字元取代為 `_`），學生端存檔時據此避免目錄攻擊。
+      - `fileSize`：檔案大小（位元組），供學生端校驗下載完整性（目前學生端實作尚未消費此欄位，僅供保留/未來驗證用）。
 
 ### 3.6 學生端本地 HTTP API (Port 8080)
 - **`GET /snapshot`**：

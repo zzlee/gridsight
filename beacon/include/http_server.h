@@ -27,6 +27,7 @@ private:
     void HandleSnapshotRequest(uintptr_t client_socket, const std::string& path);
     void HandleStatusRequest(uintptr_t client_socket);
     void HandlePingRequest(uintptr_t client_socket);
+    void HandleLogsRequest(uintptr_t client_socket);
     void SendResponse(uintptr_t client_socket, int status_code, 
                       const std::string& content_type, const std::vector<uint8_t>& body);
 

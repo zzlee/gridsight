@@ -1,7 +1,27 @@
 import React, { useState, useRef, useEffect } from 'react';
 import { StudentDevice } from '../../types';
 import { WebCodecsPlayer, WebCodecsPlayerHandle } from './WebCodecsPlayer';
-import { X, Maximize, Minimize, Camera, ShieldCheck, Cpu, MemoryStick, HardDrive, Info, CheckCircle, Activity, AppWindow, AlertTriangle } from 'lucide-react';
+import { AuthService } from '../../services/authService';
+import {
+  X,
+  Maximize,
+  Minimize,
+  Camera,
+  ShieldCheck,
+  Cpu,
+  MemoryStick,
+  HardDrive,
+  Info,
+  CheckCircle,
+  Activity,
+  AppWindow,
+  AlertTriangle,
+  FileText,
+  Download,
+  Copy,
+  RefreshCw,
+  Loader2,
+} from 'lucide-react';
 
 interface FocusModalProps {
   device: StudentDevice | null;
@@ -16,6 +36,16 @@ export const FocusModal: React.FC<FocusModalProps> = ({ device, onClose }) => {
   const [isFullscreen, setIsFullscreen] = useState(false);
   const [toastMessage, setToastMessage] = useState<string | null>(null);
 
+  // Stream status & Failure log states
+  const [streamStatus, setStreamStatus] = useState<'Connecting' | 'Live 30FPS' | 'Snapshot Fallback' | 'Offline'>('Connecting');
+  const [packetsReceived, setPacketsReceived] = useState<number>(0);
+  const [isStreamTimeout, setIsStreamTimeout] = useState<boolean>(false);
+
+  const [showLogModal, setShowLogModal] = useState<boolean>(false);
+  const [logsContent, setLogsContent] = useState<string | null>(null);
+  const [isLoadingLogs, setIsLoadingLogs] = useState<boolean>(false);
+  const [logError, setLogError] = useState<string | null>(null);
+
   // Sync fullscreen state with browser events (e.g. Esc key)
   useEffect(() => {
     const handleFullscreenChange = () => {
@@ -24,6 +54,14 @@ export const FocusModal: React.FC<FocusModalProps> = ({ device, onClose }) => {
     document.addEventListener('fullscreenchange', handleFullscreenChange);
     return () => document.removeEventListener('fullscreenchange', handleFullscreenChange);
   }, []);
+
+  // 3-second stream connection timeout checker
+  useEffect(() => {
+    const timer = setTimeout(() => {
+      setIsStreamTimeout(true);
+    }, 3000);
+    return () => clearTimeout(timer);
+  }, [device?.id]);
 
   if (!device) return null;
 
@@ -46,6 +84,51 @@ export const FocusModal: React.FC<FocusModalProps> = ({ device, onClose }) => {
         console.warn('[FocusModal] Exit fullscreen error:', err);
       }
     }
+  };
+
+  const handleFetchLogs = async () => {
+    if (!device) return;
+    setShowLogModal(true);
+    setIsLoadingLogs(true);
+    setLogError(null);
+    try {
+      const target = device.mac || device.ip || device.id;
+      const resp = await AuthService.fetchWithAuth(`/api/agent/${encodeURIComponent(target)}/logs`);
+      if (resp.ok) {
+        const text = await resp.text();
+        setLogsContent(text);
+      } else {
+        const errData = await resp.json().catch(() => ({}));
+        setLogError(errData.message || errData.error || `無法抓取學生端日誌 (HTTP ${resp.status})`);
+      }
+    } catch (err: any) {
+      console.warn('[FocusModal] Fetch logs error:', err);
+      setLogError('連線失敗：目標學生機可能離線或網路被防火牆阻擋。');
+    } finally {
+      setIsLoadingLogs(false);
+    }
+  };
+
+  const handleCopyLogs = () => {
+    if (!logsContent) return;
+    navigator.clipboard.writeText(logsContent);
+    setToastMessage('📋 已複製學生端日誌至剪貼簿');
+    setTimeout(() => setToastMessage(null), 3000);
+  };
+
+  const handleDownloadLogs = () => {
+    if (!logsContent || !device) return;
+    const blob = new Blob([logsContent], { type: 'text/plain;charset=utf-8' });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement('a');
+    link.href = url;
+    link.download = `gs-agent-${device.hostname || 'student'}_${new Date().toISOString().slice(0, 10)}.log`;
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+    URL.revokeObjectURL(url);
+    setToastMessage('💾 已下載學生端日誌檔案');
+    setTimeout(() => setToastMessage(null), 3000);
   };
 
   const handleTakeSnapshot = async () => {
@@ -141,6 +224,15 @@ export const FocusModal: React.FC<FocusModalProps> = ({ device, onClose }) => {
             </div>
           </div>
           <div className="flex items-center space-x-2">
+            {/* Fetch Student Agent Log Button */}
+            <button
+              onClick={handleFetchLogs}
+              className="p-1.5 rounded-lg bg-slate-800 hover:bg-amber-600/30 text-amber-400 border border-amber-500/30 hover:border-amber-500/60 transition-colors flex items-center space-x-1 text-xs px-2 font-medium"
+              title="抓取學生端失敗紀錄 / gs-agent.log 日誌"
+            >
+              <FileText className="w-4 h-4" />
+              <span className="hidden sm:inline">抓取學生端紀錄</span>
+            </button>
             {/* Toggle Stream Diagnostic HUD (Default OFF) */}
             <button
               onClick={() => setShowDebugHud(!showDebugHud)}
@@ -190,7 +282,32 @@ export const FocusModal: React.FC<FocusModalProps> = ({ device, onClose }) => {
 
         {/* Video Canvas Area */}
         <div className="flex-1 bg-black overflow-hidden relative">
-          <WebCodecsPlayer ref={playerRef} device={device} showDebugHud={showDebugHud} />
+          <WebCodecsPlayer
+            ref={playerRef}
+            device={device}
+            showDebugHud={showDebugHud}
+            onStreamStatusChange={(status, packets) => {
+              setStreamStatus(status);
+              setPacketsReceived(packets);
+            }}
+          />
+
+          {/* Stream Failure / No Frames Overlay Banner */}
+          {(streamStatus === 'Snapshot Fallback' || streamStatus === 'Offline' || (packetsReceived === 0 && isStreamTimeout)) && (
+            <div className="absolute bottom-6 left-1/2 -translate-x-1/2 z-40 bg-slate-950/90 border border-amber-500/50 rounded-xl p-3 px-5 shadow-2xl backdrop-blur-md flex items-center space-x-4 animate-in fade-in slide-in-from-bottom-3 duration-200">
+              <div className="flex items-center space-x-2 text-amber-400 font-medium text-xs sm:text-sm">
+                <AlertTriangle className="w-5 h-5 shrink-0 text-amber-400 animate-bounce" />
+                <span>尚未收到學生端即時畫面 (連線中斷或串流失敗)</span>
+              </div>
+              <button
+                onClick={handleFetchLogs}
+                className="px-3 py-1.5 bg-amber-500/20 hover:bg-amber-500/30 text-amber-300 border border-amber-500/40 rounded-lg text-xs font-semibold flex items-center space-x-1.5 transition-all shadow-md active:scale-95 shrink-0"
+              >
+                <FileText className="w-4 h-4" />
+                <span>抓取學生端失敗紀錄</span>
+              </button>
+            </div>
+          )}
 
           {/* Toast Notification */}
           {toastMessage && (
@@ -261,6 +378,86 @@ export const FocusModal: React.FC<FocusModalProps> = ({ device, onClose }) => {
           </div>
           <div className="text-sky-400 font-medium">按需 OpenH264 WebSocket 串流中 (單機約 2~4 Mbps)</div>
         </div>
+
+        {/* Student Failure Log Modal */}
+        {showLogModal && (
+          <div className="fixed inset-0 z-50 bg-slate-950/85 backdrop-blur-md flex items-center justify-center p-4 animate-in fade-in duration-150">
+            <div className="bg-slate-900 border border-slate-700 rounded-xl max-w-3xl w-full h-[75vh] flex flex-col overflow-hidden shadow-2xl">
+              {/* Log Modal Header */}
+              <div className="flex items-center justify-between px-5 py-3.5 bg-slate-950 border-b border-slate-800">
+                <div className="flex items-center space-x-2.5">
+                  <FileText className="w-5 h-5 text-amber-400" />
+                  <div>
+                    <h3 className="font-bold text-slate-100 text-sm sm:text-base">學生端運行日誌 (gs-agent.log)</h3>
+                    <p className="text-xs text-slate-400 font-mono">{device.hostname} ({device.ip})</p>
+                  </div>
+                </div>
+                <div className="flex items-center space-x-2">
+                  {logsContent && (
+                    <>
+                      <button
+                        onClick={handleCopyLogs}
+                        className="px-2.5 py-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-300 hover:text-white border border-slate-700 text-xs font-medium flex items-center space-x-1 transition-colors"
+                        title="複製日誌內容"
+                      >
+                        <Copy className="w-3.5 h-3.5 text-sky-400" />
+                        <span className="hidden sm:inline">複製日誌</span>
+                      </button>
+                      <button
+                        onClick={handleDownloadLogs}
+                        className="px-2.5 py-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-300 hover:text-white border border-slate-700 text-xs font-medium flex items-center space-x-1 transition-colors"
+                        title="下載 .log 檔案"
+                      >
+                        <Download className="w-3.5 h-3.5 text-emerald-400" />
+                        <span className="hidden sm:inline">下載日誌</span>
+                      </button>
+                    </>
+                  )}
+                  <button
+                    onClick={handleFetchLogs}
+                    disabled={isLoadingLogs}
+                    className="p-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-300 hover:text-white border border-slate-700 transition-colors disabled:opacity-50"
+                    title="重新拉取"
+                  >
+                    <RefreshCw className={`w-4 h-4 ${isLoadingLogs ? 'animate-spin' : ''}`} />
+                  </button>
+                  <button
+                    onClick={() => setShowLogModal(false)}
+                    className="p-1.5 rounded-lg bg-rose-500/20 hover:bg-rose-500/30 text-rose-400 border border-rose-500/30 transition-colors"
+                    title="關閉日誌視窗"
+                  >
+                    <X className="w-4 h-4" />
+                  </button>
+                </div>
+              </div>
+
+              {/* Log Modal Body */}
+              <div className="flex-1 p-4 bg-slate-950 overflow-hidden flex flex-col">
+                {isLoadingLogs ? (
+                  <div className="flex-1 flex flex-col items-center justify-center space-y-3 text-slate-400">
+                    <Loader2 className="w-8 h-8 animate-spin text-amber-400" />
+                    <p className="text-xs">正在從學生端 {device.hostname} ({device.ip}) 擷取紀錄檔...</p>
+                  </div>
+                ) : logError ? (
+                  <div className="flex-1 flex flex-col items-center justify-center p-6 text-center space-y-3">
+                    <AlertTriangle className="w-10 h-10 text-rose-400 animate-pulse" />
+                    <p className="text-slate-200 font-semibold text-sm">{logError}</p>
+                    <button
+                      onClick={handleFetchLogs}
+                      className="px-4 py-2 bg-amber-500/20 hover:bg-amber-500/30 border border-amber-500/40 text-amber-300 rounded-lg text-xs font-bold transition-all"
+                    >
+                      重新連線嘗試
+                    </button>
+                  </div>
+                ) : (
+                  <div className="flex-1 bg-slate-900 border border-slate-800 rounded-lg p-4 font-mono text-xs text-slate-300 overflow-y-auto whitespace-pre-wrap select-text leading-relaxed">
+                    {logsContent || '（學生端日誌內容空白）'}
+                  </div>
+                )}
+              </div>
+            </div>
+          </div>
+        )}
       </div>
     </div>
   );

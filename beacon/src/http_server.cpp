@@ -3,6 +3,7 @@
 #include "../include/token_manager.h"
 #include "../include/utils.h"
 #include <iostream>
+#include <fstream>
 #include <sstream>
 #include <vector>
 #include <cstring>

@@ -763,4 +763,21 @@ bool Utils::DownloadAndOpenFile(const std::string& url, const std::string& raw_f
     return true;
 }
 
+std::string Utils::JsonEscape(const std::string& input) {
+    std::ostringstream ss;
+    ss << "\"";
+    for (char c : input) {
+        if (c == '"') ss << "\\\"";
+        else if (c == '\\') ss << "\\\\";
+        else if (c == '\b') ss << "\\b";
+        else if (c == '\f') ss << "\\f";
+        else if (c == '\n') ss << "\\n";
+        else if (c == '\r') ss << "\\r";
+        else if (c == '\t') ss << "\\t";
+        else if ((unsigned char)c >= 0x20) ss << c;
+    }
+    ss << "\"";
+    return ss.str();
+}
+
 } // namespace GridSight

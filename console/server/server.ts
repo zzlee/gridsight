@@ -71,6 +71,7 @@ const snapshotCache = new Map<string, { buffer: Buffer; timestamp: number }>();
 // Maps for WebSocket reverse relay
 const agentSockets = new Map<string, WebSocket>();
 const viewerSockets = new Map<string, Set<WebSocket>>();
+const pendingLogRequests = new Map<string, (logs: string) => void>();
 
 // Normalizes MAC addresses and targets by decoding URL characters and standardizing case
 const normalizeTarget = (raw: string) => {
@@ -111,6 +112,18 @@ wss.on('connection', (ws, req) => {
             }
           });
         }
+      } else {
+        try {
+          const text = data.toString('utf-8');
+          const json = JSON.parse(text);
+          if (json.action === 'LOGS_REPORT') {
+            const cb = pendingLogRequests.get(mac);
+            if (cb) {
+              cb(json.logs || '');
+              pendingLogRequests.delete(mac);
+            }
+          }
+        } catch {}
       }
     });
 
@@ -415,7 +428,6 @@ app.post('/api/share/url', requireTeacherAuth, (req, res) => {
 app.post(
   '/api/share/file',
   requireTeacherAuth,
-  express.raw({ type: '*/*', limit: '100mb' }),
   async (req, res) => {
     try {
       await ensureUploadsDirectory();
@@ -439,16 +451,28 @@ app.post(
         }
       }
 
-      const fileBuffer = req.body as Buffer;
-      if (!fileBuffer || fileBuffer.length === 0) {
-        return res.status(400).json({ error: '檔案內容不可為空' });
-      }
-
       const fileId = Date.now().toString(36) + Math.random().toString(36).substring(2, 6);
       const savedPath = path.join(UPLOADS_DIR, `${fileId}_${safeFilename}`);
 
-      await fs.promises.writeFile(savedPath, fileBuffer);
-      logger.info(`[Share] File saved to ${savedPath} (${fileBuffer.length} bytes)`);
+      let totalBytes = 0;
+      const writeStream = fs.createWriteStream(savedPath);
+
+      await new Promise<void>((resolve, reject) => {
+        req.on('data', (chunk: Buffer) => {
+          totalBytes += chunk.length;
+        });
+        req.pipe(writeStream);
+        writeStream.on('finish', () => resolve());
+        writeStream.on('error', (err) => reject(err));
+        req.on('error', (err) => reject(err));
+      });
+
+      if (totalBytes === 0) {
+        try { await fs.promises.unlink(savedPath); } catch {}
+        return res.status(400).json({ error: '檔案內容不可為空' });
+      }
+
+      logger.info(`[Share] File saved to ${savedPath} (${totalBytes} bytes)`);
 
       const host = req.headers.host || `${activeTeacherIp}:${PORT}`;
       const teacherHost = (activeTeacherIp && activeTeacherIp !== '127.0.0.1') ? `${activeTeacherIp}:${PORT}` : host;
@@ -458,7 +482,7 @@ app.post(
         action: 'SHARE_FILE',
         url: downloadUrl,
         filename: safeFilename,
-        fileSize: fileBuffer.length,
+        fileSize: totalBytes,
       });
 
       let targetMacs: string[] = [];
@@ -484,18 +508,19 @@ app.post(
         });
       }
 
-      logger.info(`[Share] Shared file "${safeFilename}" to ${count} student agents via ${downloadUrl}`);
+      logger.info(`[Share] Shared file "${safeFilename}" (${(totalBytes / 1048576).toFixed(1)} MB) to ${count} student agents via ${downloadUrl}`);
       res.json({
         success: true,
         count,
         fileId,
         filename: safeFilename,
+        fileSize: totalBytes,
         downloadUrl,
-        message: `已將檔案 "${safeFilename}" 發送至 ${count} 台學生機`,
+        message: `已將檔案 "${safeFilename}" (${(totalBytes / 1048576).toFixed(1)} MB) 發送至 ${count} 台學生機`,
       });
     } catch (err: any) {
       logger.error(`[Share] Error sharing file: ${err.message || err}`);
-      res.status(500).json({ error: '伺服器處理檔案分享失敗' });
+      res.status(500).json({ error: `伺服器處理檔案分享失敗: ${err.message || err}` });
     }
   }
 );
@@ -620,6 +645,30 @@ app.get(['/api/agent/:id/logs', '/api/agent/logs'], requireTeacherAuth, async (r
     });
   }
 
+  // 1. Try fetching logs via active WebSocket reverse connection first (bypasses all firewall/port issues)
+  const normMac = normalizeTarget(dev.mac);
+  const ws = agentSockets.get(normMac);
+  if (ws && ws.readyState === WebSocket.OPEN) {
+    try {
+      const logs = await new Promise<string>((resolve) => {
+        const timer = setTimeout(() => {
+          pendingLogRequests.delete(normMac);
+          resolve('');
+        }, 2000);
+        pendingLogRequests.set(normMac, (data: string) => {
+          clearTimeout(timer);
+          resolve(data);
+        });
+        ws.send(JSON.stringify({ action: 'GET_LOGS' }));
+      });
+      if (logs) {
+        res.setHeader('Content-Type', 'text/plain; charset=utf-8');
+        return res.send(logs);
+      }
+    } catch {}
+  }
+
+  // 2. Fallback to direct HTTP fetch
   const port = dev.port || 8080;
   const agentUrl = `http://${dev.ip}:${port}/logs`;
 

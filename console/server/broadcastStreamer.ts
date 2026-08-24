@@ -98,6 +98,12 @@ export class TeacherBroadcastStreamer {
       '-bufsize', `${Math.floor(bitrate / 2)}k`,
       '-pix_fmt', 'yuv420p',
       '-g', String(fps),
+      '-keyint_min', String(fps),
+      '-sc_threshold', '0',
+      '-slices', '1',
+      '-bf', '0',
+      '-flags', '+low_delay',
+      '-x264-params', 'repeat-headers=1:sliced-threads=0:force-cfr=1',
       '-f', 'rtp',
       rtpUrl
     ];

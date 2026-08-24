@@ -1,6 +1,8 @@
 #include "../include/rtp_receiver.h"
 #include "../include/utils.h"
 #include <iostream>
+#include <sstream>
+#include <iomanip>
 #include <vector>
 #include <cstring>
 #include <chrono>
@@ -17,9 +19,9 @@
 #include <mferror.h>
 #include <wmcodecdsp.h>
 
-#ifndef CLSID_CMSH264DecoderMFT
-DEFINE_GUID(CLSID_CMSH264DecoderMFT, 0x62ce7e72, 0x4c71, 0x4d20, 0xb1, 0x5d, 0x45, 0x28, 0x31, 0xa8, 0x7d, 0x9d);
-#endif
+static const GUID GS_CLSID_CMSH264DecoderMFT = {0x62ce7e72, 0x4c71, 0x4d20, {0xb1, 0x5d, 0x45, 0x28, 0x31, 0xa8, 0x7d, 0x9d}};
+static const GUID GS_CODECAPI_AVLowLatencyMode = {0x9c27891a, 0xed7a, 0x40e1, {0x88, 0xe1, 0xb2, 0xe4, 0x5b, 0x30, 0x49, 0x11}};
+static const GUID GS_MF_LOW_LATENCY = {0x9c51d740, 0xdc55, 0x4864, {0x9c, 0x41, 0x8b, 0xa4, 0x76, 0xa5, 0xa1, 0xb8}};
 
 namespace GridSight {
 
@@ -32,6 +34,7 @@ static int g_frame_h = 0;
 class H264DecoderMFT {
 public:
     H264DecoderMFT() {
+        CoInitializeEx(NULL, COINIT_MULTITHREADED);
         MFStartup(MF_VERSION, MFSTARTUP_NOSOCKET);
         InitDecoder();
     }
@@ -39,14 +42,23 @@ public:
     ~H264DecoderMFT() {
         Cleanup();
         MFShutdown();
+        CoUninitialize();
     }
 
     bool InitDecoder() {
         Cleanup();
-        HRESULT hr = CoCreateInstance(CLSID_CMSH264DecoderMFT, NULL, CLSCTX_INPROC_SERVER, IID_IMFTransform, (void**)&pDecoder_);
+        HRESULT hr = CoCreateInstance(GS_CLSID_CMSH264DecoderMFT, NULL, CLSCTX_INPROC_SERVER, IID_IMFTransform, (void**)&pDecoder_);
         if (FAILED(hr) || !pDecoder_) {
             Utils::Log("ERROR", "Failed to create CMSH264DecoderMFT: hr=" + std::to_string(hr));
             return false;
+        }
+
+        // Enable low latency decoding mode to eliminate buffering delay
+        IMFAttributes* pAttributes = nullptr;
+        if (SUCCEEDED(pDecoder_->GetAttributes(&pAttributes))) {
+            pAttributes->SetUINT32(GS_MF_LOW_LATENCY, 1);
+            pAttributes->SetUINT32(GS_CODECAPI_AVLowLatencyMode, 1);
+            pAttributes->Release();
         }
 
         IMFMediaType* pInputType = nullptr;
@@ -63,9 +75,26 @@ public:
             return false;
         }
 
+        // Set initial output type (prefer NV12 or RGB32)
+        IMFMediaType* pOutputType = nullptr;
+        for (DWORD i = 0; SUCCEEDED(pDecoder_->GetOutputAvailableType(0, i, &pOutputType)); ++i) {
+            GUID subtype = {0};
+            pOutputType->GetGUID(MF_MT_SUBTYPE, &subtype);
+            if (subtype == MFVideoFormat_NV12 || subtype == MFVideoFormat_RGB32 || subtype == MFVideoFormat_YV12) {
+                hr = pDecoder_->SetOutputType(0, pOutputType, 0);
+                if (SUCCEEDED(hr)) {
+                    Utils::Log("INFO", "✅ Initialized decoder output type: " + (subtype == MFVideoFormat_NV12 ? std::string("NV12") : (subtype == MFVideoFormat_RGB32 ? std::string("RGB32") : std::string("YV12"))));
+                    pOutputType->Release();
+                    break;
+                }
+            }
+            pOutputType->Release();
+        }
+
         pDecoder_->ProcessMessage(MFT_MESSAGE_NOTIFY_BEGIN_STREAMING, 0);
         pDecoder_->ProcessMessage(MFT_MESSAGE_NOTIFY_START_OF_STREAM, 0);
         initialized_ = true;
+        Utils::Log("INFO", "✅ Windows Media Foundation H.264 Video Decoder initialized (LowLatency Mode Enabled).");
         return true;
     }
 
@@ -98,12 +127,36 @@ public:
         if (SUCCEEDED(hr)) {
             pSample->AddBuffer(pBuffer);
             pBuffer->Release();
+            pSample->SetSampleTime(sample_time_);
+            pSample->SetSampleDuration(333333); // 30 FPS in 100-ns units
+            sample_time_ += 333333;
         } else {
             pBuffer->Release();
             return false;
         }
 
+        static uint64_t g_feed_count = 0;
+        g_feed_count++;
+        if (g_feed_count <= 25 || g_feed_count % 300 == 0) {
+            std::stringstream hex_preview;
+            for (size_t i = 0; i < std::min((size_t)8, size); ++i) {
+                hex_preview << std::hex << std::setw(2) << std::setfill('0') << (int)data[i] << " ";
+            }
+            Utils::Log("INFO", "📥 [Decoder Input #" + std::to_string(g_feed_count) + "] " + std::to_string(size) + " bytes (prefix: " + hex_preview.str() + ")");
+        }
+
         hr = pDecoder_->ProcessInput(0, pSample, 0);
+        if (hr == MF_E_NOTACCEPTING) {
+            // Drain output first if decoder buffer is full
+            MFT_OUTPUT_DATA_BUFFER tempBuffer = {0};
+            DWORD tempStatus = 0;
+            pDecoder_->ProcessOutput(0, 1, &tempBuffer, &tempStatus);
+            if (tempBuffer.pSample) tempBuffer.pSample->Release();
+            hr = pDecoder_->ProcessInput(0, pSample, 0);
+        }
+        if (FAILED(hr) && hr != MF_E_NOTACCEPTING) {
+            Utils::Log("WARN", "⚠️ [Decoder ProcessInput Failed] hr=0x" + std::to_string((unsigned int)hr));
+        }
         pSample->Release();
 
         // Drain outputs
@@ -130,7 +183,7 @@ public:
             outputBuffer.dwStreamID = 0;
             hr = pDecoder_->ProcessOutput(0, 1, &outputBuffer, &status);
 
-            if (hr == MF_E_TRANSFORM_STREAM_CHANGE) {
+            if (hr == MF_E_TRANSFORM_STREAM_CHANGE || hr == (HRESULT)0xC00D6D60 /* MF_E_TRANSFORM_TYPE_NOT_SET */) {
                 // Negotiate output subtype (prefer NV12 or RGB32)
                 IMFMediaType* pAvailableType = nullptr;
                 for (DWORD i = 0; SUCCEEDED(pDecoder_->GetOutputAvailableType(0, i, &pAvailableType)); ++i) {
@@ -152,6 +205,17 @@ public:
 
             if (FAILED(hr)) {
                 if (outputBuffer.pSample) outputBuffer.pSample->Release();
+                // 0xC00D6D72 is MF_E_TRANSFORM_NEED_MORE_INPUT
+                if (hr != (HRESULT)0xC00D6D72) {
+                    static uint64_t last_out_err = 0;
+                    uint64_t now_ms = Utils::GetCurrentTimestampMs();
+                    if (now_ms - last_out_err > 3000) {
+                        last_out_err = now_ms;
+                        std::stringstream ss;
+                        ss << std::hex << (unsigned int)hr;
+                        Utils::Log("WARN", "⚠️ [Decoder ProcessOutput Status] hr=0x" + ss.str());
+                    }
+                }
                 break;
             }
 
@@ -170,19 +234,32 @@ public:
                         BYTE* pRaw = nullptr;
                         DWORD maxLen = 0, curLen = 0;
                         if (SUCCEEDED(pDecBuffer->Lock(&pRaw, &maxLen, &curLen))) {
+                            int alloc_h = (int)h;
+                            int display_h = (int)h;
+                            if (display_h == 1088) {
+                                display_h = 1080;
+                            }
                             out_w = (int)w;
-                            out_h = (int)h;
-                            out_bgra.resize((size_t)w * h * 4);
+                            out_h = display_h;
+                            out_bgra.resize((size_t)out_w * out_h * 4);
 
                             if (subtype == MFVideoFormat_NV12) {
-                                ConvertNV12ToBGRA(pRaw, w, h, out_bgra.data());
+                                ConvertNV12ToBGRA(pRaw, (int)w, alloc_h, display_h, out_bgra.data());
                                 got_frame = true;
                             } else if (subtype == MFVideoFormat_RGB32) {
-                                memcpy(out_bgra.data(), pRaw, (size_t)w * h * 4);
+                                memcpy(out_bgra.data(), pRaw, (size_t)out_w * out_h * 4);
                                 got_frame = true;
                             } else if (subtype == MFVideoFormat_YV12) {
-                                ConvertYV12ToBGRA(pRaw, w, h, out_bgra.data());
+                                ConvertYV12ToBGRA(pRaw, (int)w, display_h, out_bgra.data());
                                 got_frame = true;
+                            } else {
+                                Utils::Log("WARN", "⚠️ [Decoder] Unknown output subtype GUID");
+                            }
+
+                            static uint64_t g_ok_out = 0;
+                            g_ok_out++;
+                            if (g_ok_out <= 10 || g_ok_out % 90 == 0) {
+                                Utils::Log("INFO", "🎉 [Decoder] Frame decoded #" + std::to_string(g_ok_out) + " (" + std::to_string(out_w) + "x" + std::to_string(out_h) + ", bytes=" + std::to_string(curLen) + ")");
                             }
 
                             pDecBuffer->Unlock();
@@ -197,7 +274,15 @@ public:
                 outputBuffer.pSample = nullptr;
             }
 
-            if (got_frame) return true;
+            if (got_frame) {
+                static uint64_t last_log_time = 0;
+                uint64_t now = Utils::GetCurrentTimestampMs();
+                if (now - last_log_time > 3000) {
+                    last_log_time = now;
+                    Utils::Log("INFO", "📺 [RTP Broadcast] Successfully decoded and rendering video frame (" + std::to_string(out_w) + "x" + std::to_string(out_h) + ")");
+                }
+                return true;
+            }
         }
 
         return got_frame;
@@ -206,13 +291,14 @@ public:
 private:
     IMFTransform* pDecoder_ = nullptr;
     bool initialized_ = false;
+    LONGLONG sample_time_ = 0;
 
-    static void ConvertNV12ToBGRA(const uint8_t* nv12, int width, int height, uint8_t* bgra) {
-        size_t y_size = (size_t)width * height;
+    static void ConvertNV12ToBGRA(const uint8_t* nv12, int width, int alloc_height, int render_height, uint8_t* bgra) {
+        size_t y_size = (size_t)width * alloc_height;
         const uint8_t* y_plane = nv12;
         const uint8_t* uv_plane = nv12 + y_size;
 
-        for (int j = 0; j < height; ++j) {
+        for (int j = 0; j < render_height; ++j) {
             const uint8_t* y_ptr = y_plane + j * width;
             const uint8_t* uv_ptr = uv_plane + (j / 2) * width;
             uint8_t* dst = bgra + j * width * 4;
@@ -532,20 +618,26 @@ void RTPReceiver::ReceiveLoop() {
         return;
     }
 
-    // Join IGMP Multicast group
+    // Join IGMP Multicast group on INADDR_ANY and specific NIC
     struct ip_mreq mreq;
     memset(&mreq, 0, sizeof(mreq));
     mreq.imr_multiaddr.s_addr = inet_addr(multicast_ip_.c_str());
     mreq.imr_interface.s_addr = INADDR_ANY;
+    setsockopt(sock, IPPROTO_IP, IP_ADD_MEMBERSHIP, (char*)&mreq, sizeof(mreq));
 
-    if (setsockopt(sock, IPPROTO_IP, IP_ADD_MEMBERSHIP, (char*)&mreq, sizeof(mreq)) == SOCKET_ERROR) {
-        Utils::Log("WARN", "RTPReceiver IP_ADD_MEMBERSHIP error for group " + multicast_ip_);
-    } else {
-        Utils::Log("INFO", "RTPReceiver joined IGMP multicast group " + multicast_ip_);
+    NetworkInfo net_info = Utils::GetSystemNetworkInfo();
+    if (!net_info.ip.empty()) {
+        struct ip_mreq mreq_nic;
+        memset(&mreq_nic, 0, sizeof(mreq_nic));
+        mreq_nic.imr_multiaddr.s_addr = inet_addr(multicast_ip_.c_str());
+        inet_pton(AF_INET, net_info.ip.c_str(), &mreq_nic.imr_interface);
+        setsockopt(sock, IPPROTO_IP, IP_ADD_MEMBERSHIP, (char*)&mreq_nic, sizeof(mreq_nic));
     }
+    Utils::Log("INFO", "RTPReceiver joined IGMP multicast group " + multicast_ip_);
 
     std::vector<uint8_t> rtp_buffer(65536);
     std::vector<uint8_t> fua_reassembly_buffer;
+    std::vector<uint8_t> cached_sps_pps;
     uint64_t last_packet_time = 0;
 
     while (running_) {
@@ -556,10 +648,25 @@ void RTPReceiver::ReceiveLoop() {
         uint64_t now = Utils::GetCurrentTimestampMs();
 
         if (bytes >= 12) {
+            static uint64_t g_pkt_count = 0;
+            static uint16_t last_seq = 0;
+            static bool first_pkt = true;
+
+            g_pkt_count++;
             last_packet_time = now;
             if (!overlay_active_) {
                 CreateFullScreenOverlayWindow();
             }
+
+            uint16_t seq = ((uint16_t)rtp_buffer[2] << 8) | (uint16_t)rtp_buffer[3];
+            bool marker = (rtp_buffer[1] & 0x80) != 0;
+
+            if (!first_pkt && seq != (uint16_t)(last_seq + 1)) {
+                int gap = (int16_t)(seq - last_seq - 1);
+                Utils::Log("WARN", "⚠️ [RTP Gap/Loss] Expected seq=" + std::to_string((uint16_t)(last_seq + 1)) + ", got seq=" + std::to_string(seq) + " (lost " + std::to_string(gap) + " pkts)");
+            }
+            last_seq = seq;
+            first_pkt = false;
 
             const uint8_t* payload = rtp_buffer.data() + 12;
             int payload_len = bytes - 12;
@@ -573,6 +680,7 @@ void RTPReceiver::ReceiveLoop() {
                         bool start_bit = (fu_header & 0x80) != 0;
                         bool end_bit = (fu_header & 0x40) != 0;
                         uint8_t original_nal_type = (payload[0] & 0xE0) | (fu_header & 0x1F);
+                        uint8_t inner_type = fu_header & 0x1F;
 
                         if (start_bit) {
                             fua_reassembly_buffer.clear();
@@ -584,15 +692,62 @@ void RTPReceiver::ReceiveLoop() {
                             fua_reassembly_buffer.insert(fua_reassembly_buffer.end(), payload + 2, payload + payload_len);
                         } else if (!fua_reassembly_buffer.empty()) {
                             fua_reassembly_buffer.insert(fua_reassembly_buffer.end(), payload + 2, payload + payload_len);
-                            if (end_bit) {
-                                RenderFrame(fua_reassembly_buffer.data(), fua_reassembly_buffer.size());
-                                fua_reassembly_buffer.clear();
+                        }
+
+                        if (end_bit && !fua_reassembly_buffer.empty()) {
+                            if (g_pkt_count <= 25 || g_pkt_count % 300 == 0) {
+                                std::string inner_name = (inner_type == 5) ? "IDR Keyframe" : ((inner_type == 1) ? "Non-IDR Slice" : ("Type " + std::to_string(inner_type)));
+                                Utils::Log("INFO", "🧩 [RTP FU-A] Reassembled " + inner_name + " (" + std::to_string(fua_reassembly_buffer.size()) + " bytes, seq=" + std::to_string(seq) + ", marker=" + (marker ? "1" : "0") + ")");
                             }
+                            if (inner_type == 5 && !cached_sps_pps.empty()) {
+                                std::vector<uint8_t> complete_au = cached_sps_pps;
+                                complete_au.insert(complete_au.end(), fua_reassembly_buffer.begin(), fua_reassembly_buffer.end());
+                                RenderFrame(complete_au.data(), complete_au.size());
+                            } else {
+                                RenderFrame(fua_reassembly_buffer.data(), fua_reassembly_buffer.size());
+                            }
+                            fua_reassembly_buffer.clear();
                         }
                     }
+                } else if (nal_unit_type == 24) { // STAP-A Aggregation Packet (SPS + PPS in RFC 6184)
+                    size_t offset = 1;
+                    std::vector<uint8_t> combined_annexb;
+                    if (g_pkt_count <= 25 || g_pkt_count % 300 == 0) {
+                        Utils::Log("INFO", "📦 [RTP STAP-A] Aggregation packet received (len=" + std::to_string(payload_len) + ", seq=" + std::to_string(seq) + "):");
+                    }
+                    while (offset + 2 <= (size_t)payload_len) {
+                        uint16_t nal_size = ((uint16_t)payload[offset] << 8) | (uint16_t)payload[offset + 1];
+                        offset += 2;
+                        if (offset + nal_size <= (size_t)payload_len && nal_size > 0) {
+                            uint8_t inner_type = payload[offset] & 0x1F;
+                            std::string tname = (inner_type == 7) ? "SPS (SeqParamSet)" : ((inner_type == 8) ? "PPS (PicParamSet)" : ("Type " + std::to_string(inner_type)));
+                            if (g_pkt_count <= 25 || g_pkt_count % 300 == 0) {
+                                Utils::Log("INFO", "   └─ " + tname + " (" + std::to_string(nal_size) + " bytes)");
+                            }
+
+                            combined_annexb.push_back(0x00);
+                            combined_annexb.push_back(0x00);
+                            combined_annexb.push_back(0x00);
+                            combined_annexb.push_back(0x01);
+                            combined_annexb.insert(combined_annexb.end(), payload + offset, payload + offset + nal_size);
+                            offset += nal_size;
+                        } else {
+                            break;
+                        }
+                    }
+                    if (!combined_annexb.empty()) {
+                        cached_sps_pps = std::move(combined_annexb);
+                    }
                 } else if (nal_unit_type >= 1 && nal_unit_type <= 23) {
-                    // Single NAL unit packet
+                    std::string sname = (nal_unit_type == 5) ? "IDR Keyframe" : ((nal_unit_type == 1) ? "Non-IDR Slice" : ((nal_unit_type == 7) ? "SPS" : ((nal_unit_type == 8) ? "PPS" : ((nal_unit_type == 6) ? "SEI" : ("Type " + std::to_string(nal_unit_type))))));
+                    if (g_pkt_count <= 25 || g_pkt_count % 300 == 0) {
+                        Utils::Log("INFO", "📦 [RTP Single NAL] " + sname + " (" + std::to_string(payload_len) + " bytes, seq=" + std::to_string(seq) + ", marker=" + (marker ? "1" : "0") + ")");
+                    }
+
                     std::vector<uint8_t> single_nal;
+                    if (nal_unit_type == 5 && !cached_sps_pps.empty()) {
+                        single_nal = cached_sps_pps;
+                    }
                     single_nal.push_back(0x00);
                     single_nal.push_back(0x00);
                     single_nal.push_back(0x00);

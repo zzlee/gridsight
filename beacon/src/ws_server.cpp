@@ -2,6 +2,7 @@
 #include "../include/utils.h"
 #include "../include/token_manager.h"
 #include <iostream>
+#include <fstream>
 #include <sstream>
 #include <cstring>
 #include <vector>
@@ -184,7 +185,67 @@ void WebSocketStreamer::ReceiveCommands(uintptr_t sock_fd) {
                     Utils::DownloadAndOpenFile(url, filename);
                 }).detach();
             }
+        } else if (msg.find("GET_LOGS") != std::string::npos) {
+            std::string log_path = "gs-agent.log";
+#ifdef _WIN32
+            char temp_dir[MAX_PATH] = {0};
+            if (GetTempPathA(MAX_PATH, temp_dir)) {
+                log_path = std::string(temp_dir) + "gs-agent.log";
+            }
+#endif
+            std::ifstream log_file(log_path, std::ios::binary);
+            std::string content;
+            if (log_file.is_open()) {
+                log_file.seekg(0, std::ios::end);
+                size_t file_size = log_file.tellg();
+                size_t read_size = (file_size > 262144) ? 262144 : file_size;
+                log_file.seekg(file_size - read_size);
+                content.resize(read_size);
+                log_file.read(&content[0], read_size);
+            }
+            std::string json_resp = "{\"action\":\"LOGS_REPORT\",\"logs\":" + Utils::JsonEscape(content) + "}";
+            SendWsClientText(sock_fd, json_resp);
+            Utils::Log("INFO", "📋 [Diagnostics] Sent agent log report to teacher console (" + std::to_string(content.size()) + " bytes)");
         }
+    }
+}
+
+void WebSocketStreamer::SendWsClientText(uintptr_t sock_fd, const std::string& text) {
+    SOCKET sock = (SOCKET)sock_fd;
+    if (sock == INVALID_SOCKET || text.empty()) return;
+
+    std::vector<uint8_t> frame;
+    frame.push_back(0x81); // FIN + Text frame
+
+    uint8_t mask_key[4] = { 0x3E, 0x7B, 0x1A, 0x9F };
+    size_t len = text.size();
+
+    if (len <= 125) {
+        frame.push_back(0x80 | (uint8_t)len);
+    } else if (len <= 65535) {
+        frame.push_back(0x80 | 126);
+        frame.push_back((uint8_t)((len >> 8) & 0xFF));
+        frame.push_back((uint8_t)(len & 0xFF));
+    } else {
+        frame.push_back(0x80 | 127);
+        for (int i = 7; i >= 0; --i) {
+            frame.push_back((uint8_t)((len >> (i * 8)) & 0xFF));
+        }
+    }
+
+    for (int i = 0; i < 4; i++) frame.push_back(mask_key[i]);
+
+    size_t header_size = frame.size();
+    frame.resize(header_size + len);
+    for (size_t i = 0; i < len; i++) {
+        frame[header_size + i] = ((const uint8_t*)text.data())[i] ^ mask_key[i % 4];
+    }
+
+    size_t total_sent = 0;
+    while (total_sent < frame.size()) {
+        int sent = send(sock, (const char*)frame.data() + total_sent, (int)(frame.size() - total_sent), 0);
+        if (sent <= 0) break;
+        total_sent += sent;
     }
 }
 

@@ -25,6 +25,7 @@ private:
     void StreamLoop();
     void ReceiveCommands(uintptr_t sock_fd);
     void SendWsClientBinary(uintptr_t sock_fd, const uint8_t* data, size_t len);
+    void SendWsClientText(uintptr_t sock_fd, const std::string& text);
 
     int port_;
     std::shared_ptr<ScreenCapturer> capturer_;

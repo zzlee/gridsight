@@ -25,11 +25,14 @@ export const ShareFileModal: React.FC<ShareFileModalProps> = ({
   const [isDragging, setIsDragging] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
+  const [uploadProgress, setUploadProgress] = useState(0);
+
   useEffect(() => {
     if (isOpen) {
       setSelectedFile(null);
       setErrorMsg('');
       setSuccessMsg('');
+      setUploadProgress(0);
       setSendToAll(selectedCount === 0);
     }
   }, [isOpen, selectedCount]);
@@ -40,6 +43,7 @@ export const ShareFileModal: React.FC<ShareFileModalProps> = ({
     if (e.target.files && e.target.files.length > 0) {
       setSelectedFile(e.target.files[0]);
       setErrorMsg('');
+      setUploadProgress(0);
     }
   };
 
@@ -49,6 +53,7 @@ export const ShareFileModal: React.FC<ShareFileModalProps> = ({
     if (e.dataTransfer.files && e.dataTransfer.files.length > 0) {
       setSelectedFile(e.dataTransfer.files[0]);
       setErrorMsg('');
+      setUploadProgress(0);
     }
   };
 
@@ -67,7 +72,7 @@ export const ShareFileModal: React.FC<ShareFileModalProps> = ({
     return `${(bytes / 1048576).toFixed(1)} MB`;
   };
 
-  const handleSubmit = async (e: React.FormEvent) => {
+  const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
     if (!selectedFile) {
       setErrorMsg('請先選擇要分享的檔案');
@@ -77,35 +82,51 @@ export const ShareFileModal: React.FC<ShareFileModalProps> = ({
     setIsLoading(true);
     setErrorMsg('');
     setSuccessMsg('');
+    setUploadProgress(0);
 
-    try {
-      const targets = sendToAll || selectedCount === 0 ? [] : selectedTargets;
-      const headers: Record<string, string> = {
-        'Content-Type': 'application/octet-stream',
-        'x-filename': encodeURIComponent(selectedFile.name),
-        'x-targets': JSON.stringify(targets),
-      };
+    const targets = sendToAll || selectedCount === 0 ? [] : selectedTargets;
+    const xhr = new XMLHttpRequest();
+    xhr.open('POST', '/api/share/file');
+    xhr.setRequestHeader('Content-Type', 'application/octet-stream');
+    xhr.setRequestHeader('x-filename', encodeURIComponent(selectedFile.name));
+    xhr.setRequestHeader('x-targets', JSON.stringify(targets));
 
-      const resp = await AuthService.fetchWithAuth('/api/share/file', {
-        method: 'POST',
-        headers,
-        body: selectedFile,
-      });
-
-      const data = await resp.json();
-      if (resp.ok && data.success) {
-        setSuccessMsg(data.message || `檔案已成功發送！學生機下載後將自動開啟檔案總管`);
-        setTimeout(() => {
-          onClose();
-        }, 1800);
-      } else {
-        setErrorMsg(data.error || '檔案分享失敗');
-      }
-    } catch (err) {
-      setErrorMsg('傳送失敗，請檢查網路連線或伺服器狀態');
-    } finally {
-      setIsLoading(false);
+    const token = AuthService.getToken();
+    if (token) {
+      xhr.setRequestHeader('Authorization', `Bearer ${token}`);
     }
+
+    xhr.upload.onprogress = (event) => {
+      if (event.lengthComputable && event.total > 0) {
+        const percent = Math.min(100, Math.round((event.loaded / event.total) * 100));
+        setUploadProgress(percent);
+      }
+    };
+
+    xhr.onload = () => {
+      try {
+        const data = JSON.parse(xhr.responseText);
+        if (xhr.status >= 200 && xhr.status < 300 && data.success) {
+          setUploadProgress(100);
+          setSuccessMsg(data.message || `檔案已成功發送！學生機下載後將自動開啟檔案總管`);
+          setTimeout(() => {
+            onClose();
+          }, 1800);
+        } else {
+          setErrorMsg(data.error || `檔案分享失敗 (HTTP ${xhr.status})`);
+        }
+      } catch {
+        setErrorMsg(`伺服器回應異常 (HTTP ${xhr.status})`);
+      }
+      setIsLoading(false);
+    };
+
+    xhr.onerror = () => {
+      setErrorMsg('傳送失敗，請檢查網路連線或伺服器狀態');
+      setIsLoading(false);
+    };
+
+    xhr.send(selectedFile);
   };
 
   return (
@@ -214,6 +235,22 @@ export const ShareFileModal: React.FC<ShareFileModalProps> = ({
               </div>
             )}
           </div>
+
+          {/* Upload Progress Bar */}
+          {isLoading && (
+            <div className="space-y-1.5 p-3 rounded-xl bg-slate-950/80 border border-slate-800 animate-in fade-in">
+              <div className="flex justify-between text-xs font-medium">
+                <span className="text-amber-400">正在傳送檔案至伺服器...</span>
+                <span className="text-slate-300 font-mono">{uploadProgress}%</span>
+              </div>
+              <div className="w-full h-2 bg-slate-800 rounded-full overflow-hidden">
+                <div
+                  className="h-full bg-gradient-to-r from-amber-500 to-amber-400 transition-all duration-150 rounded-full"
+                  style={{ width: `${uploadProgress}%` }}
+                />
+              </div>
+            </div>
+          )}
 
           {/* Error / Success Feedback */}
           {errorMsg && (

@@ -134,9 +134,10 @@ export class TeacherBroadcastStreamer {
     let child: ChildProcess;
     try {
       child = spawn(ffmpegCmd, ffmpegArgs, { stdio: ['ignore', 'ignore', 'pipe'] });
-    } catch (err: any) {
-      logger.error(`[Broadcast] Failed to spawn FFmpeg (${ffmpegCmd}):`, err?.message);
-      return { ok: false, error: `無法啟動 FFmpeg: ${err?.message}` };
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : String(err);
+      logger.error(`[Broadcast] Failed to spawn FFmpeg (${ffmpegCmd}):`, msg);
+      return { ok: false, error: `無法啟動 FFmpeg: ${msg}` };
     }
 
     const stderrTail: string[] = [];

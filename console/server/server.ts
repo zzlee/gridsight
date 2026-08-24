@@ -279,11 +279,14 @@ const getDefaultSeatsLayout = () => {
   };
 };
 
+let cachedLayout: any = null;
+
 const saveSeatsLayout = async (layoutData: any) => {
   await ensureSeatsDirectory();
   try {
     await fs.promises.writeFile(SEATS_FILE, JSON.stringify(layoutData, null, 2), 'utf-8');
     logger.info(`[Seats] Successfully saved layout to ${SEATS_FILE}`);
+    cachedLayout = layoutData;
     return true;
   } catch (err) {
     logger.error(`[Seats] Failed to write layout to ${SEATS_FILE}: ${err}`);
@@ -292,6 +295,9 @@ const saveSeatsLayout = async (layoutData: any) => {
 };
 
 const loadSeatsLayout = async () => {
+  if (cachedLayout) {
+    return cachedLayout;
+  }
   await ensureSeatsDirectory();
   try {
     const content = await fs.promises.readFile(SEATS_FILE, 'utf-8');
@@ -310,6 +316,7 @@ const loadSeatsLayout = async () => {
       if (!Array.isArray(parsed.offTaskKeywords)) {
         parsed.offTaskKeywords = DEFAULT_OFFTASK_KEYWORDS;
       }
+      cachedLayout = parsed;
       return parsed;
     }
   } catch (err) {

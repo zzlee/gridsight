@@ -83,7 +83,10 @@ gridsight/
 │   │   ├── services/            # 1 FPS 縮圖輪詢 (800ms 熔斷)、座位表儲存
 │   │   └── types/               # TypeScript 資料型別定義
 │   └── server/                  # 教師端探索監聽、Token 發放與 FFmpeg RTP 串流服務
-├── docs/                     # 系統架構、通訊協定、部署與 IGMP Snooping 設定指南
+├── docs/                     # 系統架構、通訊協定、部署與開發歷史
+│   ├── wiki/                 # 📚 官方 Wiki 知識庫 (含完整開發歷程全紀錄)
+│   │   ├── Home.md
+│   │   └── development-history.md
 │   ├── architecture.md
 │   ├── protocol_spec.md
 │   ├── deployment_guide.md

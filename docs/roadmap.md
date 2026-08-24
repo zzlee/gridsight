@@ -1,6 +1,7 @@
 # GridSight 系統重構與真實功能落地實作路線圖 (Implementation Roadmap)
 
 本文檔制定 GridSight 系統由現有原型/Mock 狀態推進至 100% 真實可用生產狀態的優先級開發路線圖，並記錄目前的實作進度。
+詳細之完整歷程、技術細節與版本演進可參閱：[📚 Wiki 開發歷程全紀錄 (Development History)](wiki/development-history.md)。
 
 ---
 

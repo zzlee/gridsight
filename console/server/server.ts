@@ -518,9 +518,10 @@ app.post(
         downloadUrl,
         message: `已將檔案 "${safeFilename}" (${(totalBytes / 1048576).toFixed(1)} MB) 發送至 ${count} 台學生機`,
       });
-    } catch (err: any) {
-      logger.error(`[Share] Error sharing file: ${err.message || err}`);
-      res.status(500).json({ error: `伺服器處理檔案分享失敗: ${err.message || err}` });
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : String(err);
+      logger.error(`[Share] Error sharing file: ${msg}`);
+      res.status(500).json({ error: `伺服器處理檔案分享失敗: ${msg}` });
     }
   }
 );
@@ -692,8 +693,9 @@ app.get(['/api/agent/:id/logs', '/api/agent/logs'], requireTeacherAuth, async (r
         message: `學生端 HTTP 回應狀態碼 ${resp.status}`,
       });
     }
-  } catch (err: any) {
-    logger.warn(`[Agent Logs] Failed to fetch logs from ${agentUrl}: ${err.message || err}`);
+  } catch (err: unknown) {
+    const msg = err instanceof Error ? err.message : String(err);
+    logger.warn(`[Agent Logs] Failed to fetch logs from ${agentUrl}: ${msg}`);
     return res.status(502).json({
       error: '無法連線至學生端抓取日誌',
       message: `目標學生機 (${dev.hostname} - ${dev.ip}:${port}) 尚未回應，可能連線中斷或受防火牆阻擋。`,

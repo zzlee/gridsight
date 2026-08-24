@@ -7,6 +7,10 @@ node_modules/
 dist/
 build/
 bin/
+release/
+.cache/
+*.zip
+*.tar.gz
 gs-agent
 beacon/gs-agent
 *.exe

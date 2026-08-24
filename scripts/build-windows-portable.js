@@ -76,6 +76,24 @@ const setupNodeExe = async () => {
 
 await setupNodeExe();
 
+const cachedFfmpegExe = path.resolve(cacheDir, 'ffmpeg.exe');
+const targetFfmpegExe = path.resolve(portableDir, 'bin/ffmpeg.exe');
+
+const setupFfmpegExe = async () => {
+  if (!fs.existsSync(cachedFfmpegExe) || fs.statSync(cachedFfmpegExe).size < 10000000) {
+    console.log('[3.5/5] 🌐 Downloading official static ffmpeg.exe for Windows...');
+    const zipPath = path.resolve(cacheDir, 'ffmpeg.zip');
+    const ffmpegZipUrl = 'https://github.com/BtbN/FFmpeg-Builds/releases/download/latest/ffmpeg-master-latest-win64-gpl.zip';
+    execSync(`curl -L -o "${zipPath}" "${ffmpegZipUrl}" && unzip -p "${zipPath}" "*/bin/ffmpeg.exe" > "${cachedFfmpegExe}" && rm -f "${zipPath}"`, { stdio: 'inherit' });
+    console.log('      ✅ Official static ffmpeg.exe downloaded and cached.');
+  } else {
+    console.log('[3.5/5] ⚡ Using cached static ffmpeg.exe...');
+  }
+  fs.copyFileSync(cachedFfmpegExe, targetFfmpegExe);
+};
+
+await setupFfmpegExe();
+
 // 5. Copy Agent & Tools
 console.log('[4/5] 📂 Staging gs-agent.exe & tools...');
 const agentSrc = path.resolve(rootDir, 'beacon/gs-agent.exe');

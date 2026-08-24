@@ -1,6 +1,26 @@
 import { spawn, ChildProcess } from 'child_process';
 import os from 'os';
+import fs from 'fs';
+import path from 'path';
 import { logger } from './logger.js';
+
+const findFfmpegBinary = (): string => {
+  if (os.platform() === 'win32') {
+    const candidates = [
+      path.resolve(process.cwd(), 'bin', 'ffmpeg.exe'),
+      path.resolve(process.cwd(), 'ffmpeg.exe'),
+      path.resolve(path.dirname(process.execPath), 'ffmpeg.exe'),
+      path.resolve(path.dirname(process.execPath), 'bin', 'ffmpeg.exe'),
+      path.resolve(path.dirname(process.execPath), '..', 'bin', 'ffmpeg.exe'),
+    ];
+    for (const cand of candidates) {
+      if (fs.existsSync(cand)) {
+        return cand;
+      }
+    }
+  }
+  return 'ffmpeg';
+};
 
 export interface StreamerOptions {
   multicastIp?: string;
@@ -108,11 +128,14 @@ export class TeacherBroadcastStreamer {
       rtpUrl
     ];
 
+    const ffmpegCmd = findFfmpegBinary();
+    logger.info(`[Broadcast] Executing FFmpeg binary: ${ffmpegCmd}`);
+
     let child: ChildProcess;
     try {
-      child = spawn('ffmpeg', ffmpegArgs, { stdio: ['ignore', 'ignore', 'pipe'] });
+      child = spawn(ffmpegCmd, ffmpegArgs, { stdio: ['ignore', 'ignore', 'pipe'] });
     } catch (err: any) {
-      logger.error('[Broadcast] Failed to spawn FFmpeg:', err?.message);
+      logger.error(`[Broadcast] Failed to spawn FFmpeg (${ffmpegCmd}):`, err?.message);
       return { ok: false, error: `無法啟動 FFmpeg: ${err?.message}` };
     }
 

@@ -12,6 +12,7 @@ import { TeacherBroadcastStreamer } from './broadcastStreamer.js';
 import { logger } from './logger.js';
 import { promptSelectNic } from './nicSelector.js';
 import { openBrowser } from './browserLauncher.js';
+import type { ClassroomLayout, StudentDevice } from './types.js';
 
 const currentDirname = typeof __dirname !== 'undefined' ? __dirname : path.dirname(fileURLToPath(import.meta.url || 'file:///'));
 
@@ -265,7 +266,7 @@ const DEFAULT_OFFTASK_KEYWORDS = [
   '動畫瘋', 'Facebook', 'Instagram', 'Netflix', 'Game', '遊戲'
 ];
 
-const getDefaultSeatsLayout = () => {
+const getDefaultSeatsLayout = (): ClassroomLayout => {
   const cols = 8;
   const rows = 6;
   return {
@@ -280,9 +281,9 @@ const getDefaultSeatsLayout = () => {
   };
 };
 
-let cachedLayout: any = null;
+let cachedLayout: ClassroomLayout | null = null;
 
-const saveSeatsLayout = async (layoutData: any) => {
+const saveSeatsLayout = async (layoutData: ClassroomLayout): Promise<boolean> => {
   await ensureSeatsDirectory();
   try {
     await fs.promises.writeFile(SEATS_FILE, JSON.stringify(layoutData, null, 2), 'utf-8');
@@ -295,7 +296,7 @@ const saveSeatsLayout = async (layoutData: any) => {
   }
 };
 
-const loadSeatsLayout = async () => {
+const loadSeatsLayout = async (): Promise<ClassroomLayout> => {
   if (cachedLayout) {
     return cachedLayout;
   }
@@ -306,7 +307,7 @@ const loadSeatsLayout = async () => {
     if (parsed && Array.isArray(parsed.seats)) {
       // Filter out legacy dummy offline seats
       const cleanedSeats = parsed.seats.filter(
-        (s: any) =>
+        (s: Partial<StudentDevice>) =>
           !(
             s.status === 'offline' &&
             s.ip?.startsWith('192.168.1.') &&
@@ -317,8 +318,8 @@ const loadSeatsLayout = async () => {
       if (!Array.isArray(parsed.offTaskKeywords)) {
         parsed.offTaskKeywords = DEFAULT_OFFTASK_KEYWORDS;
       }
-      cachedLayout = parsed;
-      return parsed;
+      cachedLayout = parsed as ClassroomLayout;
+      return cachedLayout;
     }
   } catch (err) {
     logger.warn(`[Seats] Error reading ${SEATS_FILE}: ${err}`);

@@ -10,6 +10,7 @@
 #include <map>
 #include <cstdlib>
 #include <mutex>
+#include <cctype>
 
 #ifdef _WIN32
 #include <winsock2.h>
@@ -29,6 +30,8 @@
 #include <netinet/in.h>
 #include <arpa/inet.h>
 #include <unistd.h>
+#include <sys/types.h>
+#include <sys/wait.h>
 #define SOCKET int
 #define INVALID_SOCKET -1
 #define SOCKET_ERROR -1
@@ -565,8 +568,26 @@ std::string Utils::ExtractJsonField(const std::string& json, const std::string& 
     return result;
 }
 
+static bool IsValidHttpUrl(const std::string& url) {
+    if (url.empty()) return false;
+    for (char c : url) {
+        if (c == '\r' || c == '\n' || c == '\0') return false;
+    }
+    std::string lower_prefix = url.substr(0, 8);
+    for (char& c : lower_prefix) {
+        c = (char)std::tolower((unsigned char)c);
+    }
+    if (lower_prefix.find("http://") == 0 || lower_prefix.find("https://") == 0) {
+        return true;
+    }
+    return false;
+}
+
 void Utils::OpenUrl(const std::string& url) {
-    if (url.empty()) return;
+    if (!IsValidHttpUrl(url)) {
+        Log("WARN", "Refusing to open invalid or non-HTTP/HTTPS URL: " + url);
+        return;
+    }
     Log("INFO", "🔗 Opening URL in default browser: " + url);
 #ifdef _WIN32
     int len = MultiByteToWideChar(CP_UTF8, 0, url.c_str(), -1, NULL, 0);
@@ -576,8 +597,12 @@ void Utils::OpenUrl(const std::string& url) {
         ShellExecuteW(NULL, L"open", wurl.c_str(), NULL, NULL, SW_SHOWNORMAL);
     }
 #else
-    std::string cmd = "xdg-open \"" + url + "\" &";
-    system(cmd.c_str());
+    pid_t pid = fork();
+    if (pid == 0) {
+        // Child process: execute xdg-open directly without shell
+        execlp("xdg-open", "xdg-open", url.c_str(), (char*)NULL);
+        _exit(1);
+    }
 #endif
 }
 
@@ -756,8 +781,12 @@ bool Utils::DownloadAndOpenFile(const std::string& url, const std::string& raw_f
     ShellExecuteW(NULL, L"open", L"explorer.exe", params.c_str(), NULL, SW_SHOWNORMAL);
     Log("INFO", "📂 Opened File Explorer highlighting: " + target_path_utf8);
 #else
-    std::string cmd = "xdg-open \"" + downloads_dir + "\" &";
-    system(cmd.c_str());
+    pid_t pid = fork();
+    if (pid == 0) {
+        // Child process: execute xdg-open directly without shell
+        execlp("xdg-open", "xdg-open", downloads_dir.c_str(), (char*)NULL);
+        _exit(1);
+    }
 #endif
 
     return true;

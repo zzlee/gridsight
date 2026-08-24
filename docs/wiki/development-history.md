@@ -111,6 +111,15 @@ timeline
 - **批次檔亂碼根治**：將所有 `.bat` 產物轉換為標準 Windows **CRLF（`\r\n`）** 換行符，徹底解決 CP950 繁體中文環境下因 UTF-8 LF 導致的語法位移與截斷報錯。
 - **無痕自動關閉**：移除 `start-console.bat` 中的多餘 `pause` 等待，執行 `stop-console.bat` 時啟動視窗 1 秒內秒級關閉，無須手動敲擊鍵盤。
 
+### 5.5 實體教室除錯記：學生機 Ping 通但無法開啟 Join 網頁之防火牆問題
+- **現象**：學生電腦可正常 `ping` 到教師機，但無法開啟 `http://<教師IP>:3000/join` 網頁。
+- **根因分析**：
+  1. ICMP (Ping) 與 TCP 入站走不同 Windows 防火牆規則。
+  2. 學校區網常被 Windows 判定為「公用網路 (Public)」，初次啟動若未勾選公用網路放行，Windows Defender Firewall 會靜默丟棄入站 TCP 3000 封包。
+- **標準解法**：
+  - 學生機使用 `Test-NetConnection <教師IP> -Port 3000` 快速定位。
+  - 教師機以系統管理員身分執行 `netsh advfirewall firewall add rule name="GridSight Console Port 3000" dir=in action=allow protocol=TCP localport=3000 profile=any` 進行全局放行。
+
 ---
 
 ## 📊 重大版本功能與技術演進對照表

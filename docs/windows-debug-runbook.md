@@ -103,8 +103,37 @@ python scripts/test-network-multicast.py   # 於學生機執行（或單發一�
 
 ## 🚨 5. 症狀快速對照表 (Symptom Playbook)
 
-| 症狀 | 最可能原因 | 診斷指令 |
+### 5.1 關鍵障礙：學生端可以 ping 得到教師機，但無法開啟 `http://<教師IP>:3000/join` 網頁
+
+- **現象描述**：學生機在命令提示字元執行 `ping <教師IP>` 有正常回覆，但瀏覽器開啟 `/join` 顯示「無法連線」或逾時。
+- **根本原因**：
+  1. **ICMP (Ping) 與 TCP 走完全不同的防火牆規則**：Windows 預設允許同網段 ICMP Echo 封包，但會阻擋所有未放行的傳入 TCP 連接埠。
+  2. **學校區網被 Windows 識別為「公用網路 (Public Network)」**：教師端啟動 `node.exe` 時若僅放行「私人網路」，來自公用網路設定下的學生端 TCP 3000 封包會被**靜默丟棄 (Silent Drop)**。
+- **診斷步驟**：
+  1. **學生機驗證 TCP 埠通訊**（PowerShell）：
+     ```powershell
+     Test-NetConnection -ComputerName <教師IP> -Port 3000
+     ```
+     - 若 `TcpTestSucceeded : False` ➔ **100% 確定為教師端防火牆阻擋**。
+     - 若 `TcpTestSucceeded : True` ➔ 檢查學生機瀏覽器是否設有教育網 Proxy 或防毒擴充套件。
+  2. **教師機一鍵修復指令（以系統管理員身分執行 PowerShell）**：
+     ```powershell
+     # 放行教師端 Web/API TCP 3000 埠 (適用所有網路設定檔: 私人/公用/網域)
+     netsh advfirewall firewall add rule name="GridSight Console Port 3000" dir=in action=allow protocol=TCP localport=3000 profile=any
+
+     # 放行學生端動態探索 UDP 8888 埠
+     netsh advfirewall firewall add rule name="GridSight Discovery UDP 8888" dir=in action=allow protocol=UDP localport=8888 profile=any
+     ```
+  3. **第三方防毒軟體排除**：
+     若教師端安裝有趨勢科技 (PC-cillin/Apex One)、ESET、Symantec 等端點防護軟體，需在其「個人防火牆 / 網路防護」中將 TCP 3000 設為允許傳入。
+
+---
+
+### 5.2 其他常見症狀速查
+
+| 症狀 | 最可能原因 | 診斷指令 / 解決方案 |
 | :--- | :--- | :--- |
+| **學生可以 ping 但開不了 /join** | 教師端 Windows 防火牆阻擋 TCP 3000 | 詳見 §5.1；學生機 `Test-NetConnection <IP> -Port 3000`，教師端執行 `netsh` 放行指令 |
 | Web UI 完全看不到某台機器 | 多播被擋／虛擬網卡搶先宣告 | `netsh int ipv4 show joins`、`route print`、停用 VirtualBox/VMware/Hyper-V 網卡重試 |
 | 設備出現但縮圖黑灰 | Agent DXGI 擷取失敗（Session 0 / RDP 登入） | agent.log 搜尋 `Capture`；確認實體登入 Session 1（`query session`） |
 | 縮圖有、焦點串流黑畫面 | H.264 編碼器初始化失敗 | agent.log 搜尋 `START_STREAM` 後的 ERROR；HUD 是否有幀送達 |

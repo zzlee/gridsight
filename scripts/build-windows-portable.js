@@ -105,6 +105,8 @@ const startBatContent = [
   'echo   Starting GridSight Console server...',
   'echo   Tip: Run stop-console.bat or close this window to stop.',
   'echo ===============================================================',
+  'netsh advfirewall firewall add rule name="GridSight Console Port 3000" dir=in action=allow protocol=TCP localport=3000 profile=any >nul 2>&1',
+  'netsh advfirewall firewall add rule name="GridSight Discovery UDP 8888" dir=in action=allow protocol=UDP localport=8888 profile=any >nul 2>&1',
   '"%~dp0bin\\node.exe" "%~dp0server\\server.cjs"',
   '',
 ].join('\r\n');

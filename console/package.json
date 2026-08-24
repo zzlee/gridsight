@@ -1,6 +1,6 @@
 {
   "name": "gridsight-console",
-  "version": "5.4.3",
+  "version": "5.4.5",
   "private": true,
   "type": "module",
   "scripts": {

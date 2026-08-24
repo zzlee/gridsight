@@ -46,7 +46,7 @@ export const LayoutStorage = {
         if (data.layout && Array.isArray(data.layout.seats)) {
           // Filter out any legacy dummy placeholder seats
           data.layout.seats = data.layout.seats.filter(
-            (s: any) =>
+            (s: StudentDevice) =>
               !(
                 s.status === 'offline' &&
                 s.ip?.startsWith('192.168.1.') &&
@@ -70,7 +70,7 @@ export const LayoutStorage = {
       const parsed = JSON.parse(data);
       if (parsed && Array.isArray(parsed.seats)) {
         parsed.seats = parsed.seats.filter(
-          (s: any) =>
+          (s: StudentDevice) =>
             !(
               s.status === 'offline' &&
               s.ip?.startsWith('192.168.1.') &&

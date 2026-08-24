@@ -11,6 +11,7 @@ import { MulticastDiscoveryService } from './multicastDiscovery.js';
 import { TeacherBroadcastStreamer } from './broadcastStreamer.js';
 import { logger } from './logger.js';
 import { promptSelectNic } from './nicSelector.js';
+import { openBrowser } from './browserLauncher.js';
 
 const currentDirname = typeof __dirname !== 'undefined' ? __dirname : path.dirname(fileURLToPath(import.meta.url || 'file:///'));
 
@@ -1022,20 +1023,7 @@ async function bootstrap() {
     if (!process.argv.includes('--no-open') && !process.env.NO_OPEN) {
       const targetUrl =
         activeTeacherIp && activeTeacherIp !== '127.0.0.1' && activeTeacherIp !== '0.0.0.0' ? lanUrl : localUrl;
-      const platform = process.platform;
-      let cmd = '';
-      if (platform === 'win32') {
-        cmd = `start "" "${targetUrl}"`;
-      } else {
-        cmd = `xdg-open "${targetUrl}"`;
-      }
-      import('child_process').then(({ exec }) => {
-        exec(cmd, (err) => {
-          if (!err) {
-            logger.info(`[Browser] 🌐 已自動開啟瀏覽器導向控制台: ${targetUrl}`);
-          }
-        });
-      }).catch(() => {});
+      openBrowser(targetUrl);
     }
   });
 }

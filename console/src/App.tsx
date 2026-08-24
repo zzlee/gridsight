@@ -1,5 +1,5 @@
 import React, { useEffect, useState, useRef } from 'react';
-import { ClassroomLayout, StudentDevice, AppMode, GridAisle, GridObstacle } from './types';
+import { ClassroomLayout, StudentDevice, AppMode, GridAisle, GridObstacle, DiscoveredAgent } from './types';
 import { TopNav } from './components/Toolbar/TopNav';
 import { GridCanvas } from './components/Canvas/GridCanvas';
 import { FocusModal } from './components/Viewer/FocusModal';
@@ -172,14 +172,14 @@ export const App: React.FC = () => {
         if (resp.ok) {
           const data = await resp.json();
           if (data.agents && Array.isArray(data.agents)) {
-            const discovered: StudentDevice[] = data.agents.map((a: any) => {
+            const discovered: StudentDevice[] = data.agents.map((a: DiscoveredAgent) => {
               const activeWindow = a.activeWindow || a.specs?.active_window || a.window_title || '桌面 (Desktop)';
               const isOff = alertsEnabled && isOffTaskMatch(activeWindow, offTaskKeywords);
               return {
                 id: a.mac || `dev-${a.ip.replace(/\./g, '-')}`,
                 hostname: a.hostname,
                 ip: a.ip,
-                mac: a.mac,
+                mac: a.mac || '',
                 status: 'online',
                 token: a.token,
                 activeWindow,

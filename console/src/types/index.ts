@@ -6,6 +6,7 @@ export interface DeviceSystemInfo {
   hostname?: string;
   os?: string;
   uptime?: number;
+  active_window?: string;
   cpu: {
     model: string;
     cores: number;
@@ -70,6 +71,18 @@ export interface ClassroomLayout {
   aisles: GridAisle[];
   obstacles: GridObstacle[];
   offTaskKeywords?: string[];
+}
+
+export interface DiscoveredAgent {
+  hostname: string;
+  ip: string;
+  mac?: string;
+  port?: number;
+  username?: string;
+  token?: string;
+  activeWindow?: string;
+  window_title?: string;
+  specs?: DeviceSystemInfo;
 }
 
 export type AppMode = 'MONITOR' | 'EDIT_LAYOUT' | 'BROADCAST';

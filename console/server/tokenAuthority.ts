@@ -4,6 +4,8 @@ export class TokenAuthority {
   private activeTokens: Map<string, { token: string; ip: string; expiresAt: number }> = new Map();
 
   generateToken(mac: string, ip: string): string {
+    const existing = this.getToken(mac);
+    if (existing) return existing;
     const token = crypto.randomBytes(24).toString('hex');
     this.activeTokens.set(mac, {
       token,

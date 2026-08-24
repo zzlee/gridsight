@@ -281,11 +281,21 @@ static std::mutex g_log_mutex;
 static std::ofstream g_log_file;
 static bool g_log_initialized = false;
 
+static std::string GetLogFilePath() {
+#ifdef _WIN32
+    char temp_dir[MAX_PATH] = {0};
+    if (GetTempPathA(MAX_PATH, temp_dir)) {
+        return std::string(temp_dir) + "gs-agent.log";
+    }
+#endif
+    return "gs-agent.log";
+}
+
 void Utils::Log(const std::string& level, const std::string& message) {
     std::lock_guard<std::mutex> lock(g_log_mutex);
 
     if (!g_log_initialized) {
-        g_log_file.open("gs-agent.log", std::ios::app);
+        g_log_file.open(GetLogFilePath(), std::ios::app);
         g_log_initialized = true;
     }
 
@@ -306,12 +316,14 @@ void Utils::Log(const std::string& level, const std::string& message) {
         g_log_file << ss.str() << std::endl;
         g_log_file.flush();
 
-        // Log Rotation (e.g., 5MB limit)
+        // Log Rotation (5MB limit)
         if (g_log_file.tellp() > 5 * 1024 * 1024) {
             g_log_file.close();
-            std::remove("gs-agent.log.1");
-            std::rename("gs-agent.log", "gs-agent.log.1");
-            g_log_file.open("gs-agent.log", std::ios::app);
+            std::string main_log = GetLogFilePath();
+            std::string rot_log = main_log + ".1";
+            std::remove(rot_log.c_str());
+            std::rename(main_log.c_str(), rot_log.c_str());
+            g_log_file.open(main_log, std::ios::app);
         }
     }
 }
@@ -464,8 +476,18 @@ std::string Utils::ComputeWebSocketAcceptKey(const std::string& client_key) {
     return Base64Encode(digest, 20);
 }
 
+static std::string GetHeartbeatFilePath() {
+#ifdef _WIN32
+    char temp_dir[MAX_PATH] = {0};
+    if (GetTempPathA(MAX_PATH, temp_dir)) {
+        return std::string(temp_dir) + "gs-heartbeat.txt";
+    }
+#endif
+    return "gs-heartbeat.txt";
+}
+
 void Utils::UpdateHeartbeat() {
-    std::ofstream hb_file("gs-heartbeat.txt", std::ios::trunc);
+    std::ofstream hb_file(GetHeartbeatFilePath(), std::ios::trunc);
     if (hb_file.is_open()) {
         hb_file << GetCurrentTimestampMs();
         hb_file.close();
@@ -473,7 +495,7 @@ void Utils::UpdateHeartbeat() {
 }
 
 uint64_t Utils::GetLastHeartbeat() {
-    std::ifstream hb_file("gs-heartbeat.txt");
+    std::ifstream hb_file(GetHeartbeatFilePath());
     if (!hb_file.is_open()) {
         return 0;
     }

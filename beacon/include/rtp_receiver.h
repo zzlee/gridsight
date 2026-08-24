@@ -15,6 +15,7 @@ public:
 
 private:
     void ReceiveLoop();
+    void UIThreadLoop();
     void CreateFullScreenOverlayWindow();
     void RenderFrame(const uint8_t* h264_data, size_t size);
     void CloseOverlayWindow();
@@ -24,7 +25,9 @@ private:
     std::atomic<bool> running_{false};
     std::atomic<bool> overlay_active_{false};
     std::thread receive_thread_;
+    std::thread ui_thread_;
     void* hwnd_overlay_ = nullptr;
+    void* decoder_ = nullptr;
 };
 
 } // namespace GridSight

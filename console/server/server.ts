@@ -626,7 +626,11 @@ app.get(['/api/agent/:id/logs', '/api/agent/logs'], requireTeacherAuth, async (r
   try {
     const controller = new AbortController();
     const timeout = setTimeout(() => controller.abort(), 3000);
-    const resp = await fetch(agentUrl, { signal: controller.signal });
+    const headers: Record<string, string> = {};
+    if (dev.token) {
+      headers['X-Auth-Token'] = dev.token;
+    }
+    const resp = await fetch(agentUrl, { signal: controller.signal, headers });
     clearTimeout(timeout);
 
     if (resp.ok) {

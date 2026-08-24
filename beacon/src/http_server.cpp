@@ -273,7 +273,14 @@ void HttpServer::HandlePingRequest(uintptr_t client_socket) {
 }
 
 void HttpServer::HandleLogsRequest(uintptr_t client_socket) {
-    std::ifstream log_file("gs-agent.log", std::ios::binary);
+    std::string log_path = "gs-agent.log";
+#ifdef _WIN32
+    char temp_dir[MAX_PATH] = {0};
+    if (GetTempPathA(MAX_PATH, temp_dir)) {
+        log_path = std::string(temp_dir) + "gs-agent.log";
+    }
+#endif
+    std::ifstream log_file(log_path, std::ios::binary);
     std::string content;
     if (log_file.is_open()) {
         log_file.seekg(0, std::ios::end);

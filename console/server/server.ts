@@ -2,6 +2,7 @@ import 'dotenv/config';
 import express from 'express';
 import cors from 'cors';
 import path from 'path';
+import crypto from 'crypto';
 import { fileURLToPath } from 'url';
 import fs from 'fs';
 import { createServer } from 'http';
@@ -37,16 +38,16 @@ const discoveryService = new MulticastDiscoveryService(tokenAuth, (device) => {
 
 // Teacher PIN authentication state
 let teacherPin = process.env.TEACHER_PIN || '888888';
-const teacherSessions = new Map<string, number>(); // token -> expiresAt
+export const teacherSessions = new Map<string, number>(); // token -> expiresAt
 
-const generateTeacherToken = () => {
-  const token = Math.random().toString(36).substring(2) + Date.now().toString(36) + Math.random().toString(36).substring(2);
+export const generateTeacherToken = () => {
+  const token = crypto.randomBytes(32).toString('hex');
   const expiresAt = Date.now() + 1000 * 60 * 60 * 24 * 7; // 7 days valid
   teacherSessions.set(token, expiresAt);
   return { token, expiresAt };
 };
 
-const isValidTeacherToken = (token: string | null | undefined): boolean => {
+export const isValidTeacherToken = (token: string | null | undefined): boolean => {
   if (!token) return false;
   const expiresAt = teacherSessions.get(token);
   if (!expiresAt) return false;
@@ -1046,4 +1047,6 @@ async function bootstrap() {
   });
 }
 
-bootstrap();
+if (process.argv[1] && path.resolve(process.argv[1]) === path.resolve(fileURLToPath(import.meta.url))) {
+  bootstrap();
+}

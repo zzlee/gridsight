@@ -1,7 +1,22 @@
 export type ConnectionStatus = 'online' | 'degraded' | 'offline';
 
+export interface DiscoveredAgent {
+  hostname: string;
+  ip: string;
+  port?: number;
+  mac: string;
+  username?: string;
+  token?: string;
+  activeWindow?: string;
+  window_title?: string;
+  specs?: DeviceSystemInfo;
+  thumbnailBase64?: string;
+  lastSeen?: number;
+}
+
 export interface DeviceSystemInfo {
   status?: string;
+  active_window?: string;
   service?: string;
   hostname?: string;
   os?: string;

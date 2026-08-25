@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef, MutableRefObject } from 'react';
-import { ClassroomLayout, StudentDevice, AppMode } from '../types';
+import { ClassroomLayout, StudentDevice, AppMode, DiscoveredAgent } from '../types';
 import { PollingManager, TrafficStats } from '../services/pollingManager';
 import { LayoutStorage } from '../services/layoutStorage';
 import { AuthService } from '../services/authService';
@@ -66,7 +66,7 @@ export function useAgentDiscovery({
         if (resp.ok) {
           const data = await resp.json();
           if (data.agents && Array.isArray(data.agents)) {
-            const discovered: StudentDevice[] = data.agents.map((a: any) => {
+            const discovered: StudentDevice[] = data.agents.map((a: DiscoveredAgent) => {
               const activeWindow = a.activeWindow || a.specs?.active_window || a.window_title || '桌面 (Desktop)';
               const isOff = alertsEnabled && isOffTaskMatch(activeWindow, offTaskKeywords);
               return {

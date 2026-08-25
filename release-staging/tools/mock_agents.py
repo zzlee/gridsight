@@ -178,6 +178,27 @@ class MockAgent:
                 writer.write(resp_headers + body)
                 await writer.drain()
 
+            elif path.startswith('/api/logs') or path.startswith('/logs'):
+                now_str = time.strftime('%Y-%m-%d %H:%M:%S')
+                log_content = (
+                    f"[{now_str}] [INFO] Mock Agent gs-agent (Host: {self.hostname}, MAC: {self.mac}) initialized successfully.\n"
+                    f"[{now_str}] [INFO] ScreenCapturer active. Capturing desktop resolution (1920x1080).\n"
+                    f"[{now_str}] [INFO] HttpServer listening on port {self.port}.\n"
+                    f"[{now_str}] [INFO] H.264 Hardware Encoder initialized with 30 FPS / 2500 kbps bitrate.\n"
+                    f"[{now_str}] [INFO] Active foreground window: {self.active_window}\n"
+                    f"[{now_str}] [WARN] Stream diagnostic check: Mock stream simulation active.\n"
+                ).encode('utf-8')
+                resp_headers = (
+                    "HTTP/1.1 200 OK\r\n"
+                    "Content-Type: text/plain; charset=utf-8\r\n"
+                    "Access-Control-Allow-Origin: *\r\n"
+                    f"Content-Length: {len(log_content)}\r\n"
+                    "Connection: close\r\n"
+                    "\r\n"
+                ).encode('utf-8')
+                writer.write(resp_headers + log_content)
+                await writer.drain()
+
             elif path.startswith('/api/auth'):
                 body = json.dumps({
                     "status": "ok",

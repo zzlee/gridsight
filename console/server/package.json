@@ -4,7 +4,8 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "start": "tsx server.ts"
+    "start": "tsx server.ts",
+    "test": "npx tsx logger.test.ts && npx tsx browserLauncher.test.ts"
   },
   "dependencies": {
     "cors": "^2.8.5",

@@ -11,7 +11,7 @@ logStream.on('error', (error) => {
   logStream = null;
 });
 
-function writeLog(level: string, ...args: any[]) {
+export function writeLog(level: string, ...args: any[]) {
   const timestamp = new Date().toISOString();
 
   // Format the message for console output

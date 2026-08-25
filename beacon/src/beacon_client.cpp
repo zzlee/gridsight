@@ -24,8 +24,8 @@
 
 namespace GridSight {
 
-BeaconClient::BeaconClient(const std::string& multicast_ip, int port, std::shared_ptr<HttpServer> http_server)
-    : multicast_ip_(multicast_ip), port_(port), http_server_(http_server) {}
+BeaconClient::BeaconClient(const std::string& multicast_ip, int port, std::shared_ptr<HttpServer> http_server, const std::string& hmac_secret)
+    : multicast_ip_(multicast_ip), port_(port), http_server_(http_server), hmac_secret_(hmac_secret) {}
 
 BeaconClient::~BeaconClient() {
     Stop();
@@ -111,7 +111,7 @@ void BeaconClient::DiscoveryLoop() {
             sendto(sock, payload.c_str(), (int)payload.length(), 0, (sockaddr*)&addr, sizeof(addr));
 
             // Listen for TOKEN_GRANT response
-            ListenForToken((int)sock);
+            ListenForToken((int)sock, net_info.mac);
 
             closesocket(sock);
         }
@@ -125,7 +125,7 @@ void BeaconClient::DiscoveryLoop() {
     }
 }
 
-void BeaconClient::ListenForToken(int socket_fd) {
+void BeaconClient::ListenForToken(int socket_fd, const std::string& agent_mac) {
     SOCKET sock = (SOCKET)socket_fd;
 
     fd_set readfds;
@@ -148,22 +148,47 @@ void BeaconClient::ListenForToken(int socket_fd) {
                 // Extract teacher console IP from sender
                 char teacher_ip_str[INET_ADDRSTRLEN] = {0};
                 inet_ntop(AF_INET, &(from_addr.sin_addr), teacher_ip_str, INET_ADDRSTRLEN);
+
+                std::string response(buffer, bytes);
+
+                // Extract token and signature from JSON
+                size_t token_pos = response.find("\"token\":\"");
+                if (token_pos == std::string::npos) return;
+                token_pos += 9;
+                size_t token_end = response.find("\"", token_pos);
+                if (token_end == std::string::npos) return;
+                std::string token = response.substr(token_pos, token_end - token_pos);
+
+                size_t sig_pos = response.find("\"signature\":\"");
+                std::string signature;
+                if (sig_pos != std::string::npos) {
+                    sig_pos += 12;
+                    size_t sig_end = response.find("\"", sig_pos);
+                    if (sig_end != std::string::npos) {
+                        signature = response.substr(sig_pos, sig_end - sig_pos);
+                    }
+                }
+
+                // HMAC verification: only trust tokens signed by the real server
+                if (!hmac_secret_.empty()) {
+                    if (signature.empty()) {
+                        Utils::Log("WARN", "⚠️ [Beacon] TOKEN_GRANT missing HMAC signature, ignoring from " + std::string(teacher_ip_str));
+                        return;
+                    }
+                    std::string expected_data = token + "|" + agent_mac;
+                    if (!Utils::VerifyHMACSHA256(hmac_secret_, expected_data, signature)) {
+                        Utils::Log("WARN", "⚠️ [Beacon] TOKEN_GRANT HMAC mismatch! Possible spoof from " + std::string(teacher_ip_str));
+                        return;
+                    }
+                    Utils::Log("INFO", "✅ [Beacon] TOKEN_GRANT HMAC verified from " + std::string(teacher_ip_str));
+                }
+
+                // HMAC passed (or no secret configured) — accept the token
                 if (http_server_ && teacher_ip_str[0]) {
                     http_server_->SetTeacherHost(teacher_ip_str, 3000);
                 }
-
-                std::string response(buffer, bytes);
-                // Simple JSON parsing to find token
-                size_t token_pos = response.find("\"token\":\"");
-                if (token_pos != std::string::npos) {
-                    token_pos += 9;
-                    size_t token_end = response.find("\"", token_pos);
-                    if (token_end != std::string::npos) {
-                        std::string token = response.substr(token_pos, token_end - token_pos);
-                        TokenManager::Instance().SetSessionToken(token);
-                        Utils::Log("INFO", "Received dynamic session token: " + token + " from teacher " + teacher_ip_str);
-                    }
-                }
+                TokenManager::Instance().SetSessionToken(token);
+                Utils::Log("INFO", "Received dynamic session token: " + token + " from teacher " + teacher_ip_str);
             }
         }
     }

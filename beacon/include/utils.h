@@ -51,6 +51,9 @@ public:
     static std::string ExtractJsonField(const std::string& json, const std::string& field_name);
     static void OpenUrl(const std::string& url);
     static bool DownloadAndOpenFile(const std::string& url, const std::string& filename);
+
+    static std::string HMACSHA256Hex(const std::string& key, const std::string& data);
+    static bool VerifyHMACSHA256(const std::string& key, const std::string& data, const std::string& expected_hex);
 };
 
 } // namespace GridSight

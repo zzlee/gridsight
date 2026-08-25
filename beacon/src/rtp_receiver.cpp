@@ -1,6 +1,7 @@
 #include "../include/rtp_receiver.h"
 #include "../include/utils.h"
 #include <iostream>
+#include <cstdint>
 #include <sstream>
 #include <iomanip>
 #include <vector>
@@ -8,6 +9,7 @@
 #include <chrono>
 #include <mutex>
 #include <algorithm>
+#include <limits>
 
 #ifdef _WIN32
 #include <winsock2.h>
@@ -22,6 +24,142 @@
 static const GUID GS_CLSID_CMSH264DecoderMFT = {0x62ce7e72, 0x4c71, 0x4d20, {0xb1, 0x5d, 0x45, 0x28, 0x31, 0xa8, 0x7d, 0x9d}};
 static const GUID GS_CODECAPI_AVLowLatencyMode = {0x9c27891a, 0xed7a, 0x40e1, {0x88, 0xe1, 0xb2, 0xe4, 0x5b, 0x30, 0x49, 0x11}};
 static const GUID GS_MF_LOW_LATENCY = {0x9c51d740, 0xdc55, 0x4864, {0x9c, 0x41, 0x8b, 0xa4, 0x76, 0xa5, 0xa1, 0xb8}};
+
+
+namespace {
+
+struct RTPPacketView {
+    const uint8_t* payload = nullptr;
+    size_t payload_len = 0;
+
+    uint16_t sequence = 0;
+    uint32_t timestamp = 0;
+    uint32_t ssrc = 0;
+
+    bool marker = false;
+    bool padding = false;
+    bool extension = false;
+};
+
+static uint16_t ReadBE16(const uint8_t* p) {
+    return (static_cast<uint16_t>(p[0]) << 8) |
+           static_cast<uint16_t>(p[1]);
+}
+
+static uint32_t ReadBE32(const uint8_t* p) {
+    return (static_cast<uint32_t>(p[0]) << 24) |
+           (static_cast<uint32_t>(p[1]) << 16) |
+           (static_cast<uint32_t>(p[2]) << 8) |
+           static_cast<uint32_t>(p[3]);
+}
+
+/*
+ * RFC 3550 RTP fixed header:
+ *
+ *   0                   1                   2                   3
+ *   0 1 2 3 4 5 6 7 8 9 ...
+ *  +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+ *  |V=2|P|X|  CC   |M|     PT      |       sequence number        |
+ *  +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+ *  |                           timestamp                           |
+ *  +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+ *  |           synchronization source (SSRC) identifier           |
+ *  +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+ */
+static bool ParseRTPPacket(
+    const uint8_t* data,
+    size_t size,
+    RTPPacketView& out)
+{
+    out = {};
+
+    if (!data || size < 12) {
+        return false;
+    }
+
+    const uint8_t version = (data[0] >> 6) & 0x03;
+    if (version != 2) {
+        return false;
+    }
+
+    const bool padding = (data[0] & 0x20) != 0;
+    const bool extension = (data[0] & 0x10) != 0;
+    const uint8_t csrc_count = data[0] & 0x0F;
+
+    const bool marker = (data[1] & 0x80) != 0;
+
+    size_t header_len = 12;
+
+    // CSRC list
+    const size_t csrc_bytes =
+        static_cast<size_t>(csrc_count) * 4;
+
+    if (header_len + csrc_bytes > size) {
+        return false;
+    }
+
+    header_len += csrc_bytes;
+
+    // Header extension:
+    //
+    //   16-bit profile
+    //   16-bit length, measured in 32-bit words
+    //   extension data
+    //
+    if (extension) {
+        if (header_len + 4 > size) {
+            return false;
+        }
+
+        const uint16_t extension_words =
+            ReadBE16(data + header_len + 2);
+
+        const size_t extension_bytes =
+            static_cast<size_t>(extension_words) * 4;
+
+        if (header_len + 4 + extension_bytes > size) {
+            return false;
+        }
+
+        header_len += 4 + extension_bytes;
+    }
+
+    size_t payload_end = size;
+
+    // RTP padding count is stored in the final byte.
+    if (padding) {
+        if (size == 0) {
+            return false;
+        }
+
+        const uint8_t padding_len = data[size - 1];
+
+        if (padding_len == 0 ||
+            padding_len > size - header_len) {
+            return false;
+        }
+
+        payload_end -= padding_len;
+    }
+
+    if (payload_end < header_len) {
+        return false;
+    }
+
+    out.payload = data + header_len;
+    out.payload_len = payload_end - header_len;
+
+    out.sequence = ReadBE16(data + 2);
+    out.timestamp = ReadBE32(data + 4);
+    out.ssrc = ReadBE32(data + 8);
+    out.marker = marker;
+    out.padding = padding;
+    out.extension = extension;
+
+    return out.payload_len > 0;
+}
+
+} // anonymous namespace
 
 namespace GridSight {
 
@@ -243,14 +381,41 @@ public:
                             out_h = display_h;
                             out_bgra.resize((size_t)out_w * out_h * 4);
 
+                            /*
+                             * Derive the actual row stride from the
+                             * decoded buffer length. MF may pad rows
+                             * for alignment; assuming stride==width
+                             * produces a skewed image.
+                             */
+                            int stride = 0;
+                            if (alloc_h > 0 && curLen > 0) {
+                                if (subtype == MFVideoFormat_RGB32) {
+                                    stride = (int)(curLen / alloc_h);
+                                } else {
+                                    // NV12 / YV12: buffer = stride * h * 3/2
+                                    stride = (int)(curLen * 2 / ((size_t)alloc_h * 3));
+                                }
+                            }
+                            if (stride <= 0) {
+                                stride = (subtype == MFVideoFormat_RGB32)
+                                    ? (int)w * 4
+                                    : (int)w;
+                            }
+
                             if (subtype == MFVideoFormat_NV12) {
-                                ConvertNV12ToBGRA(pRaw, (int)w, alloc_h, display_h, out_bgra.data());
+                                ConvertNV12ToBGRA(pRaw, (int)w, alloc_h, display_h, stride, out_bgra.data());
                                 got_frame = true;
                             } else if (subtype == MFVideoFormat_RGB32) {
-                                memcpy(out_bgra.data(), pRaw, (size_t)out_w * out_h * 4);
+                                // Row-by-row copy respecting actual stride
+                                for (int row = 0; row < display_h; ++row) {
+                                    memcpy(
+                                        out_bgra.data() + (size_t)row * out_w * 4,
+                                        pRaw + (size_t)row * stride,
+                                        (size_t)out_w * 4);
+                                }
                                 got_frame = true;
                             } else if (subtype == MFVideoFormat_YV12) {
-                                ConvertYV12ToBGRA(pRaw, (int)w, display_h, out_bgra.data());
+                                ConvertYV12ToBGRA(pRaw, (int)w, display_h, stride, out_bgra.data());
                                 got_frame = true;
                             } else {
                                 Utils::Log("WARN", "⚠️ [Decoder] Unknown output subtype GUID");
@@ -293,14 +458,13 @@ private:
     bool initialized_ = false;
     LONGLONG sample_time_ = 0;
 
-    static void ConvertNV12ToBGRA(const uint8_t* nv12, int width, int alloc_height, int render_height, uint8_t* bgra) {
-        size_t y_size = (size_t)width * alloc_height;
+    static void ConvertNV12ToBGRA(const uint8_t* nv12, int width, int alloc_height, int render_height, int stride, uint8_t* bgra) {
         const uint8_t* y_plane = nv12;
-        const uint8_t* uv_plane = nv12 + y_size;
+        const uint8_t* uv_plane = nv12 + (size_t)stride * alloc_height;
 
         for (int j = 0; j < render_height; ++j) {
-            const uint8_t* y_ptr = y_plane + j * width;
-            const uint8_t* uv_ptr = uv_plane + (j / 2) * width;
+            const uint8_t* y_ptr = y_plane + j * stride;
+            const uint8_t* uv_ptr = uv_plane + (j / 2) * stride;
             uint8_t* dst = bgra + j * width * 4;
 
             for (int i = 0; i < width; ++i) {
@@ -323,17 +487,15 @@ private:
         }
     }
 
-    static void ConvertYV12ToBGRA(const uint8_t* yv12, int width, int height, uint8_t* bgra) {
-        size_t y_size = (size_t)width * height;
-        size_t uv_size = (size_t)(width / 2) * (height / 2);
+    static void ConvertYV12ToBGRA(const uint8_t* yv12, int width, int height, int stride, uint8_t* bgra) {
         const uint8_t* y_plane = yv12;
-        const uint8_t* v_plane = yv12 + y_size;
-        const uint8_t* u_plane = v_plane + uv_size;
+        const uint8_t* v_plane = yv12 + (size_t)stride * height;
+        const uint8_t* u_plane = v_plane + (size_t)(stride / 2) * (height / 2);
 
         for (int j = 0; j < height; ++j) {
-            const uint8_t* y_ptr = y_plane + j * width;
-            const uint8_t* u_ptr = u_plane + (j / 2) * (width / 2);
-            const uint8_t* v_ptr = v_plane + (j / 2) * (width / 2);
+            const uint8_t* y_ptr = y_plane + j * stride;
+            const uint8_t* u_ptr = u_plane + (j / 2) * (stride / 2);
+            const uint8_t* v_ptr = v_plane + (j / 2) * (stride / 2);
             uint8_t* dst = bgra + j * width * 4;
 
             for (int i = 0; i < width; ++i) {
@@ -567,6 +729,74 @@ RTPReceiver::~RTPReceiver() {
     Stop();
 }
 
+void RTPReceiver::AppendAccessUnitNAL(
+    const uint8_t* nal,
+    size_t size,
+    bool is_idr) {
+    if (!nal || size == 0) {
+        return;
+    }
+
+    if (!access_unit_active_) {
+        access_unit_buffer_.clear();
+        access_unit_active_ = true;
+        access_unit_has_idr_ = false;
+        access_unit_corrupt_ = false;
+    }
+
+    // Annex-B start code + complete NAL unit.
+    access_unit_buffer_.push_back(0x00);
+    access_unit_buffer_.push_back(0x00);
+    access_unit_buffer_.push_back(0x00);
+    access_unit_buffer_.push_back(0x01);
+    access_unit_buffer_.insert(
+        access_unit_buffer_.end(), nal, nal + size);
+
+    access_unit_has_idr_ =
+        access_unit_has_idr_ || is_idr;
+}
+
+void RTPReceiver::FlushAccessUnit() {
+    if (!access_unit_active_) {
+        return;
+    }
+
+    if (access_unit_corrupt_) {
+        Utils::Log(
+            "WARN",
+            "⚠️ [RTP AU] Dropping corrupt H.264 access unit");
+        access_unit_buffer_.clear();
+        access_unit_active_ = false;
+        access_unit_has_idr_ = false;
+        access_unit_corrupt_ = false;
+        return;
+    }
+
+    if (access_unit_buffer_.empty()) {
+        access_unit_active_ = false;
+        access_unit_has_idr_ = false;
+        return;
+    }
+
+    /*
+     * A keyframe must carry SPS/PPS before the IDR NAL. This keeps
+     * the decoder recoverable when it joins an already-running stream.
+     */
+    if (access_unit_has_idr_) {
+        // cached_sps_pps is intentionally prepended by ReceiveLoop
+        // through the local assembly path below.
+    }
+
+    RenderFrame(
+        access_unit_buffer_.data(),
+        access_unit_buffer_.size());
+
+    access_unit_buffer_.clear();
+    access_unit_active_ = false;
+    access_unit_has_idr_ = false;
+    access_unit_corrupt_ = false;
+}
+
 bool RTPReceiver::Start() {
     if (running_.exchange(true)) return true;
     receive_thread_ = std::thread(&RTPReceiver::ReceiveLoop, this);
@@ -576,7 +806,22 @@ bool RTPReceiver::Start() {
 
 void RTPReceiver::Stop() {
     if (!running_.exchange(false)) return;
+
+    rtp_stream_initialized_ = false;
+    rtp_last_seq_ = 0;
+    rtp_ssrc_ = 0;
+    fua_active_ = false;
+    fua_last_seq_ = 0;
+    fua_timestamp_ = 0;
+    fua_ssrc_ = 0;
+
     if (receive_thread_.joinable()) receive_thread_.join();
+
+    access_unit_buffer_.clear();
+    access_unit_active_ = false;
+    access_unit_has_idr_ = false;
+    access_unit_corrupt_ = false;
+
     CloseOverlayWindow();
 #ifdef _WIN32
     if (decoder_) {
@@ -647,122 +892,495 @@ void RTPReceiver::ReceiveLoop() {
 
         uint64_t now = Utils::GetCurrentTimestampMs();
 
-        if (bytes >= 12) {
-            static uint64_t g_pkt_count = 0;
-            static uint16_t last_seq = 0;
-            static bool first_pkt = true;
+    if (bytes > 0) {
+        RTPPacketView pkt;
 
-            g_pkt_count++;
-            last_packet_time = now;
-            if (!overlay_active_) {
-                CreateFullScreenOverlayWindow();
+        if (!ParseRTPPacket(
+                rtp_buffer.data(),
+                static_cast<size_t>(bytes),
+                pkt)) {
+            Utils::Log("WARN", "⚠️ [RTP] Invalid RTP packet dropped");
+            continue;
+        }
+
+        static uint64_t g_pkt_count = 0;
+        ++g_pkt_count;
+
+        last_packet_time = now;
+
+        if (!overlay_active_) {
+            CreateFullScreenOverlayWindow();
+        }
+
+        /*
+         * ------------------------------------------------------------
+         * RTP stream identity
+         * ------------------------------------------------------------
+         *
+         * A multicast socket may receive packets from multiple RTP
+         * senders. Do not mix their sequence numbers or FU-A fragments.
+         */
+        if (!rtp_stream_initialized_) {
+            rtp_stream_initialized_ = true;
+            rtp_last_seq_ = pkt.sequence;
+            rtp_ssrc_ = pkt.ssrc;
+
+            Utils::Log(
+                "INFO",
+                "🎥 [RTP] New stream SSRC=" +
+                std::to_string(rtp_ssrc_));
+        } else if (pkt.ssrc != rtp_ssrc_) {
+            Utils::Log(
+                "WARN",
+                "⚠️ [RTP] Ignoring packet from unexpected SSRC=" +
+                std::to_string(pkt.ssrc) +
+                ", active SSRC=" +
+                std::to_string(rtp_ssrc_));
+
+            /*
+             * Never allow a different SSRC to contaminate an
+             * in-progress FU-A frame.
+             */
+            fua_reassembly_buffer.clear();
+            fua_active_ = false;
+
+            continue;
+        }
+
+        /*
+         * ------------------------------------------------------------
+         * Sequence number validation
+         * ------------------------------------------------------------
+         */
+        const uint16_t expected_seq =
+            static_cast<uint16_t>(rtp_last_seq_ + 1);
+
+        const bool sequence_ok =
+            (pkt.sequence == expected_seq);
+
+        if (!sequence_ok) {
+            /*
+             * A packet loss means an FU-A frame can no longer be
+             * reconstructed correctly.
+             *
+             * IMPORTANT:
+             * Previously this was only logged and the broken FU-A
+             * buffer was still decoded.
+             */
+            const int gap =
+                static_cast<int16_t>(
+                    static_cast<uint16_t>(pkt.sequence - expected_seq));
+
+            Utils::Log(
+                "WARN",
+                "⚠️ [RTP Gap/Loss] Expected seq=" +
+                std::to_string(expected_seq) +
+                ", got seq=" +
+                std::to_string(pkt.sequence) +
+                " (delta=" +
+                std::to_string(gap) +
+                ")");
+
+            fua_reassembly_buffer.clear();
+            fua_active_ = false;
+            access_unit_corrupt_ = access_unit_active_;
+        }
+
+        rtp_last_seq_ = pkt.sequence;
+
+        const uint8_t* payload = pkt.payload;
+        const size_t payload_len = pkt.payload_len;
+
+        if (payload_len == 0) {
+            continue;
+        }
+
+        const uint8_t nal_unit_type = payload[0] & 0x1F;
+
+        /*
+         * ------------------------------------------------------------
+         * FU-A
+         * RFC 6184 section 5.8
+         * ------------------------------------------------------------
+         */
+        if (nal_unit_type == 28) {
+            if (payload_len < 2) {
+                Utils::Log(
+                    "WARN",
+                    "⚠️ [RTP FU-A] Packet too short");
+                continue;
             }
 
-            uint16_t seq = ((uint16_t)rtp_buffer[2] << 8) | (uint16_t)rtp_buffer[3];
-            bool marker = (rtp_buffer[1] & 0x80) != 0;
+            const uint8_t fu_indicator = payload[0];
+            const uint8_t fu_header = payload[1];
 
-            if (!first_pkt && seq != (uint16_t)(last_seq + 1)) {
-                int gap = (int16_t)(seq - last_seq - 1);
-                Utils::Log("WARN", "⚠️ [RTP Gap/Loss] Expected seq=" + std::to_string((uint16_t)(last_seq + 1)) + ", got seq=" + std::to_string(seq) + " (lost " + std::to_string(gap) + " pkts)");
+            const bool start_bit =
+                (fu_header & 0x80) != 0;
+
+            const bool end_bit =
+                (fu_header & 0x40) != 0;
+
+            const uint8_t original_nal_type =
+                (fu_indicator & 0xE0) |
+                (fu_header & 0x1F);
+
+            const uint8_t inner_type =
+                fu_header & 0x1F;
+
+            /*
+             * FU-A packets belonging to one NALU must have the
+             * same timestamp and SSRC.
+             */
+            if (start_bit) {
+                /*
+                 * Start a brand-new fragmented NALU.
+                 */
+                fua_reassembly_buffer.clear();
+
+                fua_reassembly_buffer.push_back(0x00);
+                fua_reassembly_buffer.push_back(0x00);
+                fua_reassembly_buffer.push_back(0x00);
+                fua_reassembly_buffer.push_back(0x01);
+                fua_reassembly_buffer.push_back(original_nal_type);
+
+                fua_reassembly_buffer.insert(
+                    fua_reassembly_buffer.end(),
+                    payload + 2,
+                    payload + payload_len);
+
+                fua_active_ = true;
+                fua_last_seq_ = pkt.sequence;
+                fua_timestamp_ = pkt.timestamp;
+                fua_ssrc_ = pkt.ssrc;
+
+            } else {
+                /*
+                 * A non-START fragment is only valid when a
+                 * corresponding START fragment is active.
+                 */
+                if (!fua_active_) {
+                    Utils::Log(
+                        "WARN",
+                        "⚠️ [RTP FU-A] Dropping orphan fragment");
+                    continue;
+                }
+
+                /*
+                 * Verify FU-A stream continuity.
+                 */
+                const uint16_t expected_fua_seq =
+                    static_cast<uint16_t>(fua_last_seq_ + 1);
+
+                if (pkt.sequence != expected_fua_seq) {
+                    Utils::Log(
+                        "WARN",
+                        "⚠️ [RTP FU-A] Sequence discontinuity; "
+                        "dropping fragmented NALU");
+
+                    fua_reassembly_buffer.clear();
+                    fua_active_ = false;
+                    continue;
+                }
+
+                /*
+                 * Timestamp must remain constant throughout one
+                 * fragmented NALU.
+                 */
+                if (pkt.timestamp != fua_timestamp_ ||
+                    pkt.ssrc != fua_ssrc_) {
+
+                    Utils::Log(
+                        "WARN",
+                        "⚠️ [RTP FU-A] Timestamp/SSRC changed; "
+                        "dropping fragmented NALU");
+
+                    fua_reassembly_buffer.clear();
+                    fua_active_ = false;
+                    continue;
+                }
+
+                fua_reassembly_buffer.insert(
+                    fua_reassembly_buffer.end(),
+                    payload + 2,
+                    payload + payload_len);
+
+                fua_last_seq_ = pkt.sequence;
             }
-            last_seq = seq;
-            first_pkt = false;
 
-            const uint8_t* payload = rtp_buffer.data() + 12;
-            int payload_len = bytes - 12;
+            /*
+             * END fragment completes the NALU.
+             */
+            if (end_bit && fua_active_) {
+                if (g_pkt_count <= 25 ||
+                    g_pkt_count % 300 == 0) {
 
-            if (payload_len > 0) {
-                uint8_t nal_unit_type = payload[0] & 0x1F;
+                    std::string inner_name =
+                        (inner_type == 5)
+                            ? "IDR Keyframe"
+                            : ((inner_type == 1)
+                                ? "Non-IDR Slice"
+                                : ("Type " +
+                                   std::to_string(inner_type)));
 
-                if (nal_unit_type == 28) { // FU-A Fragmented NAL Unit (RFC 6184)
-                    if (payload_len >= 2) {
-                        uint8_t fu_header = payload[1];
-                        bool start_bit = (fu_header & 0x80) != 0;
-                        bool end_bit = (fu_header & 0x40) != 0;
-                        uint8_t original_nal_type = (payload[0] & 0xE0) | (fu_header & 0x1F);
-                        uint8_t inner_type = fu_header & 0x1F;
+                    Utils::Log(
+                        "INFO",
+                        "🧩 [RTP FU-A] Reassembled " +
+                        inner_name +
+                        " (" +
+                        std::to_string(
+                            fua_reassembly_buffer.size()) +
+                        " bytes, seq=" +
+                        std::to_string(pkt.sequence) +
+                        ", marker=" +
+                        (pkt.marker ? "1" : "0") +
+                        ")");
+                }
 
-                        if (start_bit) {
-                            fua_reassembly_buffer.clear();
-                            fua_reassembly_buffer.push_back(0x00);
-                            fua_reassembly_buffer.push_back(0x00);
-                            fua_reassembly_buffer.push_back(0x00);
-                            fua_reassembly_buffer.push_back(0x01);
-                            fua_reassembly_buffer.push_back(original_nal_type);
-                            fua_reassembly_buffer.insert(fua_reassembly_buffer.end(), payload + 2, payload + payload_len);
-                        } else if (!fua_reassembly_buffer.empty()) {
-                            fua_reassembly_buffer.insert(fua_reassembly_buffer.end(), payload + 2, payload + payload_len);
-                        }
+                /*
+                 * fua_reassembly_buffer already contains an
+                 * Annex-B start code and reconstructed NAL
+                 * header. Append it to the current AU instead
+                 * of decoding immediately.
+                 */
+                AppendAccessUnitNAL(
+                    fua_reassembly_buffer.data() + 4,
+                    fua_reassembly_buffer.size() - 4,
+                    inner_type == 5);
 
-                        if (end_bit && !fua_reassembly_buffer.empty()) {
-                            if (g_pkt_count <= 25 || g_pkt_count % 300 == 0) {
-                                std::string inner_name = (inner_type == 5) ? "IDR Keyframe" : ((inner_type == 1) ? "Non-IDR Slice" : ("Type " + std::to_string(inner_type)));
-                                Utils::Log("INFO", "🧩 [RTP FU-A] Reassembled " + inner_name + " (" + std::to_string(fua_reassembly_buffer.size()) + " bytes, seq=" + std::to_string(seq) + ", marker=" + (marker ? "1" : "0") + ")");
-                            }
-                            if (inner_type == 5 && !cached_sps_pps.empty()) {
-                                std::vector<uint8_t> complete_au = cached_sps_pps;
-                                complete_au.insert(complete_au.end(), fua_reassembly_buffer.begin(), fua_reassembly_buffer.end());
-                                RenderFrame(complete_au.data(), complete_au.size());
-                            } else {
-                                RenderFrame(fua_reassembly_buffer.data(), fua_reassembly_buffer.size());
-                            }
-                            fua_reassembly_buffer.clear();
-                        }
-                    }
-                } else if (nal_unit_type == 24) { // STAP-A Aggregation Packet (SPS + PPS in RFC 6184)
-                    size_t offset = 1;
-                    std::vector<uint8_t> combined_annexb;
-                    if (g_pkt_count <= 25 || g_pkt_count % 300 == 0) {
-                        Utils::Log("INFO", "📦 [RTP STAP-A] Aggregation packet received (len=" + std::to_string(payload_len) + ", seq=" + std::to_string(seq) + "):");
-                    }
-                    while (offset + 2 <= (size_t)payload_len) {
-                        uint16_t nal_size = ((uint16_t)payload[offset] << 8) | (uint16_t)payload[offset + 1];
-                        offset += 2;
-                        if (offset + nal_size <= (size_t)payload_len && nal_size > 0) {
-                            uint8_t inner_type = payload[offset] & 0x1F;
-                            std::string tname = (inner_type == 7) ? "SPS (SeqParamSet)" : ((inner_type == 8) ? "PPS (PicParamSet)" : ("Type " + std::to_string(inner_type)));
-                            if (g_pkt_count <= 25 || g_pkt_count % 300 == 0) {
-                                Utils::Log("INFO", "   └─ " + tname + " (" + std::to_string(nal_size) + " bytes)");
-                            }
+                fua_reassembly_buffer.clear();
+                fua_active_ = false;
+            }
 
-                            combined_annexb.push_back(0x00);
-                            combined_annexb.push_back(0x00);
-                            combined_annexb.push_back(0x00);
-                            combined_annexb.push_back(0x01);
-                            combined_annexb.insert(combined_annexb.end(), payload + offset, payload + offset + nal_size);
-                            offset += nal_size;
-                        } else {
+        /*
+         * ------------------------------------------------------------
+         * STAP-A
+         * ------------------------------------------------------------
+         */
+        } else if (nal_unit_type == 24) {
+
+            size_t offset = 1;
+            std::vector<uint8_t> combined_annexb;
+
+            if (g_pkt_count <= 25 ||
+                g_pkt_count % 300 == 0) {
+
+                Utils::Log(
+                    "INFO",
+                    "📦 [RTP STAP-A] Aggregation packet received "
+                    "(len=" +
+                    std::to_string(payload_len) +
+                    ", seq=" +
+                    std::to_string(pkt.sequence) +
+                    ")");
+            }
+
+            while (offset + 2 <= payload_len) {
+                const uint16_t nal_size =
+                    ReadBE16(payload + offset);
+
+                offset += 2;
+
+                /*
+                 * Reject malformed aggregation packets instead
+                 * of silently accepting partial data.
+                 */
+                if (nal_size == 0 ||
+                    offset + nal_size > payload_len) {
+
+                    access_unit_corrupt_ = true;
+                    Utils::Log(
+                        "WARN",
+                        "⚠️ [RTP STAP-A] Malformed aggregation packet");
+
+                    combined_annexb.clear();
+                    break;
+                }
+
+                const uint8_t inner_type =
+                    payload[offset] & 0x1F;
+
+                std::string tname =
+                    (inner_type == 7)
+                        ? "SPS"
+                        : ((inner_type == 8)
+                            ? "PPS"
+                            : ("Type " +
+                               std::to_string(inner_type)));
+
+                if (g_pkt_count <= 25 ||
+                    g_pkt_count % 300 == 0) {
+
+                    Utils::Log(
+                        "INFO",
+                        "   └─ " +
+                        tname +
+                        " (" +
+                        std::to_string(nal_size) +
+                        " bytes)");
+                }
+
+                combined_annexb.push_back(0x00);
+                combined_annexb.push_back(0x00);
+                combined_annexb.push_back(0x00);
+                combined_annexb.push_back(0x01);
+
+                combined_annexb.insert(
+                    combined_annexb.end(),
+                    payload + offset,
+                    payload + offset + nal_size);
+
+                offset += nal_size;
+            }
+
+            if (!combined_annexb.empty()) {
+                cached_sps_pps = std::move(combined_annexb);
+
+                /*
+                 * STAP-A may contain SPS/PPS and/or other NALs.
+                 * Keep the complete aggregation in the AU as
+                 * well, so decoder configuration and frame data
+                 * retain their original RTP order.
+                 */
+                size_t cache_offset = 0;
+                while (cache_offset + 4 <= cached_sps_pps.size()) {
+                    size_t nal_start = cache_offset + 4;
+                    size_t next = cached_sps_pps.size();
+                    for (size_t i = nal_start; i + 4 <= cached_sps_pps.size(); ++i) {
+                        if (cached_sps_pps[i] == 0x00 &&
+                            cached_sps_pps[i + 1] == 0x00 &&
+                            cached_sps_pps[i + 2] == 0x00 &&
+                            cached_sps_pps[i + 3] == 0x01) {
+                            next = i;
                             break;
                         }
                     }
-                    if (!combined_annexb.empty()) {
-                        cached_sps_pps = std::move(combined_annexb);
+                    if (nal_start < next) {
+                        AppendAccessUnitNAL(
+                            cached_sps_pps.data() + nal_start,
+                            next - nal_start,
+                            false);
                     }
-                } else if (nal_unit_type >= 1 && nal_unit_type <= 23) {
-                    std::string sname = (nal_unit_type == 5) ? "IDR Keyframe" : ((nal_unit_type == 1) ? "Non-IDR Slice" : ((nal_unit_type == 7) ? "SPS" : ((nal_unit_type == 8) ? "PPS" : ((nal_unit_type == 6) ? "SEI" : ("Type " + std::to_string(nal_unit_type))))));
-                    if (g_pkt_count <= 25 || g_pkt_count % 300 == 0) {
-                        Utils::Log("INFO", "📦 [RTP Single NAL] " + sname + " (" + std::to_string(payload_len) + " bytes, seq=" + std::to_string(seq) + ", marker=" + (marker ? "1" : "0") + ")");
+                    if (next == cached_sps_pps.size()) {
+                        break;
                     }
-
-                    std::vector<uint8_t> single_nal;
-                    if (nal_unit_type == 5 && !cached_sps_pps.empty()) {
-                        single_nal = cached_sps_pps;
-                    }
-                    single_nal.push_back(0x00);
-                    single_nal.push_back(0x00);
-                    single_nal.push_back(0x00);
-                    single_nal.push_back(0x01);
-                    single_nal.insert(single_nal.end(), payload, payload + payload_len);
-                    RenderFrame(single_nal.data(), single_nal.size());
+                    cache_offset = next;
                 }
             }
-        } else {
-            // Close overlay if no packets received for > 3.5s
-            if (overlay_active_ && (now - last_packet_time > 3500)) {
-                CloseOverlayWindow();
+
+        /*
+         * ------------------------------------------------------------
+         * Single NAL unit
+         * ------------------------------------------------------------
+         */
+        } else if (nal_unit_type >= 1 &&
+                   nal_unit_type <= 23) {
+
+            std::string sname =
+                (nal_unit_type == 5)
+                    ? "IDR Keyframe"
+                    : ((nal_unit_type == 1)
+                        ? "Non-IDR Slice"
+                        : ((nal_unit_type == 7)
+                            ? "SPS"
+                            : ((nal_unit_type == 8)
+                                ? "PPS"
+                                : ((nal_unit_type == 6)
+                                    ? "SEI"
+                                    : ("Type " +
+                                       std::to_string(
+                                           nal_unit_type))))));
+
+            if (g_pkt_count <= 25 ||
+                g_pkt_count % 300 == 0) {
+
+                Utils::Log(
+                    "INFO",
+                    "📦 [RTP Single NAL] " +
+                    sname +
+                    " (" +
+                    std::to_string(payload_len) +
+                    " bytes, seq=" +
+                    std::to_string(pkt.sequence) +
+                    ", marker=" +
+                    (pkt.marker ? "1" : "0") +
+                    ")");
+            }
+
+            /*
+             * Cache SPS/PPS independently when they arrive as
+             * single NAL packets.
+             */
+            if (nal_unit_type == 7 || nal_unit_type == 8) {
+                cached_sps_pps.clear();
+                cached_sps_pps.push_back(0x00);
+                cached_sps_pps.push_back(0x00);
+                cached_sps_pps.push_back(0x00);
+                cached_sps_pps.push_back(0x01);
+                cached_sps_pps.insert(
+                    cached_sps_pps.end(),
+                    payload,
+                    payload + payload_len);
+            }
+
+            AppendAccessUnitNAL(
+                payload,
+                payload_len,
+                nal_unit_type == 5);
+        }
+
+        /*
+         * RTP marker=1 terminates the current video frame/AU.
+         * Decode exactly once per AU.
+         */
+        if (pkt.marker) {
+            if (access_unit_has_idr_ &&
+                !cached_sps_pps.empty()) {
+
+                /*
+                 * If SPS/PPS are not already present in this AU,
+                 * prepend the cached parameter sets before IDR.
+                 */
+                std::vector<uint8_t> complete_au =
+                    cached_sps_pps;
+
+                complete_au.insert(
+                    complete_au.end(),
+                    access_unit_buffer_.begin(),
+                    access_unit_buffer_.end());
+
+                if (!access_unit_corrupt_) {
+                    RenderFrame(
+                        complete_au.data(),
+                        complete_au.size());
+                }
+            } else {
+                FlushAccessUnit();
             }
         }
+
+    } else {
+        /*
+         * Close overlay if no packets received for > 3.5s.
+         */
+        if (overlay_active_ &&
+            (now - last_packet_time > 3500)) {
+
+            CloseOverlayWindow();
+        }
+
+        /*
+         * recvfrom timeout means no packet arrived. Do not flush
+         * an incomplete AU here; wait for the next RTP marker or
+         * timestamp boundary so a delayed fragment cannot create
+         * a partial decode.
+         */
     }
+    }
+
+    access_unit_buffer_.clear();
+    access_unit_active_ = false;
+    access_unit_has_idr_ = false;
+    access_unit_corrupt_ = false;
 
     closesocket(sock);
     CloseOverlayWindow();

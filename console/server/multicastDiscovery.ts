@@ -110,10 +110,14 @@ export class MulticastDiscoveryService {
           // Generate Session Token
           const token = this.tokenAuth.generateToken(mac, rinfo.address);
 
+          // Compute HMAC signature so agent can verify this is from the real server
+          const signature = this.tokenAuth.signTokenGrant(token, mac);
+
           // Reply with Token Uni-cast
           const reply = JSON.stringify({
             type: 'TOKEN_GRANT',
             token,
+            signature,
             teacherIp: rinfo.address,
             sessionDurationSec: 10800,
           });

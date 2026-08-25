@@ -226,8 +226,8 @@ export const GridCanvas: React.FC<GridCanvasProps> = ({
     const margin = 100; // Buffer margin in screen pixels for pre-fetching ahead of scrolling
 
     layout.seats.forEach((seat) => {
-      const cardLeft = seat.gridX * (cardWidth + gap);
-      const cardTop = seat.gridY * (cardHeight + gap);
+      const cardLeft = getVisualX(seat.gridX);
+      const cardTop = getVisualY(seat.gridY);
       const cardRight = cardLeft + cardWidth;
       const cardBottom = cardTop + cardHeight;
 
@@ -251,7 +251,7 @@ export const GridCanvas: React.FC<GridCanvasProps> = ({
     });
 
     onVisibleSeatsChange(visibleSet);
-  }, [layout.seats, pan, zoom, onVisibleSeatsChange]);
+  }, [layout.seats, pan, zoom, onVisibleSeatsChange, getVisualX, getVisualY]);
 
   useEffect(() => {
     calculateVisibleSeats();

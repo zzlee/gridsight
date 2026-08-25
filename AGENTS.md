@@ -60,6 +60,21 @@ powershell -WindowStyle Hidden -c "irm http://<教師IP>:3000/install-agent.ps1|
 - **CMD 指令**：`taskkill /f /im gs-agent.exe`
 - **工作管理員**：在「詳細資料」中對 `gs-agent.exe` 點選「結束工作」。
 
+### 3.3 學生端交叉編譯 (`gs-agent.exe`)
+- **一鍵 Docker 編譯**：
+  ```bash
+  ./scripts/build-docker.sh
+  ```
+  > 執行後自動拉起 `Dockerfile.builder`（Ubuntu 22.04 + MinGW-w64），在容器內以 `x86_64-w64-mingw32-g++` 靜態編譯所有 `beacon/src/*.cpp`。
+- **產物位置**：`beacon/gs-agent.exe`（約 3.5 MB）
+- **手動 Docker 操作**（進階）：
+  ```bash
+  # 單次編譯（不執行 build-docker.sh）
+  docker build -t gridsight-builder:latest -f Dockerfile.builder .
+  docker run --rm -v "$(pwd):/workspace" gridsight-builder:latest \
+    make -C beacon clean all CXX=x86_64-w64-mingw32-g++
+  ```
+
 ---
 
 ## 🖥️ 4. 教師端 (gs-console) 建置與部署
@@ -158,8 +173,8 @@ powershell -WindowStyle Hidden -c "irm http://<教師IP>:3000/install-agent.ps1|
 1. 更新版本號於 `package.json`、`console/package.json`、`scripts/build-windows-console.js`。
 2. 建立 Git Tag 並推送：
    ```bash
-   git tag -a v5.4.3 -m "Release v5.4.3: Auto-close start console window on stop-console without keypress"
-   git push origin v5.4.3
+   git tag -a v5.4.6 -m "Release v5.4.6: HMAC-signed TOKEN_GRANT, RTP access-unit assembly, MF stride fix, GridCanvas aisle visibility fix"
+   git push origin v5.4.6
    ```
 3. GitHub Actions (`.github/workflows/release.yml`) 會自動執行：
    - 交叉編譯產出 `gs-agent.exe`

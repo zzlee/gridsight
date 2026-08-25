@@ -336,7 +336,7 @@ app.get('/api/health', (req, res) => {
 
 app.get('/api/server-info', (req, res) => {
   res.json({
-    version: '5.4.3',
+    version: '5.4.6',
     teacherIp: activeTeacherIp,
     port: PORT,
     nicName: activeNicName,
@@ -718,17 +718,19 @@ app.get('/install-agent.ps1', (req, res) => {
   if (activeTeacherIp && activeTeacherIp !== '127.0.0.1' && (host.startsWith('localhost') || host.startsWith('127.0.0.1'))) {
     host = `${activeTeacherIp}:${PORT}`;
   }
+  const hmacSecret = tokenAuth.getHmacSecret();
   const script = `# ========================================================
-# GridSight Agent One-Click Pull & Launch Script (v5.4.3)
+# GridSight Agent One-Click Pull & Launch Script (v5.4.6)
 # ========================================================
 $ErrorActionPreference = "SilentlyContinue"
 $serverHost = "${host}"
 $exeUrl = "http://$serverHost/download/gs-agent.exe"
 $destDir = "$env:TEMP"
 $destPath = "$destDir\\gs-agent.exe"
+$envPath = "$destDir\\gs-agent.env"
 
 Write-Host "=======================================================" -ForegroundColor Cyan
-Write-Host "  GridSight Student Agent v5.4.3 部署與啟動程序" -ForegroundColor Cyan
+Write-Host "  GridSight Student Agent v5.4.6 部署與啟動程序" -ForegroundColor Cyan
 Write-Host "=======================================================" -ForegroundColor Cyan
 Write-Host "[GridSight] 正在終止舊版 gs-agent 行程..." -ForegroundColor Yellow
 
@@ -763,6 +765,12 @@ if (!(Test-Path $destPath) -or (Get-Item $destPath).Length -lt 10240) {
     Exit
 }
 
+# Write HMAC secret to .env so agent can verify TOKEN_GRANT signatures
+$hmacSecret = "${hmacSecret}"
+Set-Content -Path $envPath -Value "HMAC_SECRET=$hmacSecret" -NoNewline
+Add-Content -Path $envPath -Value "TEACHER_IP=$serverHost"
+Write-Host "[GridSight] 已寫入 HMAC 驗證設定至 $envPath" -ForegroundColor DarkGray
+
 # Configure Firewall
 try {
     netsh advfirewall firewall delete rule name="GridSight Agent" 2>$null | Out-Null
@@ -771,13 +779,13 @@ try {
     netsh advfirewall firewall add rule name="GridSight Agent Out" dir=out action=allow program="$destPath" enable=yes profile=any protocol=any 2>$null | Out-Null
 } catch {}
 
-Write-Host "[GridSight] 正在啟動最新版 gs-agent.exe (v5.4.3)..." -ForegroundColor Green
-Start-Process -FilePath $destPath -WindowStyle Hidden
+Write-Host "[GridSight] 正在啟動最新版 gs-agent.exe (v5.4.6)..." -ForegroundColor Green
+Start-Process -FilePath $destPath -WorkingDirectory $destDir -WindowStyle Hidden
 
 Start-Sleep -Seconds 1
 $proc = Get-Process -Name "gs-agent" -ErrorAction SilentlyContinue
 if ($proc) {
-    Write-Host "[GridSight] ✅ 學生端代理程式 (v5.4.3) 已成功在背景啟動！ (PID: $($proc[0].Id))" -ForegroundColor Green
+    Write-Host "[GridSight] ✅ 學生端代理程式 (v5.4.6) 已成功在背景啟動！ (PID: $($proc[0].Id))" -ForegroundColor Green
 } else {
     Write-Host "[GridSight] ⚠️ 警告：無法確認背景行程狀態，請檢查防毒軟體或權限設定。" -ForegroundColor Yellow
 }
@@ -1022,7 +1030,7 @@ async function bootstrap() {
     const lanUrl = `http://${activeTeacherIp}:${PORT}`;
 
     logger.info(`=============================================================`);
-    logger.info(`  🚀 GridSight Teacher Console v5.4.3`);
+    logger.info(`  🚀 GridSight Teacher Console v5.4.6`);
     logger.info(`  綁定網路卡 (NIC): ${activeNicName} (${activeTeacherIp})`);
     logger.info(`  本機控制台網址:   ${localUrl}`);
     logger.info(`  學生連線網址:     ${lanUrl}/join`);

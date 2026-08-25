@@ -193,6 +193,7 @@ int main(int argc, char* argv[]) {
     int ws_port = GridSight::Utils::GetEnvInt("WS_PORT", 8081);
     std::string rtp_ip = GridSight::Utils::GetEnv("RTP_IP", "239.255.42.100");
     int rtp_port = GridSight::Utils::GetEnvInt("RTP_PORT", 9000);
+    std::string hmac_secret = GridSight::Utils::GetEnv("HMAC_SECRET", "");
 
     auto capturer = std::make_shared<GridSight::ScreenCapturer>();
     if (!capturer->Initialize()) {
@@ -206,7 +207,7 @@ int main(int argc, char* argv[]) {
     http_server->Start();
 
     // 2. Start Beacon Discovery (notifies http_server of discovered teacher IP)
-    GridSight::BeaconClient beacon_client(multicast_ip, multicast_port, http_server);
+    GridSight::BeaconClient beacon_client(multicast_ip, multicast_port, http_server, hmac_secret);
     beacon_client.Start();
 
     // 3. Start WebSocket Server for On-demand 30 FPS Stream (with Outbound Reverse Streaming)

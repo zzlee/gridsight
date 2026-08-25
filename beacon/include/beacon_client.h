@@ -11,7 +11,9 @@ class HttpServer;
 
 class BeaconClient {
 public:
-    BeaconClient(const std::string& multicast_ip = "239.255.42.99", int port = 8888, std::shared_ptr<HttpServer> http_server = nullptr);
+    BeaconClient(const std::string& multicast_ip = "239.255.42.99", int port = 8888,
+                 std::shared_ptr<HttpServer> http_server = nullptr,
+                 const std::string& hmac_secret = "");
     ~BeaconClient();
 
     void Start();
@@ -20,11 +22,12 @@ public:
 private:
     void DiscoveryLoop();
     void SendBeaconAnnouncement(int socket_fd, const NetworkInfo& info);
-    void ListenForToken(int socket_fd);
+    void ListenForToken(int socket_fd, const std::string& agent_mac);
 
     std::string multicast_ip_;
     int port_;
     std::shared_ptr<HttpServer> http_server_;
+    std::string hmac_secret_;
     std::atomic<bool> running_{false};
     std::thread worker_thread_;
 };

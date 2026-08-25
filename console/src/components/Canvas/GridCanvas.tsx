@@ -1,4 +1,4 @@
-import React, { useRef, useState, useEffect, useCallback } from 'react';
+import React, { useRef, useState, useEffect, useCallback, useMemo } from 'react';
 import { ClassroomLayout, StudentDevice, AppMode, GridObstacle } from '../../types';
 import { StudentCard } from './StudentCard';
 import { ObstacleMarker } from './ObstacleMarker';
@@ -76,21 +76,52 @@ export const GridCanvas: React.FC<GridCanvasProps> = ({
   const gap = 14;
   const aisleGap = 36; // Visual extra width/height added by aisles
 
-  // Calculate actual pixel positions with aisle gaps
+  // Precompute prefix sums of vertical and horizontal aisles for O(1) visual coordinate lookups
+  const vAislePrefix = useMemo(() => {
+    const vAisles = (layout.aisles || []).filter((a) => a.type === 'vertical');
+    const maxCol = Math.max(layout.cols || 0, ...vAisles.map((a) => a.index + 1), 100);
+    const prefix = new Int32Array(maxCol + 1);
+    for (const a of vAisles) {
+      if (a.index + 1 >= 0 && a.index + 1 <= maxCol) {
+        prefix[a.index + 1]++;
+      }
+    }
+    for (let i = 1; i <= maxCol; i++) {
+      prefix[i] += prefix[i - 1];
+    }
+    return prefix;
+  }, [layout.aisles, layout.cols]);
+
+  const hAislePrefix = useMemo(() => {
+    const hAisles = (layout.aisles || []).filter((a) => a.type === 'horizontal');
+    const maxRow = Math.max(layout.rows || 0, ...hAisles.map((a) => a.index + 1), 100);
+    const prefix = new Int32Array(maxRow + 1);
+    for (const a of hAisles) {
+      if (a.index + 1 >= 0 && a.index + 1 <= maxRow) {
+        prefix[a.index + 1]++;
+      }
+    }
+    for (let i = 1; i <= maxRow; i++) {
+      prefix[i] += prefix[i - 1];
+    }
+    return prefix;
+  }, [layout.aisles, layout.rows]);
+
+  // Calculate actual pixel positions with aisle gaps in O(1) time
   const getVisualX = useCallback(
     (col: number) => {
-      const vAislesBefore = (layout.aisles || []).filter((a) => a.type === 'vertical' && a.index <= col - 1).length;
-      return col * (cardWidth + gap) + vAislesBefore * aisleGap;
+      const count = col <= 0 ? 0 : col < vAislePrefix.length ? vAislePrefix[col] : vAislePrefix[vAislePrefix.length - 1];
+      return col * (cardWidth + gap) + count * aisleGap;
     },
-    [layout.aisles]
+    [vAislePrefix]
   );
 
   const getVisualY = useCallback(
     (row: number) => {
-      const hAislesBefore = (layout.aisles || []).filter((a) => a.type === 'horizontal' && a.index <= row - 1).length;
-      return row * (cardHeight + gap) + hAislesBefore * aisleGap;
+      const count = row <= 0 ? 0 : row < hAislePrefix.length ? hAislePrefix[row] : hAislePrefix[hAislePrefix.length - 1];
+      return row * (cardHeight + gap) + count * aisleGap;
     },
-    [layout.aisles]
+    [hAislePrefix]
   );
 
   const handleMouseDown = (e: React.MouseEvent) => {

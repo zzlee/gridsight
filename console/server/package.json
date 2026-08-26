@@ -5,7 +5,7 @@
   "type": "module",
   "scripts": {
     "start": "tsx server.ts",
-    "test": "npx tsx browserLauncher.test.ts && npx tsx tokenAuthority.test.ts"
+    "test": "npx tsx logger.test.ts && npx tsx browserLauncher.test.ts && npx tsx tokenAuthority.test.ts"
   },
   "dependencies": {
     "cors": "^2.8.5",

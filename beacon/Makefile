@@ -1,4 +1,5 @@
 CXX ?= x86_64-w64-mingw32-g++
+HOST_CXX ?= g++
 
 ifeq ($(findstring mingw,$(CXX)),mingw)
     CXXFLAGS = -std=c++17 -O3 -Wall -Iinclude -mwindows -D_WIN32_WINNT=0x0602
@@ -21,7 +22,23 @@ $(TARGET): $(OBJ)
 %.o: %.cpp
 	$(CXX) $(CXXFLAGS) -c $< -o $@
 
-clean:
-	rm -f src/*.o $(TARGET) gs-agent.exe gs-agent
+test-capture:
+	mkdir -p build
+	$(HOST_CXX) -std=c++17 -O2 -Wall -Wextra -pthread -Iinclude \
+		tests/test_capture_lifecycle.cpp src/capture.cpp src/utils.cpp \
+		-o build/test_capture_lifecycle
+	timeout 30s ./build/test_capture_lifecycle
 
-.PHONY: all clean
+test-utils:
+	mkdir -p build
+	$(HOST_CXX) -std=c++17 -O2 -Wall -Wextra -pthread -Iinclude \
+		tests/test_security_utils.cpp src/utils.cpp \
+		-o build/test_security_utils
+	timeout 30s ./build/test_security_utils
+
+test: test-capture test-utils
+
+clean:
+	rm -f src/*.o $(TARGET) gs-agent.exe gs-agent build/test_capture_lifecycle build/test_security_utils
+
+.PHONY: all clean test test-capture test-utils

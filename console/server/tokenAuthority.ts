@@ -6,6 +6,10 @@ export class TokenAuthority {
   private activeTokens: Map<string, { token: string; ip: string; expiresAt: number }> = new Map();
   private hmacSecret: string = '';
 
+  private normalizeMac(mac: string): string {
+    return mac.trim().replace(/-/g, ':').toUpperCase();
+  }
+
   /**
    * Load or generate the HMAC shared secret.
    * Persists to data/hmac_secret.txt so the same secret survives restarts
@@ -31,7 +35,11 @@ export class TokenAuthority {
     try {
       const dir = path.dirname(secretFile);
       fs.mkdirSync(dir, { recursive: true });
-      fs.writeFileSync(secretFile, this.hmacSecret, 'utf-8');
+      /* Atomic write via temp file + rename: a truncated secret file
+       * would invalidate every issued token across restarts. */
+      const tempFile = `${secretFile}.tmp-${process.pid}`;
+      fs.writeFileSync(tempFile, this.hmacSecret, 'utf-8');
+      fs.renameSync(tempFile, secretFile);
     } catch (err) {
       console.error('[TokenAuthority] Failed to persist HMAC secret:', err);
     }
@@ -52,10 +60,11 @@ export class TokenAuthority {
   }
 
   generateToken(mac: string, ip: string): string {
-    const existing = this.getToken(mac);
+    const normalizedMac = this.normalizeMac(mac);
+    const existing = this.getToken(normalizedMac);
     if (existing) return existing;
     const token = crypto.randomBytes(24).toString('hex');
-    this.activeTokens.set(mac, {
+    this.activeTokens.set(normalizedMac, {
       token,
       ip,
       expiresAt: Date.now() + 1000 * 60 * 180, // 3 hours validity for class session
@@ -64,17 +73,20 @@ export class TokenAuthority {
   }
 
   getToken(mac: string): string | undefined {
-    const entry = this.activeTokens.get(mac);
+    const normalizedMac = this.normalizeMac(mac);
+    const entry = this.activeTokens.get(normalizedMac);
     if (!entry) return undefined;
     if (Date.now() > entry.expiresAt) {
-      this.activeTokens.delete(mac);
+      this.activeTokens.delete(normalizedMac);
       return undefined;
     }
     return entry.token;
   }
 
   validateToken(mac: string, token: string): boolean {
+    if (!mac || !token) return false;
     const active = this.getToken(mac);
-    return active === token;
+    if (!active || active.length !== token.length) return false;
+    return crypto.timingSafeEqual(Buffer.from(active), Buffer.from(token));
   }
 }

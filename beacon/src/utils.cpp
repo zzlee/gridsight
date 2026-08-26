@@ -479,26 +479,36 @@ std::string Utils::ComputeWebSocketAcceptKey(const std::string& client_key) {
     return Base64Encode(digest, 20);
 }
 
-static std::string GetHeartbeatFilePath() {
+static std::string GetHeartbeatFilePath(const std::string& component) {
+    std::string safe_component;
+    for (char c : component) {
+        if (std::isalnum(static_cast<unsigned char>(c)) || c == '-' || c == '_') {
+            safe_component += c;
+        }
+    }
+    if (safe_component.empty()) safe_component = "worker";
+    const std::string filename = safe_component == "worker"
+        ? "gs-heartbeat.txt"
+        : "gs-heartbeat-" + safe_component + ".txt";
 #ifdef _WIN32
     char temp_dir[MAX_PATH] = {0};
     if (GetTempPathA(MAX_PATH, temp_dir)) {
-        return std::string(temp_dir) + "gs-heartbeat.txt";
+        return std::string(temp_dir) + filename;
     }
 #endif
-    return "gs-heartbeat.txt";
+    return filename;
 }
 
-void Utils::UpdateHeartbeat() {
-    std::ofstream hb_file(GetHeartbeatFilePath(), std::ios::trunc);
+void Utils::UpdateHeartbeat(const std::string& component) {
+    std::ofstream hb_file(GetHeartbeatFilePath(component), std::ios::trunc);
     if (hb_file.is_open()) {
         hb_file << GetCurrentTimestampMs();
         hb_file.close();
     }
 }
 
-uint64_t Utils::GetLastHeartbeat() {
-    std::ifstream hb_file(GetHeartbeatFilePath());
+uint64_t Utils::GetLastHeartbeat(const std::string& component) {
+    std::ifstream hb_file(GetHeartbeatFilePath(component));
     if (!hb_file.is_open()) {
         return 0;
     }
@@ -571,7 +581,7 @@ std::string Utils::ExtractJsonField(const std::string& json, const std::string& 
 static bool IsValidHttpUrl(const std::string& url) {
     if (url.empty()) return false;
     for (char c : url) {
-        if (c == '\r' || c == '\n' || c == '\0') return false;
+        if (c == '\0' || std::isspace(static_cast<unsigned char>(c))) return false;
     }
     std::string lower_prefix = url.substr(0, 8);
     for (char& c : lower_prefix) {

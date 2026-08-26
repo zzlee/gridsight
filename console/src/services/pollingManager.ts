@@ -1,5 +1,6 @@
 import { StudentDevice } from '../types';
 import { AbortableRequestCircuitBreaker } from '../utils/circuitBreaker';
+import { AuthService } from './authService';
 
 export interface TrafficStats {
   bytesPerSec: number;
@@ -57,7 +58,10 @@ export class PollingManager {
             try {
               // 1. Primary: Fetch outbound cached snapshot from Teacher Console Server
               const serverSnapshotUrl = `/api/snapshot/${encodeURIComponent(device.mac || device.ip)}?t=${Date.now()}`;
-              let resp = await this.circuitBreaker.fetchWithTimeout(serverSnapshotUrl);
+              const teacherToken = AuthService.getToken();
+              let resp = await this.circuitBreaker.fetchWithTimeout(serverSnapshotUrl, {
+                headers: teacherToken ? { Authorization: `Bearer ${teacherToken}` } : {},
+              });
 
               // 2. Fallback: If not cached on server yet, try direct student port 8080
               if (!resp.ok && device.ip) {

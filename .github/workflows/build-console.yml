@@ -24,6 +24,28 @@ jobs:
         working-directory: console
         run: npm ci
 
+  backend-tests:
+    name: Server Backend & Security Tests
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: 'npm'
+          cache-dependency-path: console/server/package.json
+
+      - name: Install Server Dependencies
+        working-directory: console/server
+        run: npm ci
+
+      - name: Run Backend, Auth, Installer & Integration Tests
+        working-directory: console/server
+        run: npm test
+
       - name: Type Check & Build Frontend
         working-directory: console
         run: npm run build

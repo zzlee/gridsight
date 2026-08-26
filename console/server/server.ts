@@ -13,13 +13,14 @@ import { TeacherBroadcastStreamer } from './broadcastStreamer.js';
 import { logger } from './logger.js';
 import { promptSelectNic } from './nicSelector.js';
 import { openBrowser } from './browserLauncher.js';
+import { buildInstallAgentScript } from './installerScript.js';
 import type { ClassroomLayout, StudentDevice } from './types.js';
 
 const currentDirname = typeof __dirname !== 'undefined' ? __dirname : path.dirname(fileURLToPath(import.meta.url || 'file:///'));
 
 const app = express();
-const server = createServer(app);
-const wss = new WebSocketServer({ server });
+export const server = createServer(app);
+const wss = new WebSocketServer({ server, maxPayload: 8 * 1024 * 1024 });
 
 const PORT = process.env.API_PORT || process.env.PORT ? parseInt(process.env.API_PORT || process.env.PORT || '3000', 10) : 3000;
 const HOST = process.env.API_HOST || '0.0.0.0';
@@ -30,7 +31,7 @@ let activeNicName = 'Default';
 app.use(cors());
 app.use(express.json());
 
-const tokenAuth = new TokenAuthority();
+export const tokenAuth = new TokenAuthority();
 const broadcastStreamer = new TeacherBroadcastStreamer();
 const discoveryService = new MulticastDiscoveryService(tokenAuth, (device) => {
   logger.info(`[Discovery] New Beacon: ${device.hostname} (${device.ip})`);
@@ -68,8 +69,10 @@ const requireTeacherAuth: express.RequestHandler = (req, res, next) => {
   res.status(401).json({ error: 'Unauthorized: Teacher PIN required', code: 'AUTH_REQUIRED' });
 };
 
-// In-memory JPEG snapshot cache for outbound student pushes
+// Bounded in-memory JPEG cache for authenticated outbound student pushes.
 const snapshotCache = new Map<string, { buffer: Buffer; timestamp: number }>();
+const SNAPSHOT_CACHE_MAX_KEYS = 256;
+const SNAPSHOT_CACHE_TTL_MS = 30_000;
 
 // Maps for WebSocket reverse relay
 const agentSockets = new Map<string, WebSocket>();
@@ -82,16 +85,68 @@ const normalizeTarget = (raw: string) => {
   return decodeURIComponent(raw).replace(/%3A/gi, ':').trim().toUpperCase();
 };
 
+const pruneSnapshotCache = (now = Date.now()) => {
+  for (const [key, entry] of snapshotCache) {
+    if (now - entry.timestamp > SNAPSHOT_CACHE_TTL_MS) snapshotCache.delete(key);
+  }
+  while (snapshotCache.size > SNAPSHOT_CACHE_MAX_KEYS) {
+    const oldestKey = snapshotCache.keys().next().value as string | undefined;
+    if (!oldestKey) break;
+    snapshotCache.delete(oldestKey);
+  }
+};
+
+const storeSnapshot = (key: string, entry: { buffer: Buffer; timestamp: number }) => {
+  if (!key) return;
+  snapshotCache.delete(key);
+  snapshotCache.set(key, entry);
+  pruneSnapshotCache(entry.timestamp);
+};
+
+/*
+ * LRU-aware cache read: re-insert the entry so it moves to the tail of
+ * Map iteration order. Without this, pruneSnapshotCache evicts in strict
+ * insertion order (FIFO), letting a continuously polled seat flush out
+ * cold-but-never-hot entries unfairly.
+ */
+const getSnapshotCached = (key: string): { buffer: Buffer; timestamp: number } | undefined => {
+  const entry = snapshotCache.get(key);
+  if (entry === undefined) return undefined;
+  snapshotCache.delete(key);
+  snapshotCache.set(key, entry);
+  return entry;
+};
+
+const requireAgentSnapshotAuth: express.RequestHandler = (req, res, next) => {
+  const mac = normalizeTarget((req.headers['x-agent-mac'] as string) || '');
+  const token = (req.headers['x-auth-token'] as string) || '';
+  if (!mac || !tokenAuth.validateToken(mac, token)) {
+    return res.status(401).json({ error: 'Unauthorized agent snapshot' });
+  }
+  next();
+};
+
 wss.on('connection', (ws, req) => {
   const host = req.headers.host || `localhost:${PORT}`;
   const parsedUrl = new URL(req.url || '', `http://${host}`);
   const pathname = parsedUrl.pathname;
 
   if (pathname === '/ws/agent') {
-    const rawMac = parsedUrl.searchParams.get('mac') || req.socket.remoteAddress?.replace(/^.*:/, '') || 'unknown';
+    const rawMac = parsedUrl.searchParams.get('mac') || '';
     const mac = normalizeTarget(rawMac);
+    const token = parsedUrl.searchParams.get('token') || '';
+    if (!mac || !tokenAuth.validateToken(mac, token)) {
+      logger.warn(`[WS Relay] Rejected unauthenticated agent socket from ${req.socket.remoteAddress || 'unknown'}`);
+      ws.close(1008, 'Invalid agent credentials');
+      return;
+    }
+
+    const previous = agentSockets.get(mac);
+    if (previous && previous !== ws) {
+      previous.close(1008, 'Superseded by a newer authenticated connection');
+    }
     agentSockets.set(mac, ws);
-    logger.info(`[WS Relay] Student Agent registered outbound: ${mac}`);
+    logger.info(`[WS Relay] Authenticated student agent registered outbound: ${mac}`);
 
     let frameCount = 0;
     let totalBytes = 0;
@@ -110,9 +165,16 @@ wss.on('connection', (ws, req) => {
         const viewers = viewerSockets.get(mac);
         if (viewers && viewers.size > 0) {
           viewers.forEach((v) => {
-            if (v.readyState === WebSocket.OPEN) {
-              v.send(data, { binary: true });
+            if (v.readyState !== WebSocket.OPEN) return;
+            if (v.bufferedAmount > 8 * 1024 * 1024) {
+              logger.warn(`[WS Relay] Closing persistently slow viewer for ${mac}`);
+              v.close(1009, 'Viewer backpressure limit exceeded');
+              return;
             }
+            // Drop frames instead of growing an unbounded queue. The next IDR
+            // restores decoder state for a slow viewer.
+            if (v.bufferedAmount > 2 * 1024 * 1024) return;
+            v.send(data, { binary: true });
           });
         }
       } else {
@@ -131,23 +193,35 @@ wss.on('connection', (ws, req) => {
     });
 
     ws.on('close', () => {
-      agentSockets.delete(mac);
+      if (agentSockets.get(mac) === ws) {
+        agentSockets.delete(mac);
+      }
       logger.info(`[WS Relay] Student Agent disconnected: ${mac}`);
     });
   } else if (pathname.startsWith('/ws/stream/')) {
+    const teacherToken = parsedUrl.searchParams.get('token');
+    if (!isValidTeacherToken(teacherToken)) {
+      logger.warn(`[WS Relay] Rejected unauthenticated teacher viewer from ${req.socket.remoteAddress || 'unknown'}`);
+      ws.close(1008, 'Teacher authentication required');
+      return;
+    }
+
     const rawTarget = pathname.replace('/ws/stream/', '');
     let mac = normalizeTarget(rawTarget);
 
-    // Smart resolution: resolve IP, hostname, or ID to actual connected agent MAC
+    // Resolve an explicit IP or hostname to its authenticated agent MAC. Never
+    // fall back to an unrelated sole agent because that can disclose its stream.
     if (!agentSockets.has(mac)) {
       const dev = discoveryService.getDevices().find(
-        (d) => d.mac === mac || d.ip === mac || d.id === mac || d.hostname === mac || normalizeTarget(d.mac) === mac
+        (d) => d.mac === mac || d.ip === rawTarget || d.hostname === rawTarget || normalizeTarget(d.mac) === mac
       );
-      if (dev && agentSockets.has(normalizeTarget(dev.mac))) {
-        mac = normalizeTarget(dev.mac);
-      } else if (agentSockets.size === 1) {
-        mac = Array.from(agentSockets.keys())[0];
-      }
+      if (dev) mac = normalizeTarget(dev.mac);
+    }
+    const agentWs = agentSockets.get(mac);
+    if (!agentWs || agentWs.readyState !== WebSocket.OPEN) {
+      logger.warn(`[WS Relay] No authenticated agent available for target ${mac}`);
+      ws.close(1013, 'Agent stream unavailable');
+      return;
     }
 
     if (!viewerSockets.has(mac)) {
@@ -156,14 +230,9 @@ wss.on('connection', (ws, req) => {
     viewerSockets.get(mac)!.add(ws);
     logger.info(`[WS Relay] Teacher Viewer opened stream for: ${mac} (total viewers: ${viewerSockets.get(mac)!.size})`);
 
-    // Tell student agent to start H.264 30 FPS encoder
-    const agentWs = agentSockets.get(mac);
-    if (agentWs && agentWs.readyState === WebSocket.OPEN) {
-      agentWs.send(JSON.stringify({ action: 'START_STREAM', fps: 30, bitrate: 2500 }));
-      logger.info(`[WS Relay] Sent START_STREAM command to agent: ${mac}`);
-    } else {
-      logger.warn(`[WS Relay] Agent not found for target ${mac}. Available agents: [${Array.from(agentSockets.keys()).join(', ')}]`);
-    }
+    // Tell the authenticated student agent to start H.264 30 FPS encoder.
+    agentWs.send(JSON.stringify({ action: 'START_STREAM', fps: 30, bitrate: 2500 }));
+    logger.info(`[WS Relay] Sent START_STREAM command to agent: ${mac}`);
 
     ws.on('close', () => {
       const viewers = viewerSockets.get(mac);
@@ -181,6 +250,8 @@ wss.on('connection', (ws, req) => {
         }
       }
     });
+  } else {
+    ws.close(1008, 'Unknown WebSocket endpoint');
   }
 });
 
@@ -284,15 +355,37 @@ const getDefaultSeatsLayout = (): ClassroomLayout => {
 
 let cachedLayout: ClassroomLayout | null = null;
 
+const sanitizeLayoutForPersistence = (layoutData: ClassroomLayout): ClassroomLayout => ({
+  ...layoutData,
+  seats: layoutData.seats.map((seat) => {
+    const sanitized = { ...seat };
+    delete sanitized.token;
+    delete sanitized.thumbnailUrl;
+    return sanitized;
+  }),
+});
+
 const saveSeatsLayout = async (layoutData: ClassroomLayout): Promise<boolean> => {
   await ensureSeatsDirectory();
+  const sanitizedLayout = sanitizeLayoutForPersistence(layoutData);
+
+  /*
+   * Atomic write: write to a temp file in the same directory and rename
+   * it over the target. A crash/power loss mid-write can never leave a
+   * truncated or half-written seats.json behind; rename is atomic on
+   * POSIX and best-effort atomic (REPLACE_EXISTING) on Windows.
+   */
+  const tempFile = `${SEATS_FILE}.tmp-${process.pid}`;
   try {
-    await fs.promises.writeFile(SEATS_FILE, JSON.stringify(layoutData, null, 2), 'utf-8');
+    await ensureSeatsDirectory();
+    await fs.promises.writeFile(tempFile, JSON.stringify(sanitizedLayout, null, 2), 'utf-8');
+    await fs.promises.rename(tempFile, SEATS_FILE);
     logger.info(`[Seats] Successfully saved layout to ${SEATS_FILE}`);
-    cachedLayout = layoutData;
+    cachedLayout = sanitizedLayout;
     return true;
   } catch (err) {
     logger.error(`[Seats] Failed to write layout to ${SEATS_FILE}: ${err}`);
+    try { await fs.promises.unlink(tempFile); } catch { /* temp file already gone */ }
     return false;
   }
 };
@@ -319,7 +412,7 @@ const loadSeatsLayout = async (): Promise<ClassroomLayout> => {
       if (!Array.isArray(parsed.offTaskKeywords)) {
         parsed.offTaskKeywords = DEFAULT_OFFTASK_KEYWORDS;
       }
-      cachedLayout = parsed as ClassroomLayout;
+      cachedLayout = sanitizeLayoutForPersistence(parsed as ClassroomLayout);
       return cachedLayout;
     }
   } catch (err) {
@@ -332,19 +425,37 @@ const loadSeatsLayout = async (): Promise<ClassroomLayout> => {
 };
 
 app.get('/api/health', (req, res) => {
-  res.json({ status: 'ok', time: Date.now(), seatsFile: SEATS_FILE });
+  const discovery = discoveryService.getHealth();
+  res.json({
+    status: discovery.listening ? 'ok' : 'degraded',
+    time: Date.now(),
+    components: {
+      http: { listening: server.listening },
+      discovery,
+      websocket: {
+        authenticatedAgents: agentSockets.size,
+        activeViewerTargets: viewerSockets.size,
+      },
+      snapshots: {
+        cacheKeys: snapshotCache.size,
+        maxKeys: SNAPSHOT_CACHE_MAX_KEYS,
+        ttlMs: SNAPSHOT_CACHE_TTL_MS,
+      },
+      broadcast: { active: broadcastStreamer.isActive() },
+    },
+  });
 });
 
 app.get('/api/server-info', (req, res) => {
   res.json({
-    version: '5.4.6',
+    version: '5.5.0',
     teacherIp: activeTeacherIp,
     port: PORT,
     nicName: activeNicName,
   });
 });
 
-app.get('/api/layout', async (req, res) => {
+app.get('/api/layout', requireTeacherAuth, async (req, res) => {
   const layout = await loadSeatsLayout();
   res.json({ success: true, layout, file: SEATS_FILE });
 });
@@ -564,6 +675,7 @@ app.get('/api/share/download/:fileId/:filename', async (req, res) => {
 // Route: Receive outbound JPEG snapshots pushed from student agents
 app.post(
   '/api/agent/snapshot',
+  requireAgentSnapshotAuth,
   express.raw({ type: ['image/jpeg', 'application/octet-stream', '*/*'], limit: '2mb' }),
   (req, res) => {
     const rawMac = (req.headers['x-agent-mac'] as string) || '';
@@ -583,8 +695,9 @@ app.post(
     }
 
     if (buffer && buffer.length > 0) {
-      if (mac) snapshotCache.set(mac, { buffer, timestamp: Date.now() });
-      if (ip) snapshotCache.set(ip, { buffer, timestamp: Date.now() });
+      const entry = { buffer, timestamp: Date.now() };
+      storeSnapshot(mac, entry);
+      storeSnapshot(ip, entry);
       res.status(200).json({ status: 'ok' });
     } else {
       res.status(400).json({ error: 'empty snapshot' });
@@ -593,36 +706,50 @@ app.post(
 );
 
 // Route: Serve cached JPEG snapshots to Teacher Browser UI (with on-demand proxy fallback)
-app.get(['/api/snapshot/:id', '/api/snapshot'], async (req, res) => {
+app.get(['/api/snapshot/:id', '/api/snapshot'], requireTeacherAuth, async (req, res) => {
+  pruneSnapshotCache();
   const rawId = req.params.id || (req.query.id as string) || (req.query.mac as string) || (req.query.ip as string) || '';
   const normalizedId = normalizeTarget(rawId);
-  let cachedEntry = snapshotCache.get(normalizedId) || snapshotCache.get(rawId);
+  const wantsHighRes = req.query.full === '1' || req.query.highres === '1';
+  let cachedEntry = getSnapshotCached(normalizedId) || getSnapshotCached(rawId);
 
-  // If not in cache or older than 3 seconds, perform fast on-demand proxy fetch from agent port
-  if (!cachedEntry || Date.now() - cachedEntry.timestamp >= 3000) {
+  // High-resolution requests always bypass the thumbnail cache. Ordinary
+  // requests proxy only when the authenticated outbound cache is stale.
+  if (wantsHighRes || !cachedEntry || Date.now() - cachedEntry.timestamp >= 3000) {
     const dev = discoveryService.getDevices().find(
       (d) => normalizeTarget(d.mac) === normalizedId || d.ip === rawId || d.hostname === rawId
     );
     if (dev && dev.ip) {
       const port = dev.port || 8080;
       try {
-        const agentUrl = `http://${dev.ip}:${port}/snapshot`;
+        const agentUrl = `http://${dev.ip}:${port}/snapshot${wantsHighRes ? '?full=1' : ''}`;
         const controller = new AbortController();
-        const timeout = setTimeout(() => controller.abort(), 1200);
-        const resp = await fetch(agentUrl, { signal: controller.signal });
+        const timeout = setTimeout(() => controller.abort(), wantsHighRes ? 3000 : 1200);
+        const headers: Record<string, string> = {};
+        if (dev.token) headers['X-Auth-Token'] = dev.token;
+        const resp = await fetch(agentUrl, { signal: controller.signal, headers });
         clearTimeout(timeout);
         if (resp.ok) {
           const ab = await resp.arrayBuffer();
           const buffer = Buffer.from(ab);
+          if (wantsHighRes) {
+            res.setHeader('Content-Type', 'image/jpeg');
+            res.setHeader('Cache-Control', 'no-cache, no-store, must-revalidate');
+            return res.send(buffer);
+          }
           cachedEntry = { buffer, timestamp: Date.now() };
-          snapshotCache.set(normalizedId, cachedEntry);
-          if (dev.mac) snapshotCache.set(normalizeTarget(dev.mac), cachedEntry);
-          if (dev.ip) snapshotCache.set(dev.ip, cachedEntry);
+          storeSnapshot(normalizedId, cachedEntry);
+          if (dev.mac) storeSnapshot(normalizeTarget(dev.mac), cachedEntry);
+          if (dev.ip) storeSnapshot(dev.ip, cachedEntry);
         }
       } catch {
         // Fall through to existing cache if available
       }
     }
+  }
+
+  if (wantsHighRes) {
+    return res.status(502).json({ error: 'High-resolution snapshot unavailable' });
   }
 
   // Graceful return from snapshot cache
@@ -715,82 +842,20 @@ app.get(['/api/agent/:id/logs', '/api/agent/logs'], requireTeacherAuth, async (r
 
 // Route: One-click PowerShell installation script for Student PCs
 app.get('/install-agent.ps1', (req, res) => {
-  let host = req.headers.host || `${req.hostname}:${PORT}`;
-  if (activeTeacherIp && activeTeacherIp !== '127.0.0.1' && (host.startsWith('localhost') || host.startsWith('127.0.0.1'))) {
-    host = `${activeTeacherIp}:${PORT}`;
-  }
-  const hmacSecret = tokenAuth.getHmacSecret();
-  const script = `# ========================================================
-# GridSight Agent One-Click Pull & Launch Script (v5.4.6)
-# ========================================================
-$ErrorActionPreference = "SilentlyContinue"
-$serverHost = "${host}"
-$exeUrl = "http://$serverHost/download/gs-agent.exe"
-$destDir = "$env:TEMP"
-$destPath = "$destDir\\gs-agent.exe"
-$envPath = "$destDir\\gs-agent.env"
-
-Write-Host "=======================================================" -ForegroundColor Cyan
-Write-Host "  GridSight Student Agent v5.4.6 部署與啟動程序" -ForegroundColor Cyan
-Write-Host "=======================================================" -ForegroundColor Cyan
-Write-Host "[GridSight] 正在終止舊版 gs-agent 行程..." -ForegroundColor Yellow
-
-# Kill all previous gs-agent instances completely
-taskkill /F /IM gs-agent.exe /T 2>$null | Out-Null
-Start-Sleep -Milliseconds 500
-
-Write-Host "[GridSight] 正在從 $exeUrl 下載最新版 gs-agent.exe..." -ForegroundColor Cyan
-[Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12 -bor [Net.SecurityProtocolType]::Tls11 -bor [Net.SecurityProtocolType]::Tls
-
-# Download agent binary with error handling
-try {
-    if (Test-Path $destPath) { Remove-Item $destPath -Force }
-    $oldEAP = $ErrorActionPreference
-    $ErrorActionPreference = "Stop"
-    Invoke-WebRequest -Uri $exeUrl -OutFile $destPath -UseBasicParsing
-    $ErrorActionPreference = $oldEAP
-} catch {
-    Write-Host "[GridSight] ❌ 下載學生端程式失敗！請確認與教師端伺服器 (http://$serverHost) 連線正常。" -ForegroundColor Red
-    Write-Host "[GridSight] 錯誤詳情: $_" -ForegroundColor Red
-    Exit
-}
-
-# Verify downloaded executable size (ensure it's not a small error page HTML/JSON)
-if (!(Test-Path $destPath) -or (Get-Item $destPath).Length -lt 10240) {
-    Write-Host "[GridSight] ❌ 下載學生端程式錯誤：下載的檔案無效或大小異常。" -ForegroundColor Red
-    if (Test-Path $destPath) {
-        $content = Get-Content $destPath -TotalCount 5
-        Write-Host "[GridSight] 伺服器回應內容: $content" -ForegroundColor Red
-        Remove-Item $destPath -Force
-    }
-    Exit
-}
-
-# Write HMAC secret to .env so agent can verify TOKEN_GRANT signatures
-$hmacSecret = "${hmacSecret}"
-Set-Content -Path $envPath -Value "HMAC_SECRET=$hmacSecret" -NoNewline
-Add-Content -Path $envPath -Value "TEACHER_IP=$serverHost"
-Write-Host "[GridSight] 已寫入 HMAC 驗證設定至 $envPath" -ForegroundColor DarkGray
-
-# Configure Firewall
-try {
-    netsh advfirewall firewall delete rule name="GridSight Agent" 2>$null | Out-Null
-    netsh advfirewall firewall delete rule name="GridSight Agent Out" 2>$null | Out-Null
-    netsh advfirewall firewall add rule name="GridSight Agent" dir=in action=allow program="$destPath" enable=yes profile=any protocol=any 2>$null | Out-Null
-    netsh advfirewall firewall add rule name="GridSight Agent Out" dir=out action=allow program="$destPath" enable=yes profile=any protocol=any 2>$null | Out-Null
-} catch {}
-
-Write-Host "[GridSight] 正在啟動最新版 gs-agent.exe (v5.4.6)..." -ForegroundColor Green
-Start-Process -FilePath $destPath -WorkingDirectory $destDir -WindowStyle Hidden
-
-Start-Sleep -Seconds 1
-$proc = Get-Process -Name "gs-agent" -ErrorAction SilentlyContinue
-if ($proc) {
-    Write-Host "[GridSight] ✅ 學生端代理程式 (v5.4.6) 已成功在背景啟動！ (PID: $($proc[0].Id))" -ForegroundColor Green
-} else {
-    Write-Host "[GridSight] ⚠️ 警告：無法確認背景行程狀態，請檢查防毒軟體或權限設定。" -ForegroundColor Yellow
-}
-`;
+  const socketAddress = req.socket.localAddress?.replace(/^::ffff:/, '') || '';
+  const candidateHost = activeTeacherIp && activeTeacherIp !== '127.0.0.1'
+    ? activeTeacherIp
+    : socketAddress && socketAddress !== '127.0.0.1' && socketAddress !== '::1'
+      ? socketAddress
+      : req.hostname;
+  const teacherHost = /^[A-Za-z0-9._-]+$/.test(candidateHost) ? candidateHost : '127.0.0.1';
+  const script = buildInstallAgentScript({
+    serverHost: `${teacherHost}:${PORT}`,
+    teacherHost,
+    teacherPort: PORT,
+    hmacSecret: tokenAuth.getHmacSecret(),
+    version: '5.5.0',
+  });
   res.setHeader('Content-Type', 'text/plain; charset=utf-8');
   res.send(script);
 });
@@ -1026,12 +1091,17 @@ async function bootstrap() {
   discoveryService.start(activeTeacherIp);
 
   // 3. Start HTTP & WebSocket Server
+  server.once('error', (err) => {
+    logger.error(`[GridSight Server] HTTP/WebSocket listen failed: ${err.message}`);
+    discoveryService.stop();
+    process.exitCode = 1;
+  });
   server.listen(PORT, boundHost, () => {
     const localUrl = `http://localhost:${PORT}`;
     const lanUrl = `http://${activeTeacherIp}:${PORT}`;
 
     logger.info(`=============================================================`);
-    logger.info(`  🚀 GridSight Teacher Console v5.4.6`);
+    logger.info(`  🚀 GridSight Teacher Console v5.5.0`);
     logger.info(`  綁定網路卡 (NIC): ${activeNicName} (${activeTeacherIp})`);
     logger.info(`  本機控制台網址:   ${localUrl}`);
     logger.info(`  學生連線網址:     ${lanUrl}/join`);
@@ -1047,6 +1117,28 @@ async function bootstrap() {
   });
 }
 
+let shuttingDown = false;
+const shutdown = async (signal: string) => {
+  if (shuttingDown) return;
+  shuttingDown = true;
+  logger.info(`[GridSight Server] Received ${signal}; shutting down cleanly`);
+  discoveryService.stop();
+  broadcastStreamer.stopStream();
+  for (const socket of agentSockets.values()) socket.close(1001, 'Server shutting down');
+  for (const viewers of viewerSockets.values()) {
+    for (const socket of viewers) socket.close(1001, 'Server shutting down');
+  }
+  await new Promise<void>((resolve) => {
+    if (!server.listening) return resolve();
+    server.close(() => resolve());
+  });
+};
+
 if (process.argv[1] && path.resolve(process.argv[1]) === path.resolve(fileURLToPath(import.meta.url))) {
-  bootstrap();
+  process.once('SIGINT', () => void shutdown('SIGINT'));
+  process.once('SIGTERM', () => void shutdown('SIGTERM'));
+  bootstrap().catch((err) => {
+    logger.error(`[GridSight Server] Bootstrap failed: ${err instanceof Error ? err.message : String(err)}`);
+    process.exitCode = 1;
+  });
 }

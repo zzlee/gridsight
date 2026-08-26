@@ -24,6 +24,8 @@ private:
     void ConnectOutboundLoop();
     void StreamLoop();
     void ReceiveCommands(uintptr_t sock_fd);
+    void HandleCommandMessage(uintptr_t sock_fd, const std::string& message);
+    bool SendWsClientFrame(uintptr_t sock_fd, uint8_t opcode, const uint8_t* data, size_t len);
     void SendWsClientBinary(uintptr_t sock_fd, const uint8_t* data, size_t len);
     void SendWsClientText(uintptr_t sock_fd, const std::string& text);
 
@@ -38,10 +40,11 @@ private:
     std::thread outbound_thread_;
     std::thread stream_thread_;
 
-    uintptr_t listen_fd_ = 0;
+    std::atomic<uintptr_t> listen_fd_{0};
     uintptr_t active_client_fd_ = 0;
     uintptr_t outbound_sock_ = 0;
     std::mutex client_mutex_;
+    std::mutex send_mutex_;
     std::mutex teacher_mutex_;
 
     std::string teacher_host_;

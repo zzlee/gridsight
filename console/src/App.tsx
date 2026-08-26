@@ -119,15 +119,6 @@ export const App: React.FC = () => {
     }));
   };
 
-  const handleRefreshAuth = (device: StudentDevice) => {
-    // Generate and inject new dynamic RAM token
-    const newToken = Math.random().toString(36).substring(2) + Math.random().toString(36).substring(2);
-    setLayout((prev) => ({
-      ...prev,
-      seats: prev.seats.map((s) => (s.id === device.id ? { ...s, token: newToken } : s)),
-    }));
-  };
-
   const handleUnbindSeat = (id: string) => {
     handleReturnToPool(id);
   };
@@ -588,7 +579,6 @@ export const App: React.FC = () => {
         onClearSelection={handleClearSelection}
         onSelectAll={handleSelectAll}
         onFocusStudent={setFocusDevice}
-        onRefreshAuth={handleRefreshAuth}
         onUnbindSeat={handleUnbindSeat}
         onOpenSpecs={setSpecsDevice}
         onEditSeat={(device) => setEditingSeat(device)}

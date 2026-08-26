@@ -21,6 +21,12 @@ ScreenCapturer::~ScreenCapturer() {
 
 bool ScreenCapturer::Initialize() {
     std::lock_guard<std::mutex> lock(capture_mutex_);
+    return InitializeLocked();
+}
+
+bool ScreenCapturer::InitializeLocked() {
+    if (initialized_) return true;
+    ReleaseLocked();
 #ifdef _WIN32
     Utils::EnableDPIAwareness();
 
@@ -126,20 +132,22 @@ bool ScreenCapturer::Initialize() {
     dxgi_device->Release();
 
     initialized_ = true;
+    frame_ready_ = false;
     Utils::Log("INFO", "ScreenCapturer initialized DXGI: " + std::to_string(screen_width_) + "x" + std::to_string(screen_height_));
     return true;
 #else
     screen_width_ = 1920;
     screen_height_ = 1080;
     initialized_ = true;
+    frame_ready_ = false;
     return true;
 #endif
 }
 
 bool ScreenCapturer::CaptureFrame(FrameData& out_frame) {
     std::lock_guard<std::mutex> lock(capture_mutex_);
-    if (!initialized_) {
-        if (!Initialize()) return false;
+    if (!initialized_ && !InitializeLocked()) {
+        return false;
     }
 
     out_frame.width = screen_width_;
@@ -163,21 +171,31 @@ bool ScreenCapturer::CaptureFrame(FrameData& out_frame) {
     HRESULT hr = dup->AcquireNextFrame(33, &frame_info, &desktop_resource);
     if (FAILED(hr)) {
         if (hr == DXGI_ERROR_WAIT_TIMEOUT) {
-            // Screen is static; reuse previous staging texture frame
+            // A timeout means the desktop is unchanged. Reuse the staging
+            // texture only after at least one real frame has populated it.
+            if (!frame_ready_) return false;
         } else {
             Utils::Log("ERROR", "DXGI AcquireNextFrame failed with HR: " + std::to_string(hr) + ". Reacquiring...");
-            ReacquireDuplication();
+            if (!ReacquireDuplicationLocked()) {
+                Utils::Log("ERROR", "DXGI duplication reacquisition failed; capture will retry on the next request");
+            }
             return false;
         }
-    } else if (hr == S_OK && desktop_resource) {
-        ID3D11Texture2D* desktop_tex = nullptr;
-        hr = desktop_resource->QueryInterface(__uuidof(ID3D11Texture2D), (void**)&desktop_tex);
-        if (SUCCEEDED(hr)) {
-            context->CopyResource(staging_tex, desktop_tex);
-            desktop_tex->Release();
+    } else if (hr == S_OK) {
+        bool copied_frame = false;
+        if (desktop_resource) {
+            ID3D11Texture2D* desktop_tex = nullptr;
+            hr = desktop_resource->QueryInterface(__uuidof(ID3D11Texture2D), (void**)&desktop_tex);
+            if (SUCCEEDED(hr)) {
+                context->CopyResource(staging_tex, desktop_tex);
+                desktop_tex->Release();
+                copied_frame = true;
+            }
+            desktop_resource->Release();
         }
-        desktop_resource->Release();
         dup->ReleaseFrame();
+        if (!copied_frame) return false;
+        frame_ready_ = true;
     }
 
     D3D11_MAPPED_SUBRESOURCE map;
@@ -193,6 +211,7 @@ bool ScreenCapturer::CaptureFrame(FrameData& out_frame) {
             }
         }
         context->Unmap(staging_tex, 0);
+        last_success_timestamp_ms_ = Utils::GetCurrentTimestampMs();
         return true;
     }
 
@@ -208,17 +227,32 @@ bool ScreenCapturer::CaptureFrame(FrameData& out_frame) {
             out_frame.bgra_buffer[idx + 3] = 255;                      // A
         }
     }
+    frame_ready_ = true;
+    last_success_timestamp_ms_ = Utils::GetCurrentTimestampMs();
     return true;
 #endif
 }
 
-bool ScreenCapturer::ReacquireDuplication() {
-    Release();
-    return Initialize();
+CaptureStatus ScreenCapturer::GetStatus() const {
+    std::lock_guard<std::mutex> lock(capture_mutex_);
+    return {initialized_, frame_ready_, last_success_timestamp_ms_};
+}
+
+bool ScreenCapturer::ReacquireDuplicationLocked() {
+    ReleaseLocked();
+    return InitializeLocked();
 }
 
 void ScreenCapturer::Release() {
+    std::lock_guard<std::mutex> lock(capture_mutex_);
+    ReleaseLocked();
+}
+
+void ScreenCapturer::ReleaseLocked() {
     initialized_ = false;
+    frame_ready_ = false;
+    screen_width_ = 0;
+    screen_height_ = 0;
 #ifdef _WIN32
     if (dxgi_dup_) {
         ((IDXGIOutputDuplication*)dxgi_dup_)->Release();

@@ -30,6 +30,7 @@ private:
     std::atomic<bool> overlay_active_{false};
     std::thread receive_thread_;
     std::thread ui_thread_;
+    std::atomic<uintptr_t> socket_fd_{0};
     void* hwnd_overlay_ = nullptr;
     void* decoder_ = nullptr;
 

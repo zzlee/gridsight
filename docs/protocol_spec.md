@@ -125,7 +125,7 @@ sequenceDiagram
 ```json
 {
   "type": "BEACON",
-  "version": "5.4.6",
+  "version": "5.5.0",
   "hostname": "PC-01",
   "ip": "192.168.1.101",
   "mac": "00:1A:2B:3C:4D:01",
@@ -133,7 +133,7 @@ sequenceDiagram
   "timestamp": 1723812345678,
   "active_window": "Visual Studio Code - main.cpp",
   "specs": {
-    "agent_version": "5.4.6",
+    "agent_version": "5.5.0",
     "os": "Windows 11 Pro 64-bit",
     "uptime": 3600,
     "cpu": {
@@ -186,7 +186,7 @@ sequenceDiagram
 - **錯誤處理**：若記憶體無快取且嘗試 Agent Proxy 也失敗，回傳 `404 Not Found` `{"error":"No snapshot available"}`
 
 ### 3.5 學生端反向 WebSocket (`/ws/agent`)
-- **端點**：`ws://<TEACHER_IP>:3000/ws/agent?mac=<MAC>&ip=<IP>&token=<TOKEN>`
+- **端點**：`ws://<TEACHER_IP>:3000/ws/agent?mac=<MAC>&ip=<IP>&token=<TOKEN>`（Upgrade 時驗證 MAC+token；教師端 viewer 端點 `/ws/stream/<TARGET_MAC>` 則驗教師 session token）
 - **方向**：學生端 ➔ 教師端 (Outbound WS)
 - **訊息類型**：
   - **二進位訊息 (Binary)**：H.264 NAL Unit (帶 `0x00000001` 起始碼之 Annex B 格式)。
@@ -204,7 +204,7 @@ sequenceDiagram
   - 支持 Query 參數 `full=1` 或 `highres=1`。若指定高解析度，則即時擷取 1:1 螢幕解析度並編碼 JPEG (Quality 85) 回傳；否則回傳本地快取之 480×270 縮圖。
   - 支持 `X-Auth-Token` Header 鑑權。
 - **`GET /status`**：
-  - 回傳學生端硬體遙測數據 (JSON 格式)。
+  - 回傳學生端硬體遙測數據 (JSON 格式)，並包含各元件 named-heartbeat 年齡（`capture-worker`、`snapshot-encode`、`ws-connected` 等）與 `capture_degraded` 旗標，供教師端 `/api/health` 與 watchdog 判讀元件級健康狀態。
 - **`GET /ping`**：
   - 回傳 `{"status":"ok","service":"GridSight Beacon"}` 用於探針檢測。
 
@@ -213,8 +213,8 @@ sequenceDiagram
 ## ⚠️ 4. 現有實作限制與 TODOs (Implementation Limitations)
 
 1. **RTP 廣播渲染管線 (RTPReceiver Frame Rendering)**：
-   - 目前 `beacon/src/rtp_receiver.cpp` 已完整實作 **UDP Socket 監聽**、**IGMP 權限加入 (`IP_ADD_MEMBERSHIP`)**、**RTP Header 解析**、**RFC 6184 FU-A NALU 重組** 及 **Win32 滿版 overlay 彈窗**。
-   - 然而，`RTPReceiver::RenderFrame(const uint8_t* h264_data, size_t size)` 目前仍為**空函式 Stub (TODO)**。實際將重組後之 H.264 NALU 送入 Windows DirectShow / MFT / D3D11 進行軟硬體解碼繪製至 overlay 視窗之邏輯尚待完成。
+   - 已完整實作 **UDP Socket 監聽**、**IGMP 權限加入 (`IP_ADD_MEMBERSHIP)`、**RTP Header 解析**、**RFC 6184 FU-A / STAP-A 重組**（以 marker 位元組裝 Access Unit 後整幀解碼）、**SSRC 鎖定與逾時重新鎖定**（串流更換 SSRC 時執行完整狀態 reset）及 **Win32 滿版 overlay 彈窗 + Media Foundation MFT H.264 解碼渲染**。
+   - 序號中斷或 FU-A 不完整時丟棄該幀，等待下一個 IDR 自動恢復。
 
 2. **多網卡宣告與環境適應**：
    - 學生端預設以主要網卡 `Utils::GetSystemNetworkInfo()` 回傳 IP 進行廣播。若學生機具備虛擬網卡 (如 Docker, VMware)，需確保優先選用真實物理 LAN 網卡。

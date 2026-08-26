@@ -51,6 +51,9 @@ export class MulticastDiscoveryService {
   private tokenAuth: TokenAuthority;
   private onDeviceDiscovered?: ((device: DiscoveredAgent) => void) | undefined;
   private activeDevices = new Map<string, DiscoveredAgent>(); // key: mac or ip
+  private listening = false;
+  private joinedRoutes = 0;
+  private lastError = '';
 
   constructor(tokenAuth: TokenAuthority, onDeviceDiscovered?: ((device: DiscoveredAgent) => void) | undefined) {
     this.tokenAuth = tokenAuth;
@@ -98,7 +101,16 @@ export class MulticastDiscoveryService {
         joinedCount++;
       } catch {}
 
+      this.listening = true;
+      this.joinedRoutes = joinedCount;
+      this.lastError = '';
       logger.info(`[Discovery] Multicast listener joined ${this.multicastAddress}:${this.port} across ${joinedCount} network route(s)`);
+    });
+
+    this.server.on('error', (err) => {
+      this.listening = false;
+      this.lastError = err.message;
+      logger.error(`[Discovery] UDP socket error: ${err.message}`);
     });
 
     this.server.on('message', (msg, rinfo) => {
@@ -150,6 +162,15 @@ export class MulticastDiscoveryService {
     this.server.bind(this.port);
   }
 
+  getHealth() {
+    return {
+      listening: this.listening,
+      joinedRoutes: this.joinedRoutes,
+      lastError: this.lastError || undefined,
+      activeDevices: this.activeDevices.size,
+    };
+  }
+
   getDevices(): DiscoveredAgent[] {
     const now = Date.now();
     const result: DiscoveredAgent[] = [];
@@ -165,6 +186,8 @@ export class MulticastDiscoveryService {
   }
 
   stop() {
+    this.listening = false;
+    this.joinedRoutes = 0;
     if (this.server) {
       this.server.close();
       this.server = null;

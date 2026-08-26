@@ -10,6 +10,7 @@
 #include <mutex>
 #include <algorithm>
 #include <limits>
+#include <exception>
 
 #ifdef _WIN32
 #include <winsock2.h>
@@ -798,14 +799,98 @@ void RTPReceiver::FlushAccessUnit() {
 }
 
 bool RTPReceiver::Start() {
-    if (running_.exchange(true)) return true;
-    receive_thread_ = std::thread(&RTPReceiver::ReceiveLoop, this);
-    Utils::Log("INFO", "RTPReceiver listening on " + multicast_ip_ + ":" + std::to_string(port_));
+    if (running_.exchange(true)) return socket_fd_.load() != 0;
+
+    SOCKET sock = socket(AF_INET, SOCK_DGRAM, IPPROTO_UDP);
+    if (sock == INVALID_SOCKET) {
+        Utils::Log("ERROR", "RTPReceiver failed to create UDP socket");
+        running_ = false;
+        return false;
+    }
+
+    int reuse = 1;
+#ifdef _WIN32
+    setsockopt(sock, SOL_SOCKET, SO_REUSEADDR, (const char*)&reuse, sizeof(reuse));
+    DWORD timeout = 500;
+    setsockopt(sock, SOL_SOCKET, SO_RCVTIMEO, (const char*)&timeout, sizeof(timeout));
+#else
+    setsockopt(sock, SOL_SOCKET, SO_REUSEADDR, &reuse, sizeof(reuse));
+    struct timeval tv = {0, 500000};
+    setsockopt(sock, SOL_SOCKET, SO_RCVTIMEO, &tv, sizeof(tv));
+#endif
+
+    sockaddr_in local_addr;
+    memset(&local_addr, 0, sizeof(local_addr));
+    local_addr.sin_family = AF_INET;
+    local_addr.sin_addr.s_addr = INADDR_ANY;
+    local_addr.sin_port = htons(port_);
+    if (bind(sock, (sockaddr*)&local_addr, sizeof(local_addr)) == SOCKET_ERROR) {
+        Utils::Log("ERROR", "RTPReceiver bind failed on port " + std::to_string(port_));
+        closesocket(sock);
+        running_ = false;
+        return false;
+    }
+
+    in_addr multicast_addr;
+    if (inet_pton(AF_INET, multicast_ip_.c_str(), &multicast_addr) != 1) {
+        Utils::Log("ERROR", "RTPReceiver invalid multicast IPv4 address: " + multicast_ip_);
+        closesocket(sock);
+        running_ = false;
+        return false;
+    }
+
+    bool joined = false;
+    NetworkInfo net_info = Utils::GetSystemNetworkInfo();
+    in_addr interface_addr;
+    if (!net_info.ip.empty() && net_info.ip != "127.0.0.1" &&
+        inet_pton(AF_INET, net_info.ip.c_str(), &interface_addr) == 1) {
+        struct ip_mreq nic_membership;
+        memset(&nic_membership, 0, sizeof(nic_membership));
+        nic_membership.imr_multiaddr = multicast_addr;
+        nic_membership.imr_interface = interface_addr;
+        joined = setsockopt(sock, IPPROTO_IP, IP_ADD_MEMBERSHIP,
+                            (char*)&nic_membership, sizeof(nic_membership)) != SOCKET_ERROR;
+    }
+    if (!joined) {
+        struct ip_mreq any_membership;
+        memset(&any_membership, 0, sizeof(any_membership));
+        any_membership.imr_multiaddr = multicast_addr;
+        any_membership.imr_interface.s_addr = INADDR_ANY;
+        joined = setsockopt(sock, IPPROTO_IP, IP_ADD_MEMBERSHIP,
+                            (char*)&any_membership, sizeof(any_membership)) != SOCKET_ERROR;
+    }
+    if (!joined) {
+        Utils::Log("ERROR", "RTPReceiver failed to join IGMP multicast group " + multicast_ip_);
+        closesocket(sock);
+        running_ = false;
+        return false;
+    }
+
+    socket_fd_.store((uintptr_t)sock);
+    try {
+        receive_thread_ = std::thread(&RTPReceiver::ReceiveLoop, this);
+    } catch (const std::exception& err) {
+        uintptr_t owned_socket = socket_fd_.exchange(0);
+        if (owned_socket != 0 && (SOCKET)owned_socket != INVALID_SOCKET) {
+            closesocket((SOCKET)owned_socket);
+        }
+        running_ = false;
+        Utils::Log("ERROR", "RTPReceiver worker startup failed: " + std::string(err.what()));
+        return false;
+    }
+
+    Utils::Log("INFO", "RTPReceiver listening on " + multicast_ip_ + ":" + std::to_string(port_) + " with IGMP membership active");
     return true;
 }
 
 void RTPReceiver::Stop() {
     if (!running_.exchange(false)) return;
+
+    uintptr_t owned_socket = socket_fd_.exchange(0);
+    if (owned_socket != 0 && (SOCKET)owned_socket != INVALID_SOCKET) {
+        closesocket((SOCKET)owned_socket);
+    }
+    if (receive_thread_.joinable()) receive_thread_.join();
 
     rtp_stream_initialized_ = false;
     rtp_last_seq_ = 0;
@@ -814,9 +899,6 @@ void RTPReceiver::Stop() {
     fua_last_seq_ = 0;
     fua_timestamp_ = 0;
     fua_ssrc_ = 0;
-
-    if (receive_thread_.joinable()) receive_thread_.join();
-
     access_unit_buffer_.clear();
     access_unit_active_ = false;
     access_unit_has_idr_ = false;
@@ -832,58 +914,28 @@ void RTPReceiver::Stop() {
 }
 
 void RTPReceiver::ReceiveLoop() {
-    SOCKET sock = socket(AF_INET, SOCK_DGRAM, IPPROTO_UDP);
-    if (sock == INVALID_SOCKET) {
-        Utils::Log("ERROR", "RTPReceiver failed to create UDP socket");
+    SOCKET sock = (SOCKET)socket_fd_.load();
+    if (sock == INVALID_SOCKET || sock == 0) {
+        Utils::Log("ERROR", "RTPReceiver worker started without a valid socket");
         return;
     }
-
-    int reuse = 1;
-#ifdef _WIN32
-    setsockopt(sock, SOL_SOCKET, SO_REUSEADDR, (const char*)&reuse, sizeof(reuse));
-    DWORD timeout = 500;
-    setsockopt(sock, SOL_SOCKET, SO_RCVTIMEO, (const char*)&timeout, sizeof(timeout));
-#else
-    setsockopt(sock, SOL_SOCKET, SO_REUSEADDR, &reuse, sizeof(reuse));
-    struct timeval tv;
-    tv.tv_sec = 0;
-    tv.tv_usec = 500000;
-    setsockopt(sock, SOL_SOCKET, SO_RCVTIMEO, &tv, sizeof(tv));
-#endif
-
-    sockaddr_in local_addr;
-    memset(&local_addr, 0, sizeof(local_addr));
-    local_addr.sin_family = AF_INET;
-    local_addr.sin_addr.s_addr = INADDR_ANY;
-    local_addr.sin_port = htons(port_);
-
-    if (bind(sock, (sockaddr*)&local_addr, sizeof(local_addr)) == SOCKET_ERROR) {
-        Utils::Log("ERROR", "RTPReceiver bind failed on port " + std::to_string(port_));
-        closesocket(sock);
-        return;
-    }
-
-    // Join IGMP Multicast group on INADDR_ANY and specific NIC
-    struct ip_mreq mreq;
-    memset(&mreq, 0, sizeof(mreq));
-    mreq.imr_multiaddr.s_addr = inet_addr(multicast_ip_.c_str());
-    mreq.imr_interface.s_addr = INADDR_ANY;
-    setsockopt(sock, IPPROTO_IP, IP_ADD_MEMBERSHIP, (char*)&mreq, sizeof(mreq));
-
-    NetworkInfo net_info = Utils::GetSystemNetworkInfo();
-    if (!net_info.ip.empty()) {
-        struct ip_mreq mreq_nic;
-        memset(&mreq_nic, 0, sizeof(mreq_nic));
-        mreq_nic.imr_multiaddr.s_addr = inet_addr(multicast_ip_.c_str());
-        inet_pton(AF_INET, net_info.ip.c_str(), &mreq_nic.imr_interface);
-        setsockopt(sock, IPPROTO_IP, IP_ADD_MEMBERSHIP, (char*)&mreq_nic, sizeof(mreq_nic));
-    }
-    Utils::Log("INFO", "RTPReceiver joined IGMP multicast group " + multicast_ip_);
 
     std::vector<uint8_t> rtp_buffer(65536);
     std::vector<uint8_t> fua_reassembly_buffer;
     std::vector<uint8_t> cached_sps_pps;
     uint64_t last_packet_time = 0;
+
+    /*
+     * Time of the last packet that belonged to the currently
+     * locked SSRC. Used to decide whether a different SSRC
+     * should take over the stream (e.g. teacher console was
+     * restarted and now broadcasts under a new SSRC).
+     */
+    uint64_t last_accepted_stream_time = 0;
+
+    /* If we see no packets from the active SSRC for this long,
+     * allow any new SSRC to claim the receiver. */
+    constexpr uint64_t kStreamReacquireTimeoutMs = 5000;
 
     while (running_) {
         sockaddr_in from_addr;
@@ -907,6 +959,7 @@ void RTPReceiver::ReceiveLoop() {
         ++g_pkt_count;
 
         last_packet_time = now;
+        Utils::UpdateHeartbeat("rtp-packet");
 
         if (!overlay_active_) {
             CreateFullScreenOverlayWindow();
@@ -930,21 +983,65 @@ void RTPReceiver::ReceiveLoop() {
                 "🎥 [RTP] New stream SSRC=" +
                 std::to_string(rtp_ssrc_));
         } else if (pkt.ssrc != rtp_ssrc_) {
-            Utils::Log(
-                "WARN",
-                "⚠️ [RTP] Ignoring packet from unexpected SSRC=" +
-                std::to_string(pkt.ssrc) +
-                ", active SSRC=" +
-                std::to_string(rtp_ssrc_));
+            const bool current_stream_stale =
+                last_accepted_stream_time == 0 ||
+                (now - last_accepted_stream_time >
+                 kStreamReacquireTimeoutMs);
 
-            /*
-             * Never allow a different SSRC to contaminate an
-             * in-progress FU-A frame.
-             */
-            fua_reassembly_buffer.clear();
-            fua_active_ = false;
+            if (current_stream_stale) {
+                /*
+                 * The previously locked sender is gone (broadcast
+                 * restarted, console rebooted, ...). Re-lock onto
+                 * the new SSRC with a FULL state reset so stale
+                 * fragments/parameter sets from the old stream can
+                 * never leak into decoding of the new one.
+                 */
+                Utils::Log(
+                    "INFO",
+                    "🎥 [RTP] Stream changed SSRC=" +
+                    std::to_string(rtp_ssrc_) +
+                    " -> " +
+                    std::to_string(pkt.ssrc) +
+                    "; performing full decoder state reset");
 
-            continue;
+                rtp_last_seq_ = pkt.sequence;
+                rtp_ssrc_ = pkt.ssrc;
+                last_accepted_stream_time = now;
+
+                fua_reassembly_buffer.clear();
+                fua_active_ = false;
+                fua_last_seq_ = 0;
+                fua_timestamp_ = 0;
+                fua_ssrc_ = 0;
+
+                access_unit_buffer_.clear();
+                access_unit_active_ = false;
+                access_unit_has_idr_ = false;
+                access_unit_corrupt_ = false;
+
+                /* New sender MUST deliver its own SPS/PPS before
+                 * any IDR can be decoded; dropping the old cache
+                 * prevents mixing parameter sets across streams. */
+                cached_sps_pps.clear();
+
+                /* Continue processing this first packet below. */
+            } else {
+                Utils::Log(
+                    "WARN",
+                    "⚠️ [RTP] Ignoring packet from unexpected SSRC=" +
+                    std::to_string(pkt.ssrc) +
+                    ", active SSRC=" +
+                    std::to_string(rtp_ssrc_));
+
+                /*
+                 * Never allow a different SSRC to contaminate an
+                 * in-progress FU-A frame.
+                 */
+                fua_reassembly_buffer.clear();
+                fua_active_ = false;
+
+                continue;
+            }
         }
 
         /*
@@ -987,6 +1084,7 @@ void RTPReceiver::ReceiveLoop() {
         }
 
         rtp_last_seq_ = pkt.sequence;
+        last_accepted_stream_time = now;
 
         const uint8_t* payload = pkt.payload;
         const size_t payload_len = pkt.payload_len;
@@ -1382,7 +1480,6 @@ void RTPReceiver::ReceiveLoop() {
     access_unit_has_idr_ = false;
     access_unit_corrupt_ = false;
 
-    closesocket(sock);
     CloseOverlayWindow();
 }
 
@@ -1452,6 +1549,7 @@ void RTPReceiver::RenderFrame(const uint8_t* h264_data, size_t size) {
     int w = 0, h = 0;
     H264DecoderMFT* dec = (H264DecoderMFT*)decoder_;
     if (dec && dec->DecodeFrame(h264_data, size, bgra, w, h)) {
+        Utils::UpdateHeartbeat("rtp-decode");
         {
             std::lock_guard<std::mutex> lock(g_frame_mutex);
             g_bgra_buffer = std::move(bgra);

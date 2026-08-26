@@ -18,7 +18,6 @@ interface GridCanvasProps {
   onClearSelection?: () => void;
   onSelectAll?: () => void;
   onFocusStudent: (device: StudentDevice) => void;
-  onRefreshAuth: (device: StudentDevice) => void;
   onUnbindSeat: (id: string) => void;
   onOpenSpecs?: (device: StudentDevice) => void;
   onEditSeat?: (device: StudentDevice) => void;
@@ -44,7 +43,6 @@ export const GridCanvas: React.FC<GridCanvasProps> = ({
   onClearSelection,
   onSelectAll,
   onFocusStudent,
-  onRefreshAuth,
   onUnbindSeat,
   onOpenSpecs,
   onEditSeat,
@@ -551,7 +549,6 @@ export const GridCanvas: React.FC<GridCanvasProps> = ({
                 isEditMode={mode === 'EDIT_LAYOUT'}
                 onSelect={onSelectStudent}
                 onDoubleClick={onFocusStudent}
-                onRefreshAuth={onRefreshAuth}
                 onUnbind={onUnbindSeat}
                 onOpenSpecs={onOpenSpecs}
                 onEditSeat={onEditSeat}

@@ -1,5 +1,6 @@
 import React, { useEffect, useRef, useState, useImperativeHandle, forwardRef } from 'react';
 import { StudentDevice } from '../../types';
+import { AuthService } from '../../services/authService';
 
 export interface WebCodecsPlayerHandle {
   captureSnapshot: () => string | null;
@@ -14,6 +15,8 @@ interface WebCodecsPlayerProps {
 
 export const WebCodecsPlayer = forwardRef<WebCodecsPlayerHandle, WebCodecsPlayerProps>(({ device, showDebugHud = false, onStreamStatusChange }, ref) => {
   const canvasRef = useRef<HTMLCanvasElement>(null);
+  const renderedFrameRef = useRef(false);
+  const statusRef = useRef<'Connecting' | 'Live 30FPS' | 'Snapshot Fallback' | 'Offline'>('Connecting');
   const [fps, setFps] = useState(0);
   const [latency, setLatency] = useState(0);
   const [decoderMode, setDecoderMode] = useState<'WebCodecs GPU' | 'Canvas Fallback'>('WebCodecs GPU');
@@ -27,7 +30,7 @@ export const WebCodecsPlayer = forwardRef<WebCodecsPlayerHandle, WebCodecsPlayer
 
   useImperativeHandle(ref, () => ({
     captureSnapshot: () => {
-      if (!canvasRef.current) return null;
+      if (!canvasRef.current || !renderedFrameRef.current) return null;
       try {
         return canvasRef.current.toDataURL('image/png');
       } catch (err) {
@@ -52,16 +55,24 @@ export const WebCodecsPlayer = forwardRef<WebCodecsPlayerHandle, WebCodecsPlayer
     let lastTime = performance.now();
     let decoder: VideoDecoder | null = null;
     let ws: WebSocket | null = null;
-    let animId: number | null = null;
+    let reconnectTimer: number | null = null;
+    let reconnectAttempt = 0;
+    let lastPacketReceivedAt = 0;
+    renderedFrameRef.current = false;
+    statusRef.current = 'Connecting';
 
-    // 1. Setup FPS counter interval
+    const reportStatus = (next: 'Connecting' | 'Live 30FPS' | 'Snapshot Fallback' | 'Offline') => {
+      statusRef.current = next;
+      setStreamStatus(next);
+      onStreamStatusChange?.(next, packetCount, renderCount);
+    };
+
+    // 1. Setup FPS counter interval without closing over a stale React state value.
     const statsInterval = setInterval(() => {
       const now = performance.now();
       const delta = (now - lastTime) / 1000;
       setFps(Math.round(renderCount / delta));
-      if (onStreamStatusChange) {
-        onStreamStatusChange(streamStatus, packetCount, renderCount);
-      }
+      onStreamStatusChange?.(statusRef.current, packetCount, renderCount);
       renderCount = 0;
       lastTime = now;
     }, 1000);
@@ -86,11 +97,17 @@ export const WebCodecsPlayer = forwardRef<WebCodecsPlayerHandle, WebCodecsPlayer
               }
               videoFrame.close();
               renderCount++;
+              renderedFrameRef.current = true;
+              if (lastPacketReceivedAt > 0) {
+                setLatency(Math.max(0, Math.round(performance.now() - lastPacketReceivedAt)));
+              }
+              if (statusRef.current !== 'Live 30FPS') reportStatus('Live 30FPS');
               setDebugStats((prev) => ({ ...prev, rendered: prev.rendered + 1 }));
             },
-            error: (e: any) => {
-              console.warn('[WebCodecsPlayer] Decoder error:', e);
+            error: (error: DOMException) => {
+              console.warn('[WebCodecsPlayer] Decoder error:', error);
               setDecoderMode('Canvas Fallback');
+              reportStatus('Snapshot Fallback');
             },
           });
 
@@ -112,134 +129,175 @@ export const WebCodecsPlayer = forwardRef<WebCodecsPlayerHandle, WebCodecsPlayer
 
     initDecoder();
 
-    // 3. Connect to Teacher Console WebSocket stream relay (Port 3000)
+    // 3. Connect to the authenticated Teacher Console relay. A successful
+    // handshake is only "Connecting"; Live is reported after a frame renders.
     const wsProtocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
     const streamTarget = device.mac || device.ip;
-    const wsUrl = `${wsProtocol}//${window.location.host}/ws/stream/${encodeURIComponent(streamTarget)}?token=${device.token || ''}`;
-    
-    try {
-      ws = new WebSocket(wsUrl);
-      ws.binaryType = 'arraybuffer';
+    const teacherToken = AuthService.getToken() || '';
+    const wsUrl = `${wsProtocol}//${window.location.host}/ws/stream/${encodeURIComponent(streamTarget)}?token=${encodeURIComponent(teacherToken)}`;
 
-      ws.onopen = () => {
-        if (!isSubscribed) return;
-        setStreamStatus('Live 30FPS');
-        setLatency(Math.floor(18 + Math.random() * 15));
-        if (onStreamStatusChange) onStreamStatusChange('Live 30FPS', packetCount, 0);
-      };
+    const scheduleReconnect = () => {
+      if (!isSubscribed || reconnectTimer !== null) return;
+      const delay = Math.min(10_000, 1000 * (2 ** reconnectAttempt));
+      reconnectAttempt = Math.min(reconnectAttempt + 1, 4);
+      reconnectTimer = window.setTimeout(() => {
+        reconnectTimer = null;
+        connectWebSocket();
+      }, delay);
+    };
 
-      ws.onmessage = (event) => {
-        if (!isSubscribed) return;
-        const buffer = event.data as ArrayBuffer;
-        const bytes = new Uint8Array(buffer);
-        packetCount++;
-        totalBytes += bytes.length;
+    const handleStreamPacket = (buffer: ArrayBuffer) => {
+      if (!isSubscribed) return;
+      const bytes = new Uint8Array(buffer);
+      packetCount++;
+      totalBytes += bytes.length;
+      lastPacketReceivedAt = performance.now();
 
-        // 1. Check if frame is MJPEG (starts with 0xFF, 0xD8)
-        if (bytes[0] === 0xff && bytes[1] === 0xd8) {
-          const blob = new Blob([buffer], { type: 'image/jpeg' });
-          createImageBitmap(blob).then((bitmap) => {
-            if (isSubscribed && ctx) {
-              if (canvas.width !== bitmap.width || canvas.height !== bitmap.height) {
-                canvas.width = bitmap.width;
-                canvas.height = bitmap.height;
-              }
-              ctx.drawImage(bitmap, 0, 0, canvas.width, canvas.height);
-              bitmap.close();
-              renderCount++;
-              setDecoderMode('Canvas Fallback');
-              setDebugStats((prev) => ({
-                ...prev,
-                packets: packetCount,
-                kbReceived: Math.round(totalBytes / 1024),
-                rendered: prev.rendered + 1,
-                lastNalType: 'MJPEG Live (0xFFD8)',
-              }));
-            }
-          });
+      if (bytes[0] === 0xff && bytes[1] === 0xd8) {
+        const blob = new Blob([buffer], { type: 'image/jpeg' });
+        createImageBitmap(blob).then((bitmap) => {
+          if (!isSubscribed) {
+            bitmap.close();
+            return;
+          }
+          if (canvas.width !== bitmap.width || canvas.height !== bitmap.height) {
+            canvas.width = bitmap.width;
+            canvas.height = bitmap.height;
+          }
+          ctx.drawImage(bitmap, 0, 0, canvas.width, canvas.height);
+          bitmap.close();
+          renderCount++;
+          renderedFrameRef.current = true;
+          setLatency(Math.max(0, Math.round(performance.now() - lastPacketReceivedAt)));
+          setDecoderMode('Canvas Fallback');
+          if (statusRef.current !== 'Live 30FPS') reportStatus('Live 30FPS');
+          setDebugStats((prev) => ({
+            ...prev,
+            packets: packetCount,
+            kbReceived: Math.round(totalBytes / 1024),
+            rendered: prev.rendered + 1,
+            lastNalType: 'MJPEG Live (0xFFD8)',
+          }));
+        }).catch((err) => console.warn('[WebCodecsPlayer] MJPEG decode error:', err));
+        return;
+      }
+
+      let isKeyFrame = false;
+      let nalTypeName = 'Delta (1)';
+      for (let i = 0; i < Math.min(bytes.length - 4, 128); i++) {
+        if (bytes[i] === 0 && bytes[i + 1] === 0 && (bytes[i + 2] === 1 || (bytes[i + 2] === 0 && bytes[i + 3] === 1))) {
+          const nalHeaderIndex = bytes[i + 2] === 1 ? i + 3 : i + 4;
+          const nalType = bytes[nalHeaderIndex] & 0x1f;
+          if (nalType === 5) {
+            isKeyFrame = true;
+            nalTypeName = 'IDR Keyframe (5)';
+          } else if (nalType === 7) {
+            isKeyFrame = true;
+            nalTypeName = 'SPS (7)';
+          } else if (nalType === 8) {
+            isKeyFrame = true;
+            nalTypeName = 'PPS (8)';
+          }
+          if (isKeyFrame) break;
+        }
+      }
+      if (isKeyFrame) hasReceivedKeyFrame = true;
+
+      setDebugStats((prev) => ({
+        ...prev,
+        packets: packetCount,
+        kbReceived: Math.round(totalBytes / 1024),
+        lastNalType: nalTypeName,
+      }));
+
+      if (hasReceivedKeyFrame && decoder && decoder.state === 'configured') {
+        try {
+          decoder.decode(new EncodedVideoChunk({
+            type: isKeyFrame ? 'key' : 'delta',
+            timestamp: performance.now() * 1000,
+            data: buffer,
+          }));
+        } catch (decErr) {
+          console.warn('[WebCodecsPlayer] Decode error:', decErr);
+        }
+      }
+    };
+
+    function connectWebSocket() {
+      if (!isSubscribed) return;
+      reportStatus(renderedFrameRef.current ? 'Snapshot Fallback' : 'Connecting');
+      try {
+        const nextWs = new WebSocket(wsUrl);
+        ws = nextWs;
+        nextWs.binaryType = 'arraybuffer';
+        nextWs.onopen = () => {
+          if (!isSubscribed || ws !== nextWs) return;
+          reconnectAttempt = 0;
+          reportStatus('Connecting');
+        };
+        nextWs.onmessage = (event) => {
+          if (isSubscribed && ws === nextWs && event.data instanceof ArrayBuffer) {
+            handleStreamPacket(event.data);
+          }
+        };
+        nextWs.onerror = () => {
+          if (isSubscribed && ws === nextWs && statusRef.current !== 'Live 30FPS') {
+            reportStatus('Snapshot Fallback');
+          }
+        };
+        nextWs.onclose = (event) => {
+          if (!isSubscribed || ws !== nextWs) return;
+          console.warn('[WebCodecsPlayer] WebSocket closed:', event.code, event.reason);
+          ws = null;
+          hasReceivedKeyFrame = false;
+          reportStatus('Snapshot Fallback');
+          scheduleReconnect();
+        };
+      } catch (err) {
+        console.warn('[WebCodecsPlayer] WebSocket setup failed:', err);
+        reportStatus('Snapshot Fallback');
+        scheduleReconnect();
+      }
+    }
+
+    // 4. Keep a real authenticated snapshot fallback updating while live
+    // frames are unavailable; this also avoids a permanently frozen canvas.
+    const isLive = () => statusRef.current === 'Live 30FPS';
+    const drawFallbackSnapshot = async () => {
+      if (!isSubscribed || isLive()) return;
+      try {
+        const response = await AuthService.fetchWithAuth(
+          `/api/snapshot/${encodeURIComponent(streamTarget)}?t=${Date.now()}`
+        );
+        if (!response.ok) return;
+        const bitmap = await createImageBitmap(await response.blob());
+        if (!isSubscribed || isLive()) {
+          bitmap.close();
           return;
         }
-
-        // 2. Scan entire chunk for NAL unit start codes (0x00 0x00 0x01 or 0x00 0x00 0x00 0x01)
-        let isKeyFrame = false;
-        let nalTypeName = 'Delta (1)';
-        for (let i = 0; i < Math.min(bytes.length - 4, 128); i++) {
-          if (bytes[i] === 0 && bytes[i + 1] === 0 && (bytes[i + 2] === 1 || (bytes[i + 2] === 0 && bytes[i + 3] === 1))) {
-            const nalHeaderIndex = bytes[i + 2] === 1 ? i + 3 : i + 4;
-            const nalType = bytes[nalHeaderIndex] & 0x1f;
-            if (nalType === 5) {
-              isKeyFrame = true;
-              nalTypeName = 'IDR Keyframe (5)';
-            } else if (nalType === 7) {
-              isKeyFrame = true;
-              nalTypeName = 'SPS (7)';
-            } else if (nalType === 8) {
-              isKeyFrame = true;
-              nalTypeName = 'PPS (8)';
-            }
-            if (isKeyFrame) break;
-          }
+        if (canvas.width !== bitmap.width || canvas.height !== bitmap.height) {
+          canvas.width = bitmap.width;
+          canvas.height = bitmap.height;
         }
+        ctx.drawImage(bitmap, 0, 0, canvas.width, canvas.height);
+        bitmap.close();
+        renderedFrameRef.current = true;
+        setDebugStats((prev) => ({ ...prev, lastNalType: 'Snapshot fallback' }));
+        reportStatus('Snapshot Fallback');
+      } catch {
+        // The reconnect loop remains authoritative; avoid noisy 1 FPS logs.
+      }
+    };
 
-        if (isKeyFrame) {
-          hasReceivedKeyFrame = true;
-        }
-
-        setDebugStats((prev) => ({
-          ...prev,
-          packets: packetCount,
-          kbReceived: Math.round(totalBytes / 1024),
-          lastNalType: nalTypeName,
-        }));
-
-        // 3. Decode H.264 chunk (only if first keyframe has been received)
-        if (hasReceivedKeyFrame && decoder && decoder.state === 'configured') {
-          try {
-            const chunk = new EncodedVideoChunk({
-              type: isKeyFrame ? 'key' : 'delta',
-              timestamp: performance.now() * 1000,
-              data: buffer,
-            });
-            decoder.decode(chunk);
-          } catch (decErr: any) {
-            console.warn('[WebCodecsPlayer] Decode error:', decErr);
-          }
-        }
-      };
-
-      ws.onerror = (e) => {
-        if (!isSubscribed) return;
-        console.warn('[WebCodecsPlayer] WebSocket error:', e);
-        setStreamStatus('Snapshot Fallback');
-        if (onStreamStatusChange) onStreamStatusChange('Snapshot Fallback', packetCount, 0);
-      };
-
-      ws.onclose = (e) => {
-        if (!isSubscribed) return;
-        console.warn('[WebCodecsPlayer] WebSocket closed:', e.code, e.reason);
-        setStreamStatus('Snapshot Fallback');
-        if (onStreamStatusChange) onStreamStatusChange('Snapshot Fallback', packetCount, 0);
-      };
-    } catch (wsErr) {
-      setStreamStatus('Snapshot Fallback');
-      if (onStreamStatusChange) onStreamStatusChange('Snapshot Fallback', 0, 0);
-    }
-
-    // 4. Initial placeholder snapshot while waiting for live stream
-    if (device.thumbnailUrl) {
-      const img = new Image();
-      img.src = device.thumbnailUrl;
-      img.onload = () => {
-        if (isSubscribed && ctx && packetCount === 0) {
-          ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
-        }
-      };
-    }
+    connectWebSocket();
+    void drawFallbackSnapshot();
+    const fallbackInterval = window.setInterval(() => void drawFallbackSnapshot(), 1000);
 
     return () => {
       isSubscribed = false;
       clearInterval(statsInterval);
-      if (animId) cancelAnimationFrame(animId);
+      clearInterval(fallbackInterval);
+      if (reconnectTimer !== null) clearTimeout(reconnectTimer);
       if (ws) {
         ws.close();
         ws = null;
@@ -247,10 +305,10 @@ export const WebCodecsPlayer = forwardRef<WebCodecsPlayerHandle, WebCodecsPlayer
       if (decoder && decoder.state !== 'closed') {
         try {
           decoder.close();
-        } catch (e) {}
+        } catch {}
       }
     };
-  }, [device.id, device.mac, device.ip, device.token]);
+  }, [device.id, device.mac, device.ip]);
 
   return (
     <div className="relative w-full h-full flex flex-col items-center justify-center bg-black">

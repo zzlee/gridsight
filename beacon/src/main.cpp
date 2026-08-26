@@ -10,6 +10,7 @@
 #include <csignal>
 
 #ifdef _WIN32
+#include <winsock2.h>
 #include <windows.h>
 #else
 #include <unistd.h>
@@ -22,6 +23,28 @@ std::atomic<bool> g_keep_running{true};
 
 #ifdef _WIN32
 HANDLE g_child_process = NULL;
+
+class WinsockRuntime {
+public:
+    bool Initialize() {
+        WSADATA data;
+        int result = WSAStartup(MAKEWORD(2, 2), &data);
+        if (result != 0) {
+            GridSight::Utils::Log("ERROR", "Winsock initialization failed with error " + std::to_string(result));
+            return false;
+        }
+        initialized_ = true;
+        GridSight::Utils::Log("INFO", "Winsock 2.2 initialized for worker networking");
+        return true;
+    }
+
+    ~WinsockRuntime() {
+        if (initialized_) WSACleanup();
+    }
+
+private:
+    bool initialized_ = false;
+};
 #else
 pid_t g_child_pid = -1;
 #endif
@@ -75,9 +98,11 @@ void RunWatchdog(const char* exe_path) {
             } else if (wait_res == WAIT_TIMEOUT) {
                 // Check heartbeat
                 uint64_t now = GridSight::Utils::GetCurrentTimestampMs();
-                uint64_t last_hb = GridSight::Utils::GetLastHeartbeat();
-                if ((now - start_time > 60000) && (now - last_hb > 60000)) {
-                    GridSight::Utils::Log("ERROR", "Watchdog: Worker process deadlocked (no heartbeat for 60s). Terminating...");
+                uint64_t last_worker_hb = GridSight::Utils::GetLastHeartbeat();
+                uint64_t last_capture_worker_hb = GridSight::Utils::GetLastHeartbeat("capture-worker");
+                if ((now - start_time > 60000) &&
+                    ((now - last_worker_hb > 60000) || (now - last_capture_worker_hb > 60000))) {
+                    GridSight::Utils::Log("ERROR", "Watchdog: Worker or capture pipeline stalled for 60s. Terminating...");
                     TerminateProcess(pi.hProcess, 1);
                     crashed = true;
                     break;
@@ -125,9 +150,11 @@ void RunWatchdog(const char* exe_path) {
                 } else if (wpid == 0) {
                     // Still running, check heartbeat
                     uint64_t now = GridSight::Utils::GetCurrentTimestampMs();
-                    uint64_t last_hb = GridSight::Utils::GetLastHeartbeat();
-                    if ((now - start_time > 60000) && (now - last_hb > 60000)) {
-                        GridSight::Utils::Log("ERROR", "Watchdog: Worker process deadlocked (no heartbeat for 60s). Terminating...");
+                    uint64_t last_worker_hb = GridSight::Utils::GetLastHeartbeat();
+                    uint64_t last_capture_worker_hb = GridSight::Utils::GetLastHeartbeat("capture-worker");
+                    if ((now - start_time > 60000) &&
+                        ((now - last_worker_hb > 60000) || (now - last_capture_worker_hb > 60000))) {
+                        GridSight::Utils::Log("ERROR", "Watchdog: Worker or capture pipeline stalled for 60s. Terminating...");
                         kill(pid, SIGKILL);
                         crashed = true;
                         waitpid(pid, &status, 0); // Cleanup
@@ -181,8 +208,18 @@ int main(int argc, char* argv[]) {
     }
 
     GridSight::Utils::Log("INFO", "=======================================================");
-    GridSight::Utils::Log("INFO", " GridSight Beacon Agent v5.4.3 (Outbound Relay + Win32)");
+    GridSight::Utils::Log("INFO", " GridSight Beacon Agent v5.5.0 (Outbound Relay + Win32)");
     GridSight::Utils::Log("INFO", "=======================================================");
+
+#ifdef _WIN32
+    // Winsock must be initialized before any HTTP, WebSocket, beacon, or RTP
+    // thread can call socket(). The watchdog process intentionally skips it.
+    WinsockRuntime winsock;
+    if (!winsock.Initialize()) {
+        GridSight::Utils::Log("ERROR", "Worker startup aborted because networking is unavailable");
+        return 2;
+    }
+#endif
 
     // Load .env configuration
     GridSight::Utils::LoadEnv(".env");
@@ -194,42 +231,69 @@ int main(int argc, char* argv[]) {
     std::string rtp_ip = GridSight::Utils::GetEnv("RTP_IP", "239.255.42.100");
     int rtp_port = GridSight::Utils::GetEnvInt("RTP_PORT", 9000);
     std::string hmac_secret = GridSight::Utils::GetEnv("HMAC_SECRET", "");
+    std::string teacher_host = GridSight::Utils::GetEnv(
+        "TEACHER_HOST",
+        GridSight::Utils::GetEnv("TEACHER_IP", "192.168.190.201"));
+    int teacher_port = GridSight::Utils::GetEnvInt("TEACHER_PORT", 3000);
+
+    // Backward compatibility for legacy TEACHER_IP=host:port files. New
+    // installers always write TEACHER_HOST and TEACHER_PORT separately.
+    const size_t legacy_colon = teacher_host.rfind(':');
+    if (legacy_colon != std::string::npos && teacher_host.find(':') == legacy_colon) {
+        try {
+            const int parsed_port = std::stoi(teacher_host.substr(legacy_colon + 1));
+            if (parsed_port > 0 && parsed_port <= 65535) {
+                teacher_port = parsed_port;
+                teacher_host = teacher_host.substr(0, legacy_colon);
+            }
+        } catch (...) {
+            GridSight::Utils::Log("WARN", "Invalid legacy TEACHER_IP endpoint; waiting for multicast discovery");
+        }
+    }
 
     auto capturer = std::make_shared<GridSight::ScreenCapturer>();
     if (!capturer->Initialize()) {
-        GridSight::Utils::Log("ERROR", "Failed to initialize ScreenCapturer");
+        GridSight::Utils::Log("WARN", "Initial ScreenCapturer setup failed; capture requests will retry initialization");
     }
 
-    // 1. Start HTTP Server with Outbound Snapshot Push to Teacher
+    // 1. Start snapshot and focus-stream services with the configured
+    // bootstrap endpoint. A verified TOKEN_GRANT updates both destinations.
     auto http_server = std::make_shared<GridSight::HttpServer>(http_port, capturer);
-    std::string default_teacher = GridSight::Utils::GetEnv("TEACHER_IP", "192.168.190.201");
-    http_server->SetTeacherHost(default_teacher, 3000);
-    http_server->Start();
+    auto ws_streamer = std::make_shared<GridSight::WebSocketStreamer>(ws_port, capturer);
+    http_server->SetTeacherHost(teacher_host, teacher_port);
+    ws_streamer->SetTeacherHost(teacher_host, teacher_port);
+    if (!http_server->Start()) {
+        GridSight::Utils::Log("WARN", "HttpServer inbound listener is unavailable; outbound snapshot worker may still be active");
+    }
+    if (!ws_streamer->Start()) {
+        GridSight::Utils::Log("WARN", "WebSocket inbound fallback is unavailable; reverse outbound focus streaming may still be active");
+    }
 
-    // 2. Start Beacon Discovery (notifies http_server of discovered teacher IP)
-    GridSight::BeaconClient beacon_client(multicast_ip, multicast_port, http_server, hmac_secret);
+    // 2. Start discovery only after both consumers exist, so every verified
+    // teacher endpoint update is applied atomically to snapshot and WS paths.
+    GridSight::BeaconClient beacon_client(
+        multicast_ip, multicast_port, http_server, ws_streamer, hmac_secret);
     beacon_client.Start();
 
-    // 3. Start WebSocket Server for On-demand 30 FPS Stream (with Outbound Reverse Streaming)
-    auto ws_streamer = std::make_shared<GridSight::WebSocketStreamer>(ws_port, capturer);
-    ws_streamer->SetTeacherHost(default_teacher, 3000);
-    ws_streamer->Start();
-
-    // 4. Start RTP Receiver for Teacher Multicast Broadcast
+    // 3. Start RTP Receiver for Teacher Multicast Broadcast
     GridSight::RTPReceiver rtp_receiver(rtp_ip, rtp_port);
-    rtp_receiver.Start();
+    if (!rtp_receiver.Start()) {
+        GridSight::Utils::Log("ERROR", "RTPReceiver failed to start; teacher broadcast reception is unavailable");
+    }
 
-    GridSight::Utils::Log("INFO", "GridSight Beacon running.");
+    GridSight::Utils::Log("INFO", "GridSight Beacon worker startup sequence completed.");
 
     while (g_keep_running) {
         GridSight::Utils::SleepMs(1000);
     }
 
     GridSight::Utils::Log("INFO", "GridSight Beacon shutting down...");
+    // Stop discovery first so it cannot publish a new endpoint while the
+    // destination consumers are draining.
+    beacon_client.Stop();
     rtp_receiver.Stop();
     ws_streamer->Stop();
     http_server->Stop();
-    beacon_client.Stop();
     capturer->Release();
 
     return 0;

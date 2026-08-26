@@ -57,6 +57,7 @@ export const FocusModal: React.FC<FocusModalProps> = ({ device, onClose }) => {
 
   // 3-second stream connection timeout checker
   useEffect(() => {
+    setIsStreamTimeout(false);
     const timer = setTimeout(() => {
       setIsStreamTimeout(true);
     }, 3000);
@@ -132,20 +133,15 @@ export const FocusModal: React.FC<FocusModalProps> = ({ device, onClose }) => {
   };
 
   const handleTakeSnapshot = async () => {
-    let dataUrl: string | null = null;
-
-    // 1. Try capturing exact current frame from WebCodecs canvas
-    if (playerRef.current) {
-      dataUrl = playerRef.current.captureSnapshot();
-    }
-
-    // 2. Fallback to thumbnail URL if canvas was blank
-    if (!dataUrl && device.thumbnailUrl) {
-      dataUrl = device.thumbnailUrl;
-    }
-
     const timestamp = new Date().toISOString().replace(/[:.]/g, '-');
     const filename = `GridSight_${device.seatNo || device.hostname}_${timestamp}.png`;
+
+    // A live rendered frame can be exported directly. During Connecting or
+    // Snapshot Fallback, bypass the low-resolution canvas and request a fresh
+    // authenticated full-resolution capture from the agent.
+    const dataUrl = streamStatus === 'Live 30FPS'
+      ? playerRef.current?.captureSnapshot() || null
+      : null;
 
     if (dataUrl) {
       const link = document.createElement('a');
@@ -154,30 +150,30 @@ export const FocusModal: React.FC<FocusModalProps> = ({ device, onClose }) => {
       document.body.appendChild(link);
       link.click();
       document.body.removeChild(link);
-
       setToastMessage(`📸 截圖已儲存：${filename}`);
       setTimeout(() => setToastMessage(null), 3000);
-    } else {
-      // 3. Fallback: Fetch direct snapshot via backend API
-      try {
-        const resp = await fetch(`/api/snapshot/${encodeURIComponent(device.mac || device.ip)}?full=1&t=${Date.now()}`);
-        if (resp.ok) {
-          const blob = await resp.blob();
-          const blobUrl = URL.createObjectURL(blob);
-          const link = document.createElement('a');
-          link.href = blobUrl;
-          link.download = filename;
-          document.body.appendChild(link);
-          link.click();
-          document.body.removeChild(link);
-          URL.revokeObjectURL(blobUrl);
+      return;
+    }
 
-          setToastMessage(`📸 截圖已儲存：${filename}`);
-          setTimeout(() => setToastMessage(null), 3000);
-        }
-      } catch (err) {
-        console.warn('[FocusModal] Snapshot download failed:', err);
-      }
+    try {
+      const resp = await AuthService.fetchWithAuth(
+        `/api/snapshot/${encodeURIComponent(device.mac || device.ip)}?full=1&t=${Date.now()}`
+      );
+      if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+      const blobUrl = URL.createObjectURL(await resp.blob());
+      const link = document.createElement('a');
+      link.href = blobUrl;
+      link.download = filename;
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+      URL.revokeObjectURL(blobUrl);
+      setToastMessage(`📸 截圖已儲存：${filename}`);
+      setTimeout(() => setToastMessage(null), 3000);
+    } catch (err) {
+      console.warn('[FocusModal] Snapshot download failed:', err);
+      setToastMessage('❌ 高解析截圖失敗，請檢查 Agent 擷取狀態');
+      setTimeout(() => setToastMessage(null), 3000);
     }
   };
 
@@ -286,9 +282,12 @@ export const FocusModal: React.FC<FocusModalProps> = ({ device, onClose }) => {
             ref={playerRef}
             device={device}
             showDebugHud={showDebugHud}
-            onStreamStatusChange={(status, packets) => {
+            onStreamStatusChange={(status, packets, rendered) => {
               setStreamStatus(status);
               setPacketsReceived(packets);
+              if (status === 'Live 30FPS' && (packets > 0 || rendered > 0)) {
+                setIsStreamTimeout(false);
+              }
             }}
           />
 

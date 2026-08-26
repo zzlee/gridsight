@@ -38,6 +38,17 @@ int main() {
     std::ifstream check2("/tmp/injected_test2");
     assert(!check2.is_open() && "Security test failed: /tmp/injected_test2 was created!");
 
-    std::cout << "✅ All Utils::OpenUrl Security Tests Passed!" << std::endl;
+    const std::string grant =
+        R"({"type":"TOKEN_GRANT","token":"abc123","signature":"0123456789abcdef"})";
+    assert(GridSight::Utils::ExtractJsonField(grant, "type") == "TOKEN_GRANT");
+    assert(GridSight::Utils::ExtractJsonField(grant, "token") == "abc123");
+    assert(GridSight::Utils::ExtractJsonField(grant, "signature") == "0123456789abcdef");
+    assert(GridSight::Utils::ExtractJsonField(grant, "missing").empty());
+
+    GridSight::Utils::UpdateHeartbeat("test-component");
+    assert(GridSight::Utils::GetLastHeartbeat("test-component") > 0);
+    std::remove("gs-heartbeat-test-component.txt");
+
+    std::cout << "✅ All Utils security, token-grant, and heartbeat tests passed!" << std::endl;
     return 0;
 }

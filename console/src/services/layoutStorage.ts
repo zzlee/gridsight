@@ -9,14 +9,24 @@ export const DEFAULT_OFFTASK_KEYWORDS = [
   '動畫瘋', 'Facebook', 'Instagram', 'Netflix', 'Game', '遊戲'
 ];
 
+const sanitizeLayoutForStorage = (layout: ClassroomLayout): ClassroomLayout => ({
+  ...layout,
+  seats: layout.seats.map((seat) => ({
+    ...seat,
+    token: undefined,
+    thumbnailUrl: undefined,
+  })),
+});
+
 export const LayoutStorage = {
   /**
    * Save layout to backend server (which writes to SEATS_FILE specified in .env)
    */
   async saveLayout(layout: ClassroomLayout): Promise<boolean> {
+    const sanitizedLayout = sanitizeLayoutForStorage(layout);
     // 1. Cache to localStorage for instant offline recovery
     try {
-      localStorage.setItem(STORAGE_KEY, JSON.stringify(layout));
+      localStorage.setItem(STORAGE_KEY, JSON.stringify(sanitizedLayout));
     } catch {
       // ignore
     }
@@ -26,7 +36,7 @@ export const LayoutStorage = {
       const resp = await AuthService.fetchWithAuth('/api/layout', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(layout),
+        body: JSON.stringify(sanitizedLayout),
       });
       return resp.ok;
     } catch (err) {
@@ -53,8 +63,9 @@ export const LayoutStorage = {
                 s.mac?.startsWith('00:1A:2B:3C')
               )
           );
-          localStorage.setItem(STORAGE_KEY, JSON.stringify(data.layout));
-          return data.layout;
+          const sanitizedLayout = sanitizeLayoutForStorage(data.layout);
+          localStorage.setItem(STORAGE_KEY, JSON.stringify(sanitizedLayout));
+          return sanitizedLayout;
         }
       }
     } catch (err) {
@@ -77,7 +88,9 @@ export const LayoutStorage = {
               s.mac?.startsWith('00:1A:2B:3C')
             )
         );
-        return parsed;
+        const sanitizedLayout = sanitizeLayoutForStorage(parsed);
+        localStorage.setItem(STORAGE_KEY, JSON.stringify(sanitizedLayout));
+        return sanitizedLayout;
       }
       return this.createMatrixLayout(8, 6, '電腦教室 (8×6, 48席位)');
     } catch {

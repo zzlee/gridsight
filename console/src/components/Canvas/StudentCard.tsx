@@ -1,13 +1,12 @@
 import React from 'react';
 import { StudentDevice } from '../../types';
-import { Monitor, Maximize2, RefreshCw, Cpu, Move, Edit2, AppWindow, AlertTriangle } from 'lucide-react';
+import { Monitor, Maximize2, Cpu, Move, Edit2, AppWindow, AlertTriangle } from 'lucide-react';
 
 interface StudentCardProps {
   device: StudentDevice;
   isEditMode: boolean;
   onSelect: (id: string, multi: boolean) => void;
   onDoubleClick: (device: StudentDevice) => void;
-  onRefreshAuth: (device: StudentDevice) => void;
   onUnbind: (id: string) => void;
   onOpenSpecs?: (device: StudentDevice) => void;
   onEditSeat?: (device: StudentDevice) => void;
@@ -25,7 +24,6 @@ export const StudentCard: React.FC<StudentCardProps> = ({
   isEditMode,
   onSelect,
   onDoubleClick,
-  onRefreshAuth,
   onUnbind,
   onOpenSpecs,
   onEditSeat,
@@ -164,16 +162,6 @@ export const StudentCard: React.FC<StudentCardProps> = ({
               title="檢視電腦硬體狀態 (CPU/RAM/Disk)"
             >
               <Cpu className="w-3.5 h-3.5" />
-            </button>
-            <button
-              onClick={(e) => {
-                e.stopPropagation();
-                onRefreshAuth(device);
-              }}
-              className="p-1.5 rounded-md bg-slate-800 hover:bg-slate-700 text-slate-200 shadow"
-              title="重新配發 RAM 鑑權 Token"
-            >
-              <RefreshCw className="w-3.5 h-3.5" />
             </button>
           </div>
         )}

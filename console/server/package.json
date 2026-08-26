@@ -1,11 +1,12 @@
 {
   "name": "gridsight-teacher-server",
-  "version": "5.0.0",
+  "version": "5.5.0",
   "private": true,
   "type": "module",
   "scripts": {
     "start": "tsx server.ts",
-    "test": "npx tsx logger.test.ts && npx tsx browserLauncher.test.ts && npx tsx tokenAuthority.test.ts"
+    "typecheck": "tsc --noEmit",
+    "test": "npx tsx logger.test.ts && npx tsx browserLauncher.test.ts && npx tsx tokenAuthority.test.ts && npx tsx auth.test.ts && npx tsx installerScript.test.ts && npx tsx security.integration.test.ts"
   },
   "dependencies": {
     "cors": "^2.8.5",

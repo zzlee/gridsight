@@ -13,6 +13,10 @@ jobs:
       - name: Checkout Code
         uses: actions/checkout@v4
 
+      - name: Run native agent regression tests
+        run: |
+          make -C beacon test HOST_CXX=g++
+
       - name: Build gs-agent.exe via Docker Builder
         run: |
           ./scripts/build-docker.sh

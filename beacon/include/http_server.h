@@ -4,6 +4,8 @@
 #include <thread>
 #include <memory>
 #include <mutex>
+#include <condition_variable>
+#include <deque>
 #include <vector>
 #include <string>
 
@@ -20,6 +22,7 @@ public:
 
 private:
     void ListenLoop();
+    void ClientWorkerLoop();
     void SnapshotWorkerLoop();
     void PushSnapshotToTeacher(const std::vector<uint8_t>& jpeg_data);
     void HandleClient(uintptr_t client_socket);
@@ -36,7 +39,17 @@ private:
     std::atomic<bool> running_{false};
     std::thread server_thread_;
     std::thread snapshot_thread_;
-    uintptr_t listen_fd_ = 0;
+    std::atomic<uintptr_t> listen_fd_{0};
+
+    // Bounded owned client workers prevent detached handlers from outliving
+    // HttpServer while limiting shutdown latency and resource usage.
+    static constexpr size_t kClientWorkerCount = 4;
+    static constexpr size_t kMaxPendingClients = 32;
+    std::atomic<bool> client_workers_running_{false};
+    std::mutex client_queue_mutex_;
+    std::condition_variable client_queue_cv_;
+    std::deque<uintptr_t> client_queue_;
+    std::vector<std::thread> client_workers_;
 
     // Snapshot background cache
     std::mutex snapshot_mutex_;

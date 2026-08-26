@@ -44,8 +44,8 @@ public:
     static std::string GetActiveWindowTitle();
     static std::string Base64Encode(const uint8_t* data, size_t len);
     static std::string ComputeWebSocketAcceptKey(const std::string& client_key);
-    static void UpdateHeartbeat();
-    static uint64_t GetLastHeartbeat();
+    static void UpdateHeartbeat(const std::string& component = "worker");
+    static uint64_t GetLastHeartbeat(const std::string& component = "worker");
 
     static std::string JsonEscape(const std::string& input);
     static std::string ExtractJsonField(const std::string& json, const std::string& field_name);

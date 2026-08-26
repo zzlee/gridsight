@@ -2,11 +2,13 @@
 #include "../include/token_manager.h"
 #include "../include/utils.h"
 #include "../include/http_server.h"
+#include "../include/ws_server.h"
 #include <iostream>
 #include <sstream>
 #include <iomanip>
 #include <random>
 #include <cstring>
+#include <utility>
 
 #ifdef _WIN32
 #include <winsock2.h>
@@ -24,8 +26,12 @@
 
 namespace GridSight {
 
-BeaconClient::BeaconClient(const std::string& multicast_ip, int port, std::shared_ptr<HttpServer> http_server, const std::string& hmac_secret)
-    : multicast_ip_(multicast_ip), port_(port), http_server_(http_server), hmac_secret_(hmac_secret) {}
+BeaconClient::BeaconClient(const std::string& multicast_ip, int port,
+                           std::shared_ptr<HttpServer> http_server,
+                           std::shared_ptr<WebSocketStreamer> ws_streamer,
+                           const std::string& hmac_secret)
+    : multicast_ip_(multicast_ip), port_(port), http_server_(std::move(http_server)),
+      ws_streamer_(std::move(ws_streamer)), hmac_secret_(hmac_secret) {}
 
 BeaconClient::~BeaconClient() {
     Stop();
@@ -34,7 +40,7 @@ BeaconClient::~BeaconClient() {
 void BeaconClient::Start() {
     if (running_.exchange(true)) return;
     worker_thread_ = std::thread(&BeaconClient::DiscoveryLoop, this);
-    Utils::Log("INFO", "BeaconClient started (Multicast " + multicast_ip_ + ":" + std::to_string(port_) + ")");
+    Utils::Log("INFO", "BeaconClient worker thread started (Multicast target " + multicast_ip_ + ":" + std::to_string(port_) + ")");
 }
 
 void BeaconClient::Stop() {
@@ -71,7 +77,7 @@ void BeaconClient::DiscoveryLoop() {
         std::ostringstream ss;
         ss << "{"
            << "\"type\":\"BEACON\","
-           << "\"version\":\"5.4.3\","
+           << "\"version\":\"5.5.0\","
            << "\"hostname\":\"" << net_info.hostname << "\","
            << "\"ip\":\"" << net_info.ip << "\","
            << "\"mac\":\"" << net_info.mac << "\","
@@ -79,7 +85,7 @@ void BeaconClient::DiscoveryLoop() {
            << "\"active_window\":\"" << esc_win.str() << "\","
            << "\"timestamp\":" << Utils::GetCurrentTimestampMs() << ","
            << "\"specs\":{"
-           <<   "\"agent_version\":\"5.4.3\","
+           <<   "\"agent_version\":\"5.5.0\","
            <<   "\"os\":\"" << hw.os_name << "\","
            <<   "\"uptime\":" << hw.uptime_seconds << ","
            <<   "\"cpu\":{\"model\":\"" << hw.cpu_model << "\",\"cores\":" << hw.cpu_cores << ",\"usage_percent\":" << hw.cpu_usage_percent << "},"
@@ -106,18 +112,39 @@ void BeaconClient::DiscoveryLoop() {
             memset(&addr, 0, sizeof(addr));
             addr.sin_family = AF_INET;
             addr.sin_port = htons(port_);
-            inet_pton(AF_INET, multicast_ip_.c_str(), &addr.sin_addr);
+            if (inet_pton(AF_INET, multicast_ip_.c_str(), &addr.sin_addr) != 1) {
+                Utils::Log("ERROR", "BeaconClient invalid multicast IPv4 address: " + multicast_ip_);
+                closesocket(sock);
+                Utils::UpdateHeartbeat();
+                Utils::SleepMs(5000);
+                continue;
+            }
 
-            sendto(sock, payload.c_str(), (int)payload.length(), 0, (sockaddr*)&addr, sizeof(addr));
-
-            // Listen for TOKEN_GRANT response
-            ListenForToken((int)sock, net_info.mac);
+            int sent = sendto(sock, payload.c_str(), (int)payload.length(), 0, (sockaddr*)&addr, sizeof(addr));
+            if (sent == SOCKET_ERROR) {
+#ifdef _WIN32
+                Utils::Log("WARN", "BeaconClient multicast send failed (error " + std::to_string(WSAGetLastError()) + ")");
+#else
+                Utils::Log("WARN", "BeaconClient multicast send failed");
+#endif
+            } else {
+                // Listen for TOKEN_GRANT only after a beacon was sent.
+                ListenForToken((int)sock, net_info.mac);
+            }
 
             closesocket(sock);
+        } else {
+#ifdef _WIN32
+            Utils::Log("WARN", "BeaconClient UDP socket creation failed (error " + std::to_string(WSAGetLastError()) + ")");
+#else
+            Utils::Log("WARN", "BeaconClient UDP socket creation failed");
+#endif
         }
 
-        // Update heartbeat immediately after announcement
+        // Process-level heartbeat drives the watchdog; the named heartbeat is
+        // exposed separately through component diagnostics.
         Utils::UpdateHeartbeat();
+        Utils::UpdateHeartbeat("beacon");
 
         // Random jitter to prevent network broadcast storms from 70 PCs
         int sleep_time = jitter_dist(gen);
@@ -151,22 +178,16 @@ void BeaconClient::ListenForToken(int socket_fd, const std::string& agent_mac) {
 
                 std::string response(buffer, bytes);
 
-                // Extract token and signature from JSON
-                size_t token_pos = response.find("\"token\":\"");
-                if (token_pos == std::string::npos) return;
-                token_pos += 9;
-                size_t token_end = response.find("\"", token_pos);
-                if (token_end == std::string::npos) return;
-                std::string token = response.substr(token_pos, token_end - token_pos);
-
-                size_t sig_pos = response.find("\"signature\":\"");
-                std::string signature;
-                if (sig_pos != std::string::npos) {
-                    sig_pos += 12;
-                    size_t sig_end = response.find("\"", sig_pos);
-                    if (sig_end != std::string::npos) {
-                        signature = response.substr(sig_pos, sig_end - sig_pos);
-                    }
+                // Parse string fields with the shared escape-aware helper. This
+                // avoids brittle prefix offsets (the old signature parser
+                // started on the opening quote and always produced an empty
+                // signature when HMAC verification was enabled).
+                const std::string message_type = Utils::ExtractJsonField(response, "type");
+                const std::string token = Utils::ExtractJsonField(response, "token");
+                const std::string signature = Utils::ExtractJsonField(response, "signature");
+                if (message_type != "TOKEN_GRANT" || token.empty()) {
+                    Utils::Log("WARN", "[Beacon] Ignoring malformed token response from " + std::string(teacher_ip_str));
+                    return;
                 }
 
                 // HMAC verification: only trust tokens signed by the real server
@@ -184,11 +205,12 @@ void BeaconClient::ListenForToken(int socket_fd, const std::string& agent_mac) {
                 }
 
                 // HMAC passed (or no secret configured) — accept the token
-                if (http_server_ && teacher_ip_str[0]) {
-                    http_server_->SetTeacherHost(teacher_ip_str, 3000);
+                if (teacher_ip_str[0]) {
+                    if (http_server_) http_server_->SetTeacherHost(teacher_ip_str, 3000);
+                    if (ws_streamer_) ws_streamer_->SetTeacherHost(teacher_ip_str, 3000);
                 }
                 TokenManager::Instance().SetSessionToken(token);
-                Utils::Log("INFO", "Received dynamic session token: " + token + " from teacher " + teacher_ip_str);
+                Utils::Log("INFO", "Received verified dynamic session token from teacher " + std::string(teacher_ip_str));
             }
         }
     }

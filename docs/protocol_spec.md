@@ -125,7 +125,7 @@ sequenceDiagram
 ```json
 {
   "type": "BEACON",
-  "version": "5.5.0",
+  "version": "5.6.0",
   "hostname": "PC-01",
   "ip": "192.168.1.101",
   "mac": "00:1A:2B:3C:4D:01",
@@ -133,7 +133,7 @@ sequenceDiagram
   "timestamp": 1723812345678,
   "active_window": "Visual Studio Code - main.cpp",
   "specs": {
-    "agent_version": "5.5.0",
+    "agent_version": "5.6.0",
     "os": "Windows 11 Pro 64-bit",
     "uptime": 3600,
     "cpu": {

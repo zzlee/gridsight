@@ -43,3 +43,7 @@ yarn-debug.log*
 yarn-error.log*
 .temp/
 tmp/
+
+# Pi coding-agent local session state & one-off handoff docs (not for repo)
+.pi/
+HANDOFF.md

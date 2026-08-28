@@ -1,0 +1,89 @@
+<!doctype html>
+<html lang="zh-Hant">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>GridSight — 一間 70 人電腦教室的工程故事</title>
+<style>
+:root{--bg:#071018;--panel:#0d1924;--panel2:#101f2d;--text:#e9f2f8;--muted:#8ea5b5;--line:#203544;--cyan:#61dafb;--green:#6ee7b7;--amber:#fbbf24;--rose:#fb7185;--purple:#a78bfa;--shadow:0 24px 70px #0008}*{box-sizing:border-box}html{scroll-behavior:smooth}body{margin:0;background:radial-gradient(circle at 50% -10%,#17334a 0,#071018 42%,#050b10 100%);color:var(--text);font:15px/1.7 system-ui,-apple-system,BlinkMacSystemFont,"Segoe UI","Noto Sans TC",sans-serif}a{color:inherit}.wrap{width:min(1180px,92vw);margin:auto}.hero{min-height:94vh;display:grid;place-items:center;position:relative;overflow:hidden}.hero:before{content:"";position:absolute;inset:0;background-image:linear-gradient(#ffffff08 1px,transparent 1px),linear-gradient(90deg,#ffffff08 1px,transparent 1px);background-size:42px 42px;mask-image:linear-gradient(to bottom,#000,transparent 85%);animation:grid 18s linear infinite}.hero-content{position:relative;text-align:center;max-width:900px;padding:70px 0}.eyebrow{letter-spacing:.18em;text-transform:uppercase;color:var(--cyan);font-weight:700;font-size:12px}.hero h1{font-size:clamp(42px,8vw,88px);line-height:.98;margin:18px 0;background:linear-gradient(120deg,#fff,var(--cyan),#a7f3d0);-webkit-background-clip:text;background-clip:text;color:transparent}.hero p{font-size:clamp(17px,2.2vw,23px);color:#c3d3dd;max-width:760px;margin:0 auto 30px}.btn{display:inline-flex;gap:8px;align-items:center;border:1px solid #ffffff24;background:#ffffff0c;color:#fff;padding:11px 17px;border-radius:999px;text-decoration:none;cursor:pointer}.btn:hover{background:#ffffff16}.scroll{margin-top:45px;color:var(--muted);font-size:12px}.chapter{padding:105px 0;border-top:1px solid var(--line)}.chapter-grid{display:grid;grid-template-columns:.72fr 1.28fr;gap:55px;align-items:start}.kicker{color:var(--cyan);font-weight:800;font-size:12px;letter-spacing:.12em}.chapter h2{font-size:clamp(30px,4vw,54px);line-height:1.08;margin:10px 0 18px}.chapter .lead{font-size:19px;color:#c4d2db}.muted{color:var(--muted)}.card{background:linear-gradient(145deg,#102131dd,#09141eee);border:1px solid var(--line);border-radius:20px;box-shadow:var(--shadow);padding:25px}.problem{display:grid;grid-template-columns:repeat(3,1fr);gap:12px;margin-top:28px}.problem .card{min-height:155px}.icon{font-size:28px}.metric{font-size:36px;font-weight:850;line-height:1;color:#fff;margin:8px 0}.timeline{position:relative;padding:15px 0}.timeline:before{content:"";position:absolute;left:13px;top:0;bottom:0;width:2px;background:linear-gradient(var(--cyan),var(--purple),var(--green))}.event{position:relative;padding:0 0 45px 52px;cursor:pointer}.dot{position:absolute;left:5px;top:7px;width:18px;height:18px;border:3px solid var(--bg);background:var(--cyan);border-radius:50%;box-shadow:0 0 0 3px #61dafb33}.event.active .dot{transform:scale(1.35);background:var(--amber);box-shadow:0 0 0 7px #fbbf2420}.event h3{margin:0;font-size:20px}.event .date{color:var(--cyan);font:12px ui-monospace,monospace}.event-detail{display:none;margin-top:10px;color:#b8cbd6}.event.active .event-detail{display:block}.pill{display:inline-block;border:1px solid #ffffff20;border-radius:999px;padding:2px 9px;margin:3px;font-size:12px;color:#b8cbd6}.arch{display:grid;grid-template-columns:1fr 1fr 1fr;gap:12px;align-items:center}.node{min-height:120px;padding:18px;border:1px solid #294455;border-radius:16px;background:#0c1823;transition:.3s}.node:hover{transform:translateY(-4px);border-color:var(--cyan)}.node strong{display:block;font-size:16px}.arrow{text-align:center;color:var(--cyan);font-size:25px}.flow{display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-top:18px}.flow .step{flex:1;min-width:135px;text-align:center;padding:13px;border-radius:12px;background:#0b1824;border:1px solid var(--line)}.mode-switch{display:flex;gap:8px;flex-wrap:wrap;margin-bottom:15px}.mode-switch button{border:1px solid var(--line);background:#0a1620;color:#b9cbd5;border-radius:10px;padding:9px 12px;cursor:pointer}.mode-switch button.active{border-color:var(--cyan);color:#fff;background:#123042}.mode-panel{display:none}.mode-panel.active{display:block}.meter{height:12px;background:#071018;border-radius:99px;overflow:hidden;border:1px solid #20313d}.meter i{display:block;height:100%;width:var(--w);background:linear-gradient(90deg,var(--cyan),var(--green));border-radius:inherit}.split{display:grid;grid-template-columns:1fr 1fr;gap:18px}.quote{font-size:23px;line-height:1.45;border-left:3px solid var(--cyan);padding-left:20px;color:#e2edf3}.code{font:13px/1.7 ui-monospace,SFMono-Regular,Menlo,monospace;background:#050b10;border:1px solid #1b303d;border-radius:14px;padding:18px;overflow:auto;color:#c7e6ef}.compare{width:100%;border-collapse:collapse}.compare th,.compare td{border-bottom:1px solid var(--line);padding:12px;text-align:left}.compare th{color:#8fb3c4;font-size:12px;text-transform:uppercase}.cta{padding:100px 0;text-align:center}.cta h2{font-size:clamp(32px,5vw,58px);margin:0 0 15px}.progress{position:fixed;top:0;left:0;height:3px;width:0;background:linear-gradient(90deg,var(--cyan),var(--green));z-index:20}.nav{position:fixed;right:20px;top:50%;transform:translateY(-50%);display:grid;gap:9px;z-index:10}.nav button{width:10px;height:10px;border-radius:50%;border:0;background:#ffffff35;cursor:pointer}.nav button.active{background:var(--cyan);box-shadow:0 0 14px var(--cyan)}footer{padding:35px 0 70px;color:var(--muted);font-size:12px;text-align:center;border-top:1px solid var(--line)}@keyframes grid{to{transform:translateY(42px)}}@media(max-width:800px){.chapter-grid,.split{grid-template-columns:1fr}.problem,.arch{grid-template-columns:1fr}.nav{display:none}.chapter{padding:75px 0}.hero{min-height:88vh}}
+</style>
+</head>
+<body>
+<div class="progress" id="progress"></div>
+<nav class="nav" aria-label="章節導覽" id="nav"></nav>
+<header class="hero" id="s0"><div class="hero-content wrap">
+<div class="eyebrow">GridSight · Development Story</div>
+<h1>不是先做 UI。<br>先把 70 台電腦救下來。</h1>
+<p>這是一個從「70 台學生機怎麼同時被看見？」開始的工程故事。一路從還原卡、Session 0、1GbE，走到低負載輪詢、H.264 即時串流、RTP Multicast，以及最後的可靠性與安全性重構。</p>
+<a class="btn" href="#s1">開始故事 ↓</a>
+<div class="scroll">向下滾動，或點右側節點跳轉</div>
+</div></header>
+
+<section class="chapter" id="s1"><div class="wrap chapter-grid"><div><div class="kicker">CHAPTER 01 · THE CONSTRAINT</div><h2>故事從三個<br>「不能」開始。</h2><p class="lead">不是缺功能，而是環境本身不允許用一般 IT 軟體的思路解題。</p></div><div><div class="problem">
+<div class="card"><div class="icon">💾</div><h3>不能留下安裝痕跡</h3><p class="muted">還原卡讓 C 槽在重開機後回到原狀。傳統常駐安裝包沒有意義。</p></div>
+<div class="card"><div class="icon">🪟</div><h3>不能假設 Service 看得到桌面</h3><p class="muted">Windows Session 0 與學生登入的 Session 1 隔離，背景服務不是理所當然的答案。</p></div>
+<div class="card"><div class="icon">🌐</div><h3>不能 70 台一起灌滿網路</h3><p class="muted">1GbE LAN 下，高解析度全班串流會把瓶頸從 CPU 推到交換器與教師機。</p></div></div>
+<div class="quote" style="margin-top:28px">所以第一個架構問題不是「畫面怎麼畫得漂亮」，而是：<strong>如何讓每台學生機只付得起它真正需要的成本？</strong></div></div></div></section>
+
+<section class="chapter" id="s2"><div class="wrap chapter-grid"><div><div class="kicker">CHAPTER 02 · V1 → V2</div><h2>把 Agent 放進<br>學生的 Session。</h2><p class="lead">架構第一次定型：原生 C++ Agent + Web Console，並把影像流拆成三種完全不同的需求。</p></div><div>
+<div class="arch">
+<div class="node"><strong>👨‍🎓 Student</strong><span class="muted">Windows / Session 1</span><br><span class="pill">gs-agent.exe</span><span class="pill">DXGI</span></div><div class="arrow">→</div><div class="node"><strong>👩‍🏫 Console</strong><span class="muted">Teacher browser</span><br><span class="pill">React</span><span class="pill">WebCodecs</span></div>
+<div class="node"><strong>Beacon</strong><span class="muted">UDP Multicast discovery</span></div><div class="arrow">↔</div><div class="node"><strong>LAN</strong><span class="muted">1GbE / IGMP Snooping</span></div>
+</div>
+<div class="card" style="margin-top:18px"><h3>三種模式，三種成本模型</h3><div class="mode-switch"><button class="active" data-mode="m1">① 常態監控</button><button data-mode="m2">② 焦點調閱</button><button data-mode="m3">③ 全體廣播</button></div>
+<div class="mode-panel active" id="m1"><b>480×270 @ 1 FPS</b> · WebP/JPEG + HTTP Pull<br><span class="muted">70 台約 17 Mbps。監控是「偶爾更新的縮圖」，沒必要 30 FPS。</span><div class="meter" style="margin-top:12px"><i style="--w:17%"></i></div></div>
+<div class="mode-panel" id="m2"><b>720p/1080p @ 30 FPS</b> · H.264 + WebSocket<br><span class="muted">只有被點選的學生才進入即時串流，WebCodecs 負責 GPU 解碼。</span><div class="meter" style="margin-top:12px"><i style="--w:42%"></i></div></div>
+<div class="mode-panel" id="m3"><b>1080p @ 30 FPS</b> · H.264 + RTP UDP Multicast<br><span class="muted">交換器用 IGMP Snooping 複製，70 台接收端不代表 70 份上行流。</span><div class="meter" style="margin-top:12px"><i style="--w:12%"></i></div></div></div>
+</div></div></section>
+
+<section class="chapter" id="s3"><div class="wrap chapter-grid"><div><div class="kicker">CHAPTER 03 · V3 → V4</div><h2>第一個真正的<br>效能戰爭。</h2><p class="lead">當 70 台真的同時工作，原本「看起來合理」的實作開始露出成本。</p></div><div><div class="split"><div class="card"><div class="kicker">JPEG PIPELINE</div><h3>Tier 1：WIC</h3><p>Windows 原生 <code>IWICImagingFactory</code> / <code>IWICBitmapEncoder</code>，把快照編碼拉到約 <b>0.4ms/frame</b>。</p><h3>Tier 2：Turbo SIMD</h3><p>內建 Fast-DCT 作為熱備援，避免單一路徑失效。</p></div><div class="card"><div class="kicker">FOCUS VIEWER</div><h3>從軟解換到 GPU</h3><p>捨棄 JSMpeg / 純 WASM 軟解，改用瀏覽器 <b>WebCodecs VideoDecoder</b>。</p><p class="metric">&lt; 5 ms</p><span class="muted">文件記錄的解碼延遲目標</span></div></div>
+<div class="card" style="margin-top:18px"><h3>同一個畫面，兩種觀看距離</h3><div class="flow"><div class="step">70 個小縮圖<br><b>低頻寬</b></div><div class="arrow">→</div><div class="step">點一台<br><b>30 FPS H.264</b></div><div class="arrow">→</div><div class="step">老師廣播<br><b>RTP Multicast</b></div></div></div></div></div></section>
+
+<section class="chapter" id="s4"><div class="wrap chapter-grid"><div><div class="kicker">CHAPTER 04 · V5.0 → V5.2</div><h2>技術做完了，<br>卻還不能叫做完成。</h2><p class="lead">學校現場真正討厭的不是 bug，而是「需要教人怎麼安裝」。</p></div><div><div class="card"><h3>1 秒加入教室</h3><p>學生開啟 <code>/join</code>，一鍵複製 Win+R 指令。Agent 下載到 <code>%TEMP%</code>，直接在 Session 1 執行。</p><div class="code">http://&lt;TEACHER_IP&gt;:3000/join
+        ↓
+「複製連線指令」
+        ↓
+Win + R → 貼上 → Enter
+        ↓
+gs-agent.exe · 無 UI · 無安裝</div></div>
+<div class="card" style="margin-top:16px"><h3>為什麼不用 navigator.clipboard？</h3><p class="muted">因為教室現場可能就是 HTTP。於是退回 hidden textarea + <code>document.execCommand('copy')</code>，把瀏覽器安全限制變成相容性策略。</p></div>
+<div class="card" style="margin-top:16px"><h3>Windows Defender 也是產品的一部分</h3><p>第三方單檔打包容易被判成未知威脅。於是改成綠色便攜包，使用官方簽章的原生 node.exe，讓部署路徑更可預期。</p></div></div></div></section>
+
+<section class="chapter" id="s5"><div class="wrap chapter-grid"><div><div class="kicker">CHAPTER 05 · V5.3</div><h2>開始回答另一個問題：<br>「學生正在做什麼？」</h2><p class="lead">GridSight 從單純的畫面監控，長出「課堂情境」：前景視窗、離題關鍵字、紅光警示。</p></div><div><div class="card"><h3>每秒一次的學生脈搏</h3><div class="flow"><div class="step">GetForegroundWindow()</div><div class="arrow">→</div><div class="step">GetWindowTextW()</div><div class="arrow">→</div><div class="step">Snapshot / Beacon</div></div><p class="muted" style="margin-top:20px">例如：<code>Visual Studio Code</code>、<code>YouTube - Google Chrome</code>。教師端把關鍵字庫持久化到 <code>data/seats.json</code>。</p></div>
+<div class="card" style="margin-top:18px"><h3>當「離題」被偵測</h3><div style="display:flex;align-items:center;gap:20px"><div style="width:85px;height:85px;border-radius:20px;border:2px solid var(--rose);box-shadow:0 0 35px #fb718566;display:grid;place-items:center;font-size:32px">⚠️</div><div><b style="color:var(--rose)">離題警示</b><br><span class="muted">座位卡紅色 pulse · 導航列顯示 N 台</span></div></div></div></div></div></section>
+
+<section class="chapter" id="s6"><div class="wrap chapter-grid"><div><div class="kicker">CHAPTER 06 · V5.4</div><h2>真正的敵人<br>藏在「正常情況」裡。</h2><p class="lead">多網卡、色彩轉換、Windows 批次檔、localhost 與真實 LAN IP——每個單獨看都很小，合在一起就是現場事故。</p></div><div><div class="timeline">
+<div class="event active"><div class="dot"></div><span class="date">5.4.0</span><h3>SSE2：把 BGRA → NV12 搬進 SIMD</h3><div class="event-detail">30 FPS 高畫質推流時，色彩空間轉換成為 CPU 熱點。一次處理 16 pixels，讓編碼前的資料搬運更有效率。</div></div>
+<div class="event"><div class="dot"></div><span class="date">5.4.0</span><h3>Multi-NIC：先問「哪張網卡？」</h3><div class="event-detail">實體 Ethernet、Wi-Fi、WSL、Hyper-V、VirtualBox 同時存在時，多播可能走錯路。啟動時掃描介面、過濾虛擬網卡，並提供 6 秒倒數選擇。</div></div>
+<div class="event"><div class="dot"></div><span class="date">5.4.1–5.4.3</span><h3>把 localhost 變成真的教室 IP</h3><div class="event-detail">教師端可用 localhost 開頁面，但學生加入指令不能指向 localhost。前端透過 /api/server-info 動態校正 LAN IP。</div></div>
+</div></div></div></section>
+
+<section class="chapter" id="s7"><div class="wrap chapter-grid"><div><div class="kicker">CHAPTER 07 · V5.5 / V5.6</div><h2>最後一幕不是新功能。<br>是把「會動」變成「可靠」。</h2><p class="lead">近期 release 把重心放到 deadlock、UAF、WebSocket、RTP、auth、backpressure、health 與 CI。</p></div><div><table class="compare"><thead><tr><th>問題</th><th>修正</th><th>結果</th></tr></thead><tbody>
+<tr><td>DXGI mutex deadlock</td><td>InitializeLocked / ReleaseLocked lifecycle</td><td>擷取生命週期可控</td></tr>
+<tr><td>Detached client UAF</td><td>HttpServer bounded worker pool</td><td>4 workers + condition variable</td></tr>
+<tr><td>WS framing 不完整</td><td>RFC 6455 parsing + fragmentation + ping/pong</td><td>1MB command cap</td></tr>
+<tr><td>RTP 重啟後接不到</td><td>SSRC change / 5s timeout / state reset</td><td>可重新取得新 broadcast</td></tr>
+<tr><td>Viewer 堵塞</td><td>bufferedAmount 上限 + 丟棄非 IDR frames</td><td>避免越積越多</td></tr>
+<tr><td>服務狀態不透明</td><td>named heartbeats + /status + /api/health</td><td>從「黑盒」變成可觀測</td></tr>
+</tbody></table>
+<div class="quote" style="margin-top:25px">工程成熟的訊號，不是功能列表越來越長，而是「出錯時知道自己在哪裡、為什麼、怎麼恢復」。</div></div></div></section>
+
+<section class="chapter" id="s8"><div class="wrap"><div class="kicker">THE SYSTEM TODAY</div><h2>回頭看，GridSight 其實是一個成本分配器。</h2><p class="lead" style="max-width:800px">同一個教室，同一套 Agent，根據觀看需求切換不同資料路徑：低頻監控、單點即時、全班廣播。這才讓 70 台設備在 1GbE 環境下同時工作成為可控的工程問題。</p>
+<div class="card" style="margin-top:30px"><div class="flow"><div class="step"><b>70 × 1 FPS</b><br><span class="muted">HTTP Pull</span></div><div class="arrow">+</div><div class="step"><b>1 × 30 FPS</b><br><span class="muted">WebSocket / H.264</span></div><div class="arrow">+</div><div class="step"><b>1 × Multicast</b><br><span class="muted">RTP / IGMP</span></div><div class="arrow">=</div><div class="step" style="border-color:var(--green)"><b>可運作的教室</b><br><span class="muted">不是理論，是現場</span></div></div></div>
+</div></section>
+
+<section class="cta"><div class="wrap"><div class="eyebrow">ONE LAST THING</div><h2>下一個問題，會是什麼？</h2><p class="lead">GridSight 的開發歷程沒有結束；它只是從「把畫面送過去」，走到了「讓整個系統值得信任」。</p><a class="btn" href="https://github.com/zzlee/gridsight" target="_blank" rel="noreferrer">查看 GitHub Repository ↗</a></div></section>
+<footer>GridSight · 70 人電腦教室螢幕監控與實時廣播系統 · Interactive Development Story<br>內容依 repository README、docs/wiki/development-history.md 與近期 release 變更整理。</footer>
+<script>
+const sections=[...document.querySelectorAll('.chapter')];
+const nav=document.getElementById('nav');
+sections.forEach((s,i)=>{const b=document.createElement('button');b.title=`Chapter ${i+1}`;b.onclick=()=>s.scrollIntoView({behavior:'smooth'});nav.appendChild(b)});
+const dots=[...nav.children];
+const io=new IntersectionObserver(es=>es.forEach(e=>{if(e.isIntersecting){const i=sections.indexOf(e.target);dots.forEach((d,j)=>d.classList.toggle('active',i===j))}}),{rootMargin:'-35% 0px -55% 0px'});sections.forEach(s=>io.observe(s));
+window.addEventListener('scroll',()=>{const h=document.documentElement;document.getElementById('progress').style.width=(h.scrollTop/(h.scrollHeight-h.clientHeight)*100)+'%'});
+
+document.querySelectorAll('[data-mode]').forEach(btn=>btn.addEventListener('click',()=>{document.querySelectorAll('[data-mode]').forEach(b=>b.classList.remove('active'));document.querySelectorAll('.mode-panel').forEach(p=>p.classList.remove('active'));btn.classList.add('active');document.getElementById(btn.dataset.mode).classList.add('active')}));
+document.querySelectorAll('.event').forEach(e=>e.addEventListener('click',()=>{document.querySelectorAll('.event').forEach(x=>x.classList.remove('active'));e.classList.add('active')}));
+</script>
+</body>
+</html>

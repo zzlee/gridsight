@@ -84,7 +84,15 @@ const setupFfmpegExe = async () => {
     console.log('[3.5/5] 🌐 Downloading official static ffmpeg.exe for Windows...');
     const zipPath = path.resolve(cacheDir, 'ffmpeg.zip');
     const ffmpegZipUrl = 'https://github.com/BtbN/FFmpeg-Builds/releases/download/latest/ffmpeg-master-latest-win64-gpl.zip';
-    execSync(`curl -L -o "${zipPath}" "${ffmpegZipUrl}" && unzip -p "${zipPath}" "*/bin/ffmpeg.exe" > "${cachedFfmpegExe}" && rm -f "${zipPath}"`, { stdio: 'inherit' });
+    console.log('      Downloading ffmpeg zip...');
+    execSync(`curl -L -o "${zipPath}" "${ffmpegZipUrl}"`, { stdio: 'inherit' });
+    try {
+      execSync(`unzip -p "${zipPath}" "*/bin/ffmpeg.exe" > "${cachedFfmpegExe}"`, { stdio: 'inherit' });
+    } catch (err) {
+      console.log('      unzip not available, extracting via Python zipfile...');
+      execSync(`python3 -c "import zipfile; z=zipfile.ZipFile('${zipPath}'); m=[n for n in z.namelist() if n.endswith('bin/ffmpeg.exe')][0]; open('${cachedFfmpegExe}','wb').write(z.read(m))"`, { stdio: 'inherit' });
+    }
+    fs.rmSync(zipPath, { force: true });
     console.log('      ✅ Official static ffmpeg.exe downloaded and cached.');
   } else {
     console.log('[3.5/5] ⚡ Using cached static ffmpeg.exe...');
@@ -177,6 +185,11 @@ if (fs.existsSync(zipOut)) fs.unlinkSync(zipOut);
 
 try {
   execSync(`cd "${releaseDir}" && zip -r "${zipOut}" gridsight-console-windows`, { stdio: 'inherit' });
+} catch (err) {
+  console.log('Zip binary not available, creating archive via Python zipfile...');
+  execSync(`python3 -c "import zipfile,os; src='${portableDir}'; out='${zipOut}'; [open(out,'w')] if False else None; z=zipfile.ZipFile(out,'w',zipfile.ZIP_DEFLATED); [z.write(os.path.join(r,f), os.path.relpath(os.path.join(r,f), os.path.dirname(src))) for r,d,fs in os.walk(src) for f in fs]; z.close()"`, { stdio: 'inherit' });
+}
+if (fs.existsSync(zipOut)) {
   const stats = fs.statSync(zipOut);
   console.log('===============================================================');
   console.log(`  ✅ SUCCESS! Zero-Warning Portable Bundle generated:`);
@@ -184,6 +197,6 @@ try {
   console.log(`     Zip:     ${zipOut}`);
   console.log(`     ZipSize: ${(stats.size / 1048576).toFixed(2)} MB`);
   console.log('===============================================================');
-} catch (err) {
-  console.warn('Zip creation note:', err.message);
+} else {
+  console.warn('Zip creation failed: archive not found.');
 }

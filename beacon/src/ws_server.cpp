@@ -254,7 +254,21 @@ void WebSocketStreamer::ReceiveCommands(uintptr_t sock_fd) {
 
     while (running_) {
         const int bytes = recv(sock, reinterpret_cast<char*>(buffer), sizeof(buffer), 0);
-        if (bytes <= 0) break;
+        if (bytes < 0) {
+            // A benign idle timeout is NOT a disconnection. The reverse WS is
+            // otherwise silent between commands (the server only writes on
+            // viewer events), so 3s of no data would otherwise be mistaken for
+            // a drop and trigger an endless reconnect loop that never relays frames.
+            const int recv_err = LastWebSocketError();
+#ifdef _WIN32
+            const bool is_timeout = (recv_err == WSAETIMEDOUT || recv_err == WSAEWOULDBLOCK);
+#else
+            const bool is_timeout = (recv_err == EAGAIN || recv_err == EWOULDBLOCK);
+#endif
+            if (is_timeout) continue;
+            break; // genuine error (including shutdown() during Stop)
+        }
+        if (bytes == 0) break; // peer closed cleanly
         Utils::UpdateHeartbeat("ws-rx");
         pending.insert(pending.end(), buffer, buffer + bytes);
 

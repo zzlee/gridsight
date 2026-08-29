@@ -540,7 +540,7 @@ static void ToggleFullscreen(HWND hwnd) {
         int win_h = 720;
         int x = (screen_w - win_w) / 2;
         int y = (screen_h - win_h) / 2;
-        SetWindowPos(hwnd, HWND_NOTOPMOST, x, y, win_w, win_h, SWP_NOOWNERZORDER | SWP_FRAMECHANGED);
+        SetWindowPos(hwnd, HWND_TOPMOST, x, y, win_w, win_h, SWP_NOOWNERZORDER | SWP_FRAMECHANGED);
     }
 }
 
@@ -570,7 +570,7 @@ static LRESULT CALLBACK OverlayWndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARA
         InvalidateRect(hwnd, NULL, FALSE);
         return 0;
 
-    case WM_PAINT: {
+    case WM_PAINT:
         PAINTSTRUCT ps;
         HDC hdc = BeginPaint(hwnd, &ps);
         RECT rc;
@@ -709,8 +709,7 @@ static LRESULT CALLBACK OverlayWndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARA
         EndPaint(hwnd, &ps);
         return 0;
     }
-    }
-    return DefWindowProc(hwnd, msg, wParam, lParam);
+    return DefWindowProcW(hwnd, msg, wParam, lParam);
 }
 
 } // namespace GridSight
@@ -1629,6 +1628,7 @@ void RTPReceiver::UIThreadLoop() {
     if (hwnd) {
         hwnd_overlay_ = (void*)hwnd;
         ShowWindow(hwnd, SW_SHOW);
+        SetWindowPos(hwnd, HWND_TOPMOST, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE);
         UpdateWindow(hwnd);
 
         MSG msg;

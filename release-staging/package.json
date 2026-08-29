@@ -1,6 +1,6 @@
 {
   "name": "gridsight-console",
-  "version": "5.7.1",
+  "version": "5.7.2",
   "bin": "server.cjs",
   "main": "server.cjs",
   "pkg": {

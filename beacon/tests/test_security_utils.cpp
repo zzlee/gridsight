@@ -49,6 +49,13 @@ int main() {
     assert(GridSight::Utils::GetLastHeartbeat("test-component") > 0);
     std::remove("gs-heartbeat-test-component.txt");
 
-    std::cout << "✅ All Utils security, token-grant, and heartbeat tests passed!" << std::endl;
+    // Test Logging
+    GridSight::Utils::Log("INFO", "Testing log output functionality");
+    std::ifstream log_file("gs-agent.log");
+    assert(log_file.is_open() && "Log file gs-agent.log should be created and accessible");
+    std::string log_contents((std::istreambuf_iterator<char>(log_file)), std::istreambuf_iterator<char>());
+    assert(log_contents.find("Testing log output functionality") != std::string::npos);
+
+    std::cout << "✅ All Utils security, token-grant, heartbeat, and logging tests passed!" << std::endl;
     return 0;
 }

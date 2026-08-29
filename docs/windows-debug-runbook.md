@@ -10,7 +10,7 @@
 
 | 元件 | 日誌/診斷管道 | 位置 |
 | :--- | :--- | :--- |
-| 學生端 `gs-agent.exe` | 檔案日誌（5MB 輪轉 → `.log.1`） | **行程 CWD** 下的 `gs-agent.log` |
+| 學生端 `gs-agent.exe` | 檔案日誌（5MB 或 1小時輪轉 → `.log.1`） | **行程 CWD** 下的 `gs-agent.log` |
 | 學生端 Watchdog | 心跳檔（60s 無心跳自動重啟 worker） | 行程 CWD 下的 `gs-heartbeat.txt` |
 | 教師端 Console | 檔案日誌（所有 `[Discovery]` `[WS Relay]` `[Broadcast]` 事件） | CWD 下 `gridsight-server.log`，可用 `LOG_FILE_PATH` 覆寫 |
 | 教師端瀏覽器 | 串流品質 HUD（FPS/解碼延遲/幀型）、硬體遙測 HUD | 焦點監看視窗頂部圖示開啟（預設關閉） |

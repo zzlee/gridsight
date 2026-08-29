@@ -283,6 +283,7 @@ std::string Utils::GenerateRandomToken(size_t length) {
 static std::mutex g_log_mutex;
 static std::ofstream g_log_file;
 static bool g_log_initialized = false;
+static std::chrono::steady_clock::time_point g_last_log_rotation_time;
 
 static std::string GetLogFilePath() {
 #ifdef _WIN32
@@ -300,6 +301,7 @@ void Utils::Log(const std::string& level, const std::string& message) {
     if (!g_log_initialized) {
         g_log_file.open(GetLogFilePath(), std::ios::app);
         g_log_initialized = true;
+        g_last_log_rotation_time = std::chrono::steady_clock::now();
     }
 
     auto now = std::chrono::system_clock::now();
@@ -319,14 +321,16 @@ void Utils::Log(const std::string& level, const std::string& message) {
         g_log_file << ss.str() << std::endl;
         g_log_file.flush();
 
-        // Log Rotation (5MB limit)
-        if (g_log_file.tellp() > 5 * 1024 * 1024) {
+        // Log Rotation (5MB limit OR 1 hour time limit)
+        auto now_steady = std::chrono::steady_clock::now();
+        if (g_log_file.tellp() > 5 * 1024 * 1024 || (now_steady - g_last_log_rotation_time) >= std::chrono::hours(1)) {
             g_log_file.close();
             std::string main_log = GetLogFilePath();
             std::string rot_log = main_log + ".1";
             std::remove(rot_log.c_str());
             std::rename(main_log.c_str(), rot_log.c_str());
             g_log_file.open(main_log, std::ios::app);
+            g_last_log_rotation_time = now_steady;
         }
     }
 }

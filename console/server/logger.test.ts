@@ -1,4 +1,6 @@
-import { writeLog, logger } from './logger.ts';
+import fs from 'fs';
+import path from 'path';
+import { writeLog, logger, closeLogger } from './logger.ts';
 
 function assert(condition: boolean, message: string) {
   if (!condition) {
@@ -114,17 +116,69 @@ function captureConsoleOutput(fn: () => void) {
   assert(logCalls[0][4]?.role === 'admin', 'console.log receives format arg 3');
 }
 
-// 4. Test error handling when stream fails or becomes null
+// 4. Test error handling when write occurs
 {
-  // Trigger stream error on any underlying stream if existing, or verify writeLog resilience after logStream error
   const { logCalls, errorCalls } = captureConsoleOutput(() => {
-    // Calling writeLog multiple times to confirm safety regardless of logStream status
     writeLog('INFO', 'Post-stream error info log');
     writeLog('ERROR', 'Post-stream error failure log');
   });
 
   assert(logCalls.length === 1, 'writeLog safe execution log call');
   assert(errorCalls.length === 1, 'writeLog safe execution error call');
+}
+
+// 5. Test log rotation (Rolling Mechanism)
+{
+  const testLogDir = path.resolve(process.cwd(), 'temp_test_logs');
+  const testLogPath = path.join(testLogDir, 'test-rotation.log');
+
+  // Set small max size (200 bytes) and max files (2)
+  process.env.LOG_FILE_PATH = testLogPath;
+  process.env.LOG_MAX_SIZE = '200';
+  process.env.LOG_MAX_FILES = '2';
+
+  // Ensure clean dir
+  closeLogger();
+  if (fs.existsSync(testLogDir)) {
+    fs.rmSync(testLogDir, { recursive: true, force: true });
+  }
+
+  captureConsoleOutput(() => {
+    // Each log line is ~40-60 bytes.
+    // Line 1: ~50B
+    writeLog('INFO', 'Rotation message line 1 - filling up initial buffer');
+    // Line 2: ~50B -> Total ~100B
+    writeLog('INFO', 'Rotation message line 2 - buffer half full');
+    // Line 3: ~50B -> Total ~150B
+    writeLog('INFO', 'Rotation message line 3 - approaching limit');
+    // Line 4: ~50B -> Total > 200B -> Triggers rotation! Main log becomes .1, new main log started.
+    writeLog('INFO', 'Rotation message line 4 - triggers rotation 1');
+    // Line 5 & 6 & 7 -> Triggers rotation 2! (.1 -> .2, main -> .1)
+    writeLog('INFO', 'Rotation message line 5 - buffer fill');
+    writeLog('INFO', 'Rotation message line 6 - buffer fill');
+    writeLog('INFO', 'Rotation message line 7 - triggers rotation 2');
+    // Line 8 & 9 & 10 -> Triggers rotation 3! (.2 discarded since LOG_MAX_FILES=2)
+    writeLog('INFO', 'Rotation message line 8 - buffer fill');
+    writeLog('INFO', 'Rotation message line 9 - buffer fill');
+    writeLog('INFO', 'Rotation message line 10 - triggers rotation 3');
+  });
+
+  closeLogger();
+
+  assert(fs.existsSync(testLogPath), 'Main log file exists after rotation');
+  assert(fs.existsSync(`${testLogPath}.1`), 'Rotated log .1 exists');
+  assert(fs.existsSync(`${testLogPath}.2`), 'Rotated log .2 exists');
+  assert(!fs.existsSync(`${testLogPath}.3`), 'Rotated log .3 does not exist (capped at LOG_MAX_FILES=2)');
+
+  // Clean up env and temp files
+  delete process.env.LOG_FILE_PATH;
+  delete process.env.LOG_MAX_SIZE;
+  delete process.env.LOG_MAX_FILES;
+  if (fs.existsSync(testLogDir)) {
+    fs.rmSync(testLogDir, { recursive: true, force: true });
+  }
+
+  assert(true, 'Log rotation test completed successfully');
 }
 
 console.log('\nAll logger tests passed successfully! 🎉');

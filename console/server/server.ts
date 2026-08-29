@@ -311,9 +311,9 @@ const defaultSeatsFile = isStandalone
   : '/data/seats.json';
 const SEATS_FILE = process.env.SEATS_FILE || defaultSeatsFile;
 
-const UPLOADS_DIR = isStandalone
+const UPLOADS_DIR = process.env.UPLOADS_DIR || (isStandalone
   ? path.resolve(process.cwd(), 'data', 'uploads')
-  : '/data/uploads';
+  : '/data/uploads');
 
 // Directory for media files uploaded for a broadcast test (streamed via RTP multicast).
 const BROADCAST_TEST_DIR = path.join(UPLOADS_DIR, 'broadcast-test');

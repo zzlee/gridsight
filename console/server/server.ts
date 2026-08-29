@@ -306,14 +306,20 @@ app.get('/api/stream/debug', requireTeacherAuth, (req, res) => {
 });
 
 const isStandalone = (process as any).pkg !== undefined || process.platform === 'win32';
-const defaultSeatsFile = isStandalone
-  ? path.resolve(process.cwd(), 'data', 'seats.json')
-  : '/data/seats.json';
+
+const defaultDataDir = (() => {
+  if (isStandalone) return path.resolve(process.cwd(), 'data');
+  try {
+    if (fs.existsSync('/data')) return '/data';
+  } catch {}
+  return path.resolve(process.cwd(), 'data');
+})();
+
+const defaultSeatsFile = path.join(defaultDataDir, 'seats.json');
 const SEATS_FILE = process.env.SEATS_FILE || defaultSeatsFile;
 
-const UPLOADS_DIR = isStandalone
-  ? path.resolve(process.cwd(), 'data', 'uploads')
-  : '/data/uploads';
+const defaultUploadsDir = path.join(defaultDataDir, 'uploads');
+const UPLOADS_DIR = process.env.UPLOADS_DIR || defaultUploadsDir;
 
 // Directory for media files uploaded for a broadcast test (streamed via RTP multicast).
 const BROADCAST_TEST_DIR = path.join(UPLOADS_DIR, 'broadcast-test');

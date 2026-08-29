@@ -34,6 +34,7 @@ private:
     int port_;
     std::atomic<bool> running_{false};
     std::atomic<bool> overlay_active_{false};
+    std::atomic<uint64_t> last_stop_broadcast_time_{0};
     std::thread receive_thread_;
     std::thread decode_thread_;
     std::thread ui_thread_;

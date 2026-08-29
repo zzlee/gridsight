@@ -729,6 +729,7 @@ static RTPReceiver* g_rtp_receiver_instance = nullptr;
 void RTPReceiver::RequestCloseOverlay() {
 #ifdef _WIN32
     if (g_rtp_receiver_instance) {
+        g_rtp_receiver_instance->last_stop_broadcast_time_ = Utils::GetCurrentTimestampMs();
         g_rtp_receiver_instance->CloseOverlayWindow();
     }
 #endif
@@ -1039,6 +1040,9 @@ void RTPReceiver::ReceiveLoop() {
         uint64_t now = Utils::GetCurrentTimestampMs();
 
     if (bytes > 0) {
+        if (now - last_stop_broadcast_time_ < 3000) {
+            continue;
+        }
         RTPPacketView pkt;
 
         if (!ParseRTPPacket(

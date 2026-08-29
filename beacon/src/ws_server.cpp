@@ -196,6 +196,7 @@ void WebSocketStreamer::ConnectOutboundLoop() {
         inet_pton(AF_INET, host.c_str(), &addr.sin_addr);
 
         if (connect(s, (sockaddr*)&addr, sizeof(addr)) == SOCKET_ERROR) {
+            Utils::Log("ERROR", "❌ Outbound connect to teacher " + host + ":" + std::to_string(port) + " failed (error " + std::to_string(LastWebSocketError()) + ")");
             {
                 std::lock_guard<std::mutex> lock(client_mutex_);
                 if (outbound_sock_ == (uintptr_t)s) outbound_sock_ = 0;
@@ -231,6 +232,14 @@ void WebSocketStreamer::ConnectOutboundLoop() {
             if (running_) {
                 Utils::Log("WARN", "Reverse WebSocket disconnected, retrying...");
             }
+        } else {
+            std::string err_reason = "unknown";
+            if (rec <= 0) {
+                err_reason = "recv timeout or peer closed (error " + std::to_string(LastWebSocketError()) + ")";
+            } else {
+                err_reason = "rejected by server: " + std::string(buf, rec > 256 ? 256 : rec);
+            }
+            Utils::Log("ERROR", "❌ Reverse WebSocket handshake failed with " + host + ": " + err_reason);
         }
 
         {

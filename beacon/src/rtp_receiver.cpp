@@ -1544,6 +1544,20 @@ void RTPReceiver::ReceiveLoop() {
             } else if (!au_to_decode.empty()) {
                 EnqueueAU(std::move(au_to_decode));
             }
+
+            /*
+             * Reset the per-frame access-unit assembly state so the next
+             * frame starts from an empty buffer. Without this the growing
+             * buffer is never cleared (AppendAccessUnitNAL only clears it
+             * when access_unit_active_ is false), so every subsequent frame
+             * fed to the decoder accumulates ALL prior NALs — replaying from
+             * the start and growing without bound (visibly "buffers, replays
+             * from head, then keeps accumulating").
+             */
+            access_unit_buffer_.clear();
+            access_unit_active_ = false;
+            access_unit_has_idr_ = false;
+            access_unit_corrupt_ = false;
         }
 
     } else {

@@ -28,6 +28,12 @@ export interface StreamerOptions {
   fps?: number;
   bitrateKbps?: number;
   localIp?: string;
+  /** 'screen' captures the teacher display (default); 'file'/'url' stream a media source via RTP for test purposes. */
+  sourceType?: 'screen' | 'file' | 'url';
+  /** For sourceType 'file'/'url': the local file path or remote media URL to stream. */
+  source?: string;
+  /** For sourceType 'file'/'url': optional max output frame height for the test stream (e.g. 720 lower decode load on student agents). Auto-fits width, preserves aspect. */
+  scale?: number;
 }
 
 export interface StreamStartResult {
@@ -67,6 +73,11 @@ export class TeacherBroadcastStreamer {
   private process: ChildProcess | null = null;
   private isStreaming = false;
   private killTimers = new Set<NodeJS.Timeout>();
+  private currentSourceType: string = 'screen';
+
+  getMode(): string | null {
+    return this.isStreaming ? this.currentSourceType : null;
+  }
 
   async startStream(options: StreamerOptions = {}): Promise<StreamStartResult> {
     if (this.isStreaming && this.process && this.process.exitCode === null) {
@@ -97,9 +108,33 @@ export class TeacherBroadcastStreamer {
 
     let inputArgs: string[];
     const platform = os.platform();
+    const sourceType = options.sourceType || 'screen';
+    const mediaSource = options.source?.trim() || '';
+    // Framerate/output constraints inserted for the media (file/url) path only.
+    let mediaConstraints: string[] = [];
 
-    // macOS is not a supported platform (see docs/roadmap.md)
-    if (platform === 'win32') {
+    if (sourceType === 'file' || sourceType === 'url') {
+      // Media broadcast test: stream a local file or remote URL over the same
+      // RTP multicast group the student agents subscribe to, looped until stop.
+      if (sourceType === 'file' && !fs.existsSync(mediaSource)) {
+        logger.error(`[Broadcast] Test media file not found: ${mediaSource}`);
+        return { ok: false, error: `測試媒體檔案不存在: ${mediaSource}` };
+      }
+      if (sourceType === 'url' && !/^https?:\/\//i.test(mediaSource)) {
+        return { ok: false, error: '請提供有效的測試媒體網址 (http/https)' };
+      }
+      logger.info(`[Broadcast] Media broadcast test source (${sourceType}): ${mediaSource}`);
+      // -re paces input at native frame rate; -stream_loop -1 loops forever so
+      // the test keeps streaming until the teacher explicitly stops it.
+      inputArgs = ['-re', '-stream_loop', '-1', '-i', mediaSource];
+      // Cap output framerate so decode load on student agents stays low.
+      mediaConstraints = ['-r', String(fps)];
+      // Optionally downscale (typical test streams are 1080p; agents may struggle
+      // to decode 1080p60 in software). Auto-fit width to preserve aspect ratio.
+      const maxHeight = clampInt(options.scale, 0, 144, 2160);
+      if (maxHeight > 0) mediaConstraints.push('-vf', `scale=-2:${maxHeight}`);
+    } else if (platform === 'win32') {
+      // macOS is not a supported platform (see docs/roadmap.md)
       inputArgs = ['-f', 'gdigrab', '-framerate', String(fps), '-i', 'desktop'];
     } else {
       // Linux: omit -video_size so x11grab captures the full screen at native resolution
@@ -110,6 +145,7 @@ export class TeacherBroadcastStreamer {
     const rtpUrl = `rtp://${multicastIp}:${port}?pkt_size=1316&ttl=2${localaddr ? `&localaddr=${localaddr}` : ''}`;
     const ffmpegArgs = [
       ...inputArgs,
+      ...mediaConstraints,
       '-c:v', 'libx264',
       '-preset', 'ultrafast',
       '-tune', 'zerolatency',
@@ -164,12 +200,14 @@ export class TeacherBroadcastStreamer {
 
     this.process = child;
     this.isStreaming = true;
+    this.currentSourceType = sourceType;
 
     child.on('close', (code) => {
       if (this.process !== child) return;
       logger.info(`[Broadcast] Streamer process exited with code ${code}`);
       this.isStreaming = false;
       this.process = null;
+      this.currentSourceType = 'screen';
     });
 
     child.on('error', (err) => {
@@ -188,6 +226,7 @@ export class TeacherBroadcastStreamer {
       if (this.process === child) {
         this.isStreaming = false;
         this.process = null;
+        this.currentSourceType = 'screen';
       }
       return { ok: false, error: reason };
     } 
@@ -199,6 +238,7 @@ export class TeacherBroadcastStreamer {
     const child = this.process;
     this.process = null;
     this.isStreaming = false;
+    this.currentSourceType = 'screen';
 
     if (child && child.exitCode === null) {
       try {

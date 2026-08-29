@@ -12,6 +12,10 @@ var __commonJS = (cb, mod) => function __require() {
     throw mod = 0, e;
   }
 };
+var __export = (target, all) => {
+  for (var name in all)
+    __defProp(target, name, { get: all[name], enumerable: true });
+};
 var __copyProps = (to, from, except, desc) => {
   if (from && typeof from === "object" || typeof from === "function") {
     for (let key of __getOwnPropNames(from))
@@ -28,6 +32,7 @@ var __toESM = (mod, isNodeMode, target) => (target = mod != null ? __create(__ge
   isNodeMode || !mod || !mod.__esModule ? __defProp(target, "default", { value: mod, enumerable: true }) : target,
   mod
 ));
+var __toCommonJS = (mod) => __copyProps(__defProp({}, "__esModule", { value: true }), mod);
 
 // console/server/node_modules/dotenv/lib/main.js
 var require_main = __commonJS({
@@ -35,7 +40,7 @@ var require_main = __commonJS({
     var fs5 = require("fs");
     var path5 = require("path");
     var os4 = require("os");
-    var crypto2 = require("crypto");
+    var crypto3 = require("crypto");
     var TIPS = [
       "\u25C8 encrypted .env [www.dotenvx.com]",
       "\u25C8 secrets for agents [www.dotenvx.com]",
@@ -279,7 +284,7 @@ var require_main = __commonJS({
       const authTag = ciphertext.subarray(-16);
       ciphertext = ciphertext.subarray(12, -16);
       try {
-        const aesgcm = crypto2.createDecipheriv("aes-256-gcm", key, nonce);
+        const aesgcm = crypto3.createDecipheriv("aes-256-gcm", key, nonce);
         aesgcm.setAuthTag(authTag);
         return `${aesgcm.update(ciphertext)}${aesgcm.final()}`;
       } catch (error) {
@@ -19153,14 +19158,14 @@ var require_etag = __commonJS({
   "console/server/node_modules/etag/index.js"(exports2, module2) {
     "use strict";
     module2.exports = etag;
-    var crypto2 = require("crypto");
+    var crypto3 = require("crypto");
     var Stats = require("fs").Stats;
     var toString = Object.prototype.toString;
     function entitytag(entity) {
       if (entity.length === 0) {
         return '"0-2jmj7l5rSw0yVb/vlWAYkK/YBwk"';
       }
-      var hash = crypto2.createHash("sha1").update(entity, "utf8").digest("base64").substring(0, 27);
+      var hash = crypto3.createHash("sha1").update(entity, "utf8").digest("base64").substring(0, 27);
       var len = typeof entity === "string" ? Buffer.byteLength(entity, "utf8") : entity.length;
       return '"' + len.toString(16) + "-" + hash + '"';
     }
@@ -22053,11 +22058,11 @@ var require_request = __commonJS({
 // console/server/node_modules/cookie-signature/index.js
 var require_cookie_signature = __commonJS({
   "console/server/node_modules/cookie-signature/index.js"(exports2) {
-    var crypto2 = require("crypto");
+    var crypto3 = require("crypto");
     exports2.sign = function(val, secret) {
       if ("string" !== typeof val) throw new TypeError("Cookie value must be provided as a string.");
       if (null == secret) throw new TypeError("Secret key must be provided.");
-      return val + "." + crypto2.createHmac("sha256", secret).update(val).digest("base64").replace(/\=+$/, "");
+      return val + "." + crypto3.createHmac("sha256", secret).update(val).digest("base64").replace(/\=+$/, "");
     };
     exports2.unsign = function(val, secret) {
       if ("string" !== typeof val) throw new TypeError("Signed cookie string must be provided.");
@@ -22066,7 +22071,7 @@ var require_cookie_signature = __commonJS({
       return sha1(mac) == sha1(val) ? str : false;
     };
     function sha1(str) {
-      return crypto2.createHash("sha1").update(str).digest("hex");
+      return crypto3.createHash("sha1").update(str).digest("hex");
     }
   }
 });
@@ -26982,6 +26987,17 @@ var require_websocket_server = __commonJS({
   }
 });
 
+// console/server/server.ts
+var server_exports = {};
+__export(server_exports, {
+  generateTeacherToken: () => generateTeacherToken,
+  isValidTeacherToken: () => isValidTeacherToken,
+  server: () => server,
+  teacherSessions: () => teacherSessions,
+  tokenAuth: () => tokenAuth
+});
+module.exports = __toCommonJS(server_exports);
+
 // console/server/node_modules/dotenv/config.js
 (function() {
   require_main().config(
@@ -26997,6 +27013,7 @@ var require_websocket_server = __commonJS({
 var import_express = __toESM(require_express2(), 1);
 var import_cors = __toESM(require_lib3(), 1);
 var import_path4 = __toESM(require("path"), 1);
+var import_crypto2 = __toESM(require("crypto"), 1);
 var import_url = require("url");
 var import_fs4 = __toESM(require("fs"), 1);
 var import_http = require("http");
@@ -27018,6 +27035,9 @@ var import_path = __toESM(require("path"), 1);
 var TokenAuthority = class {
   activeTokens = /* @__PURE__ */ new Map();
   hmacSecret = "";
+  normalizeMac(mac) {
+    return mac.trim().replace(/-/g, ":").toUpperCase();
+  }
   /**
    * Load or generate the HMAC shared secret.
    * Persists to data/hmac_secret.txt so the same secret survives restarts
@@ -27037,7 +27057,9 @@ var TokenAuthority = class {
     try {
       const dir = import_path.default.dirname(secretFile);
       import_fs.default.mkdirSync(dir, { recursive: true });
-      import_fs.default.writeFileSync(secretFile, this.hmacSecret, "utf-8");
+      const tempFile = `${secretFile}.tmp-${process.pid}`;
+      import_fs.default.writeFileSync(tempFile, this.hmacSecret, "utf-8");
+      import_fs.default.renameSync(tempFile, secretFile);
     } catch (err) {
       console.error("[TokenAuthority] Failed to persist HMAC secret:", err);
     }
@@ -27052,10 +27074,11 @@ var TokenAuthority = class {
     return import_crypto.default.createHmac("sha256", secret).update(token + "|" + mac).digest("hex");
   }
   generateToken(mac, ip) {
-    const existing = this.getToken(mac);
+    const normalizedMac = this.normalizeMac(mac);
+    const existing = this.getToken(normalizedMac);
     if (existing) return existing;
     const token = import_crypto.default.randomBytes(24).toString("hex");
-    this.activeTokens.set(mac, {
+    this.activeTokens.set(normalizedMac, {
       token,
       ip,
       expiresAt: Date.now() + 1e3 * 60 * 180
@@ -27064,17 +27087,20 @@ var TokenAuthority = class {
     return token;
   }
   getToken(mac) {
-    const entry = this.activeTokens.get(mac);
+    const normalizedMac = this.normalizeMac(mac);
+    const entry = this.activeTokens.get(normalizedMac);
     if (!entry) return void 0;
     if (Date.now() > entry.expiresAt) {
-      this.activeTokens.delete(mac);
+      this.activeTokens.delete(normalizedMac);
       return void 0;
     }
     return entry.token;
   }
   validateToken(mac, token) {
+    if (!mac || !token) return false;
     const active = this.getToken(mac);
-    return active === token;
+    if (!active || active.length !== token.length) return false;
+    return import_crypto.default.timingSafeEqual(Buffer.from(active), Buffer.from(token));
   }
 };
 
@@ -27122,6 +27148,9 @@ var MulticastDiscoveryService = class {
   onDeviceDiscovered;
   activeDevices = /* @__PURE__ */ new Map();
   // key: mac or ip
+  listening = false;
+  joinedRoutes = 0;
+  lastError = "";
   constructor(tokenAuth2, onDeviceDiscovered) {
     this.tokenAuth = tokenAuth2;
     this.onDeviceDiscovered = onDeviceDiscovered;
@@ -27160,7 +27189,15 @@ var MulticastDiscoveryService = class {
         joinedCount++;
       } catch {
       }
+      this.listening = true;
+      this.joinedRoutes = joinedCount;
+      this.lastError = "";
       logger.info(`[Discovery] Multicast listener joined ${this.multicastAddress}:${this.port} across ${joinedCount} network route(s)`);
+    });
+    this.server.on("error", (err) => {
+      this.listening = false;
+      this.lastError = err.message;
+      logger.error(`[Discovery] UDP socket error: ${err.message}`);
     });
     this.server.on("message", (msg, rinfo) => {
       try {
@@ -27200,6 +27237,14 @@ var MulticastDiscoveryService = class {
     });
     this.server.bind(this.port);
   }
+  getHealth() {
+    return {
+      listening: this.listening,
+      joinedRoutes: this.joinedRoutes,
+      lastError: this.lastError || void 0,
+      activeDevices: this.activeDevices.size
+    };
+  }
   getDevices() {
     const now = Date.now();
     const result = [];
@@ -27213,6 +27258,8 @@ var MulticastDiscoveryService = class {
     return result;
   }
   stop() {
+    this.listening = false;
+    this.joinedRoutes = 0;
     if (this.server) {
       this.server.close();
       this.server = null;
@@ -27262,6 +27309,10 @@ var TeacherBroadcastStreamer = class {
   process = null;
   isStreaming = false;
   killTimers = /* @__PURE__ */ new Set();
+  currentSourceType = "screen";
+  getMode() {
+    return this.isStreaming ? this.currentSourceType : null;
+  }
   async startStream(options = {}) {
     if (this.isStreaming && this.process && this.process.exitCode === null) {
       return { ok: true, alreadyActive: true };
@@ -27281,7 +27332,23 @@ var TeacherBroadcastStreamer = class {
     );
     let inputArgs;
     const platform = import_os2.default.platform();
-    if (platform === "win32") {
+    const sourceType = options.sourceType || "screen";
+    const mediaSource = options.source?.trim() || "";
+    let mediaConstraints = [];
+    if (sourceType === "file" || sourceType === "url") {
+      if (sourceType === "file" && !import_fs3.default.existsSync(mediaSource)) {
+        logger.error(`[Broadcast] Test media file not found: ${mediaSource}`);
+        return { ok: false, error: `\u6E2C\u8A66\u5A92\u9AD4\u6A94\u6848\u4E0D\u5B58\u5728: ${mediaSource}` };
+      }
+      if (sourceType === "url" && !/^https?:\/\//i.test(mediaSource)) {
+        return { ok: false, error: "\u8ACB\u63D0\u4F9B\u6709\u6548\u7684\u6E2C\u8A66\u5A92\u9AD4\u7DB2\u5740 (http/https)" };
+      }
+      logger.info(`[Broadcast] Media broadcast test source (${sourceType}): ${mediaSource}`);
+      inputArgs = ["-re", "-stream_loop", "-1", "-i", mediaSource];
+      mediaConstraints = ["-r", String(fps)];
+      const maxHeight = clampInt(options.scale, 0, 144, 2160);
+      if (maxHeight > 0) mediaConstraints.push("-vf", `scale=-2:${maxHeight}`);
+    } else if (platform === "win32") {
       inputArgs = ["-f", "gdigrab", "-framerate", String(fps), "-i", "desktop"];
     } else {
       const display = process.env.DISPLAY || ":0";
@@ -27290,6 +27357,7 @@ var TeacherBroadcastStreamer = class {
     const rtpUrl = `rtp://${multicastIp}:${port}?pkt_size=1316&ttl=2${localaddr ? `&localaddr=${localaddr}` : ""}`;
     const ffmpegArgs = [
       ...inputArgs,
+      ...mediaConstraints,
       "-c:v",
       "libx264",
       "-preset",
@@ -27349,11 +27417,13 @@ var TeacherBroadcastStreamer = class {
     });
     this.process = child;
     this.isStreaming = true;
+    this.currentSourceType = sourceType;
     child.on("close", (code) => {
       if (this.process !== child) return;
       logger.info(`[Broadcast] Streamer process exited with code ${code}`);
       this.isStreaming = false;
       this.process = null;
+      this.currentSourceType = "screen";
     });
     child.on("error", (err) => {
       if (this.process !== child) return;
@@ -27369,6 +27439,7 @@ var TeacherBroadcastStreamer = class {
       if (this.process === child) {
         this.isStreaming = false;
         this.process = null;
+        this.currentSourceType = "screen";
       }
       return { ok: false, error: reason };
     }
@@ -27379,6 +27450,7 @@ var TeacherBroadcastStreamer = class {
     const child = this.process;
     this.process = null;
     this.isStreaming = false;
+    this.currentSourceType = "screen";
     if (child && child.exitCode === null) {
       try {
         child.kill("SIGTERM");
@@ -27580,12 +27652,105 @@ function openBrowser(targetUrl, platform = process.platform) {
   }
 }
 
+// console/server/installerScript.ts
+var assertSafeValue = (name, value, pattern) => {
+  if (!pattern.test(value)) {
+    throw new Error(`Unsafe ${name} value`);
+  }
+  return value;
+};
+var buildInstallAgentScript = ({
+  serverHost,
+  teacherHost,
+  teacherPort,
+  hmacSecret,
+  version
+}) => {
+  const safeServerHost = assertSafeValue("serverHost", serverHost, /^[A-Za-z0-9._:-]+$/);
+  const safeTeacherHost = assertSafeValue("teacherHost", teacherHost, /^[A-Za-z0-9._-]+$/);
+  const safeSecret = assertSafeValue("hmacSecret", hmacSecret, /^[a-fA-F0-9]{64}$/);
+  const safeVersion = assertSafeValue("version", version, /^\d+\.\d+\.\d+$/);
+  if (!Number.isInteger(teacherPort) || teacherPort < 1 || teacherPort > 65535) {
+    throw new Error("Invalid teacherPort value");
+  }
+  return `# ========================================================
+# GridSight Agent One-Click Pull & Launch Script (v${safeVersion})
+# ========================================================
+$ErrorActionPreference = "SilentlyContinue"
+$serverHost = "${safeServerHost}"
+$exeUrl = "http://$serverHost/download/gs-agent.exe"
+$destDir = "$env:TEMP"
+$destPath = "$destDir\\gs-agent.exe"
+$envPath = "$destDir\\.env"
+
+Write-Host "=======================================================" -ForegroundColor Cyan
+Write-Host "  GridSight Student Agent v${safeVersion} \u90E8\u7F72\u8207\u555F\u52D5\u7A0B\u5E8F" -ForegroundColor Cyan
+Write-Host "=======================================================" -ForegroundColor Cyan
+Write-Host "[GridSight] \u6B63\u5728\u7D42\u6B62\u820A\u7248 gs-agent \u884C\u7A0B..." -ForegroundColor Yellow
+
+taskkill /F /IM gs-agent.exe /T 2>$null | Out-Null
+Start-Sleep -Milliseconds 500
+
+Write-Host "[GridSight] \u6B63\u5728\u5F9E $exeUrl \u4E0B\u8F09\u6700\u65B0\u7248 gs-agent.exe..." -ForegroundColor Cyan
+[Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12 -bor [Net.SecurityProtocolType]::Tls11 -bor [Net.SecurityProtocolType]::Tls
+
+try {
+    if (Test-Path $destPath) { Remove-Item $destPath -Force }
+    $oldEAP = $ErrorActionPreference
+    $ErrorActionPreference = "Stop"
+    Invoke-WebRequest -Uri $exeUrl -OutFile $destPath -UseBasicParsing
+    $ErrorActionPreference = $oldEAP
+} catch {
+    Write-Host "[GridSight] \u274C \u4E0B\u8F09\u5B78\u751F\u7AEF\u7A0B\u5F0F\u5931\u6557\uFF01\u8ACB\u78BA\u8A8D\u8207\u6559\u5E2B\u7AEF\u4F3A\u670D\u5668 (http://$serverHost) \u9023\u7DDA\u6B63\u5E38\u3002" -ForegroundColor Red
+    Write-Host "[GridSight] \u932F\u8AA4\u8A73\u60C5: $_" -ForegroundColor Red
+    Exit
+}
+
+if (!(Test-Path $destPath) -or (Get-Item $destPath).Length -lt 10240) {
+    Write-Host "[GridSight] \u274C \u4E0B\u8F09\u5B78\u751F\u7AEF\u7A0B\u5F0F\u932F\u8AA4\uFF1A\u4E0B\u8F09\u7684\u6A94\u6848\u7121\u6548\u6216\u5927\u5C0F\u7570\u5E38\u3002" -ForegroundColor Red
+    if (Test-Path $destPath) {
+        $content = Get-Content $destPath -TotalCount 5
+        Write-Host "[GridSight] \u4F3A\u670D\u5668\u56DE\u61C9\u5167\u5BB9: $content" -ForegroundColor Red
+        Remove-Item $destPath -Force
+    }
+    Exit
+}
+
+# Write the exact file and keys consumed by gs-agent from its working directory.
+$configLines = @(
+    "HMAC_SECRET=${safeSecret}",
+    "TEACHER_HOST=${safeTeacherHost}",
+    "TEACHER_PORT=${teacherPort}"
+)
+Set-Content -Path $envPath -Value $configLines -Encoding ASCII
+Write-Host "[GridSight] \u5DF2\u5BEB\u5165 HMAC \u8207\u6559\u5E2B\u7AEF\u8A2D\u5B9A\u81F3 $envPath" -ForegroundColor DarkGray
+
+try {
+    netsh advfirewall firewall delete rule name="GridSight Agent" 2>$null | Out-Null
+    netsh advfirewall firewall delete rule name="GridSight Agent Out" 2>$null | Out-Null
+    netsh advfirewall firewall add rule name="GridSight Agent" dir=in action=allow program="$destPath" enable=yes profile=any protocol=any 2>$null | Out-Null
+    netsh advfirewall firewall add rule name="GridSight Agent Out" dir=out action=allow program="$destPath" enable=yes profile=any protocol=any 2>$null | Out-Null
+} catch {}
+
+Write-Host "[GridSight] \u6B63\u5728\u555F\u52D5\u6700\u65B0\u7248 gs-agent.exe (v${safeVersion})..." -ForegroundColor Green
+Start-Process -FilePath $destPath -WorkingDirectory $destDir -WindowStyle Hidden
+
+Start-Sleep -Seconds 1
+$proc = Get-Process -Name "gs-agent" -ErrorAction SilentlyContinue
+if ($proc) {
+    Write-Host "[GridSight] \u2705 \u5B78\u751F\u7AEF\u4EE3\u7406\u7A0B\u5F0F (v${safeVersion}) \u5DF2\u6210\u529F\u5728\u80CC\u666F\u555F\u52D5\uFF01 (PID: $($proc[0].Id))" -ForegroundColor Green
+} else {
+    Write-Host "[GridSight] \u26A0\uFE0F \u8B66\u544A\uFF1A\u7121\u6CD5\u78BA\u8A8D\u80CC\u666F\u884C\u7A0B\u72C0\u614B\uFF0C\u8ACB\u6AA2\u67E5\u9632\u6BD2\u8EDF\u9AD4\u6216\u6B0A\u9650\u8A2D\u5B9A\u3002" -ForegroundColor Yellow
+}
+`;
+};
+
 // console/server/server.ts
 var import_meta = {};
 var currentDirname = typeof __dirname !== "undefined" ? __dirname : import_path4.default.dirname((0, import_url.fileURLToPath)(import_meta.url || "file:///"));
 var app = (0, import_express.default)();
 var server = (0, import_http.createServer)(app);
-var wss = new import_websocket_server.default({ server });
+var wss = new import_websocket_server.default({ server, maxPayload: 8 * 1024 * 1024 });
 var PORT = process.env.API_PORT || process.env.PORT ? parseInt(process.env.API_PORT || process.env.PORT || "3000", 10) : 3e3;
 var HOST = process.env.API_HOST || "0.0.0.0";
 var activeTeacherIp = "127.0.0.1";
@@ -27600,7 +27765,7 @@ var discoveryService = new MulticastDiscoveryService(tokenAuth, (device) => {
 var teacherPin = process.env.TEACHER_PIN || "888888";
 var teacherSessions = /* @__PURE__ */ new Map();
 var generateTeacherToken = () => {
-  const token = Math.random().toString(36).substring(2) + Date.now().toString(36) + Math.random().toString(36).substring(2);
+  const token = import_crypto2.default.randomBytes(32).toString("hex");
   const expiresAt = Date.now() + 1e3 * 60 * 60 * 24 * 7;
   teacherSessions.set(token, expiresAt);
   return { token, expiresAt };
@@ -27624,6 +27789,8 @@ var requireTeacherAuth = (req, res, next) => {
   res.status(401).json({ error: "Unauthorized: Teacher PIN required", code: "AUTH_REQUIRED" });
 };
 var snapshotCache = /* @__PURE__ */ new Map();
+var SNAPSHOT_CACHE_MAX_KEYS = 256;
+var SNAPSHOT_CACHE_TTL_MS = 3e4;
 var agentSockets = /* @__PURE__ */ new Map();
 var viewerSockets = /* @__PURE__ */ new Map();
 var pendingLogRequests = /* @__PURE__ */ new Map();
@@ -27631,15 +27798,56 @@ var normalizeTarget = (raw) => {
   if (!raw) return "";
   return decodeURIComponent(raw).replace(/%3A/gi, ":").trim().toUpperCase();
 };
+var pruneSnapshotCache = (now = Date.now()) => {
+  for (const [key, entry] of snapshotCache) {
+    if (now - entry.timestamp > SNAPSHOT_CACHE_TTL_MS) snapshotCache.delete(key);
+  }
+  while (snapshotCache.size > SNAPSHOT_CACHE_MAX_KEYS) {
+    const oldestKey = snapshotCache.keys().next().value;
+    if (!oldestKey) break;
+    snapshotCache.delete(oldestKey);
+  }
+};
+var storeSnapshot = (key, entry) => {
+  if (!key) return;
+  snapshotCache.delete(key);
+  snapshotCache.set(key, entry);
+  pruneSnapshotCache(entry.timestamp);
+};
+var getSnapshotCached = (key) => {
+  const entry = snapshotCache.get(key);
+  if (entry === void 0) return void 0;
+  snapshotCache.delete(key);
+  snapshotCache.set(key, entry);
+  return entry;
+};
+var requireAgentSnapshotAuth = (req, res, next) => {
+  const mac = normalizeTarget(req.headers["x-agent-mac"] || "");
+  const token = req.headers["x-auth-token"] || "";
+  if (!mac || !tokenAuth.validateToken(mac, token)) {
+    return res.status(401).json({ error: "Unauthorized agent snapshot" });
+  }
+  next();
+};
 wss.on("connection", (ws, req) => {
   const host = req.headers.host || `localhost:${PORT}`;
   const parsedUrl = new URL(req.url || "", `http://${host}`);
   const pathname = parsedUrl.pathname;
   if (pathname === "/ws/agent") {
-    const rawMac = parsedUrl.searchParams.get("mac") || req.socket.remoteAddress?.replace(/^.*:/, "") || "unknown";
+    const rawMac = parsedUrl.searchParams.get("mac") || "";
     const mac = normalizeTarget(rawMac);
+    const token = parsedUrl.searchParams.get("token") || "";
+    if (!mac || !tokenAuth.validateToken(mac, token)) {
+      logger.warn(`[WS Relay] Rejected unauthenticated agent socket from ${req.socket.remoteAddress || "unknown"}`);
+      ws.close(1008, "Invalid agent credentials");
+      return;
+    }
+    const previous = agentSockets.get(mac);
+    if (previous && previous !== ws) {
+      previous.close(1008, "Superseded by a newer authenticated connection");
+    }
     agentSockets.set(mac, ws);
-    logger.info(`[WS Relay] Student Agent registered outbound: ${mac}`);
+    logger.info(`[WS Relay] Authenticated student agent registered outbound: ${mac}`);
     let frameCount = 0;
     let totalBytes = 0;
     ws.on("message", (data, isBinary) => {
@@ -27653,9 +27861,14 @@ wss.on("connection", (ws, req) => {
         const viewers = viewerSockets.get(mac);
         if (viewers && viewers.size > 0) {
           viewers.forEach((v) => {
-            if (v.readyState === import_websocket.default.OPEN) {
-              v.send(data, { binary: true });
+            if (v.readyState !== import_websocket.default.OPEN) return;
+            if (v.bufferedAmount > 8 * 1024 * 1024) {
+              logger.warn(`[WS Relay] Closing persistently slow viewer for ${mac}`);
+              v.close(1009, "Viewer backpressure limit exceeded");
+              return;
             }
+            if (v.bufferedAmount > 2 * 1024 * 1024) return;
+            v.send(data, { binary: true });
           });
         }
       } else {
@@ -27674,34 +27887,39 @@ wss.on("connection", (ws, req) => {
       }
     });
     ws.on("close", () => {
-      agentSockets.delete(mac);
+      if (agentSockets.get(mac) === ws) {
+        agentSockets.delete(mac);
+      }
       logger.info(`[WS Relay] Student Agent disconnected: ${mac}`);
     });
   } else if (pathname.startsWith("/ws/stream/")) {
+    const teacherToken = parsedUrl.searchParams.get("token");
+    if (!isValidTeacherToken(teacherToken)) {
+      logger.warn(`[WS Relay] Rejected unauthenticated teacher viewer from ${req.socket.remoteAddress || "unknown"}`);
+      ws.close(1008, "Teacher authentication required");
+      return;
+    }
     const rawTarget = pathname.replace("/ws/stream/", "");
     let mac = normalizeTarget(rawTarget);
     if (!agentSockets.has(mac)) {
       const dev = discoveryService.getDevices().find(
-        (d) => d.mac === mac || d.ip === mac || d.id === mac || d.hostname === mac || normalizeTarget(d.mac) === mac
+        (d) => d.mac === mac || d.ip === rawTarget || d.hostname === rawTarget || normalizeTarget(d.mac) === mac
       );
-      if (dev && agentSockets.has(normalizeTarget(dev.mac))) {
-        mac = normalizeTarget(dev.mac);
-      } else if (agentSockets.size === 1) {
-        mac = Array.from(agentSockets.keys())[0];
-      }
+      if (dev) mac = normalizeTarget(dev.mac);
+    }
+    const agentWs = agentSockets.get(mac);
+    if (!agentWs || agentWs.readyState !== import_websocket.default.OPEN) {
+      logger.warn(`[WS Relay] No authenticated agent available for target ${mac}`);
+      ws.close(1013, "Agent stream unavailable");
+      return;
     }
     if (!viewerSockets.has(mac)) {
       viewerSockets.set(mac, /* @__PURE__ */ new Set());
     }
     viewerSockets.get(mac).add(ws);
     logger.info(`[WS Relay] Teacher Viewer opened stream for: ${mac} (total viewers: ${viewerSockets.get(mac).size})`);
-    const agentWs = agentSockets.get(mac);
-    if (agentWs && agentWs.readyState === import_websocket.default.OPEN) {
-      agentWs.send(JSON.stringify({ action: "START_STREAM", fps: 30, bitrate: 2500 }));
-      logger.info(`[WS Relay] Sent START_STREAM command to agent: ${mac}`);
-    } else {
-      logger.warn(`[WS Relay] Agent not found for target ${mac}. Available agents: [${Array.from(agentSockets.keys()).join(", ")}]`);
-    }
+    agentWs.send(JSON.stringify({ action: "START_STREAM", fps: 30, bitrate: 2500 }));
+    logger.info(`[WS Relay] Sent START_STREAM command to agent: ${mac}`);
     ws.on("close", () => {
       const viewers = viewerSockets.get(mac);
       if (viewers) {
@@ -27717,6 +27935,8 @@ wss.on("connection", (ws, req) => {
         }
       }
     });
+  } else {
+    ws.close(1008, "Unknown WebSocket endpoint");
   }
 });
 app.post("/api/auth/login", (req, res) => {
@@ -27768,6 +27988,14 @@ var isStandalone = process.pkg !== void 0 || process.platform === "win32";
 var defaultSeatsFile = isStandalone ? import_path4.default.resolve(process.cwd(), "data", "seats.json") : "/data/seats.json";
 var SEATS_FILE = process.env.SEATS_FILE || defaultSeatsFile;
 var UPLOADS_DIR = isStandalone ? import_path4.default.resolve(process.cwd(), "data", "uploads") : "/data/uploads";
+var BROADCAST_TEST_DIR = import_path4.default.join(UPLOADS_DIR, "broadcast-test");
+var ensureBroadcastTestDirectory = async () => {
+  try {
+    await import_fs4.default.promises.mkdir(BROADCAST_TEST_DIR, { recursive: true });
+  } catch (err) {
+    logger.warn(`[Broadcast Test] Failed to create directory ${BROADCAST_TEST_DIR}: ${err}`);
+  }
+};
 var ensureSeatsDirectory = async () => {
   const dir = import_path4.default.dirname(SEATS_FILE);
   try {
@@ -27817,15 +28045,32 @@ var getDefaultSeatsLayout = () => {
   };
 };
 var cachedLayout = null;
+var sanitizeLayoutForPersistence = (layoutData) => ({
+  ...layoutData,
+  seats: layoutData.seats.map((seat) => {
+    const sanitized = { ...seat };
+    delete sanitized.token;
+    delete sanitized.thumbnailUrl;
+    return sanitized;
+  })
+});
 var saveSeatsLayout = async (layoutData) => {
   await ensureSeatsDirectory();
+  const sanitizedLayout = sanitizeLayoutForPersistence(layoutData);
+  const tempFile = `${SEATS_FILE}.tmp-${process.pid}`;
   try {
-    await import_fs4.default.promises.writeFile(SEATS_FILE, JSON.stringify(layoutData, null, 2), "utf-8");
+    await ensureSeatsDirectory();
+    await import_fs4.default.promises.writeFile(tempFile, JSON.stringify(sanitizedLayout, null, 2), "utf-8");
+    await import_fs4.default.promises.rename(tempFile, SEATS_FILE);
     logger.info(`[Seats] Successfully saved layout to ${SEATS_FILE}`);
-    cachedLayout = layoutData;
+    cachedLayout = sanitizedLayout;
     return true;
   } catch (err) {
     logger.error(`[Seats] Failed to write layout to ${SEATS_FILE}: ${err}`);
+    try {
+      await import_fs4.default.promises.unlink(tempFile);
+    } catch {
+    }
     return false;
   }
 };
@@ -27845,7 +28090,7 @@ var loadSeatsLayout = async () => {
       if (!Array.isArray(parsed.offTaskKeywords)) {
         parsed.offTaskKeywords = DEFAULT_OFFTASK_KEYWORDS;
       }
-      cachedLayout = parsed;
+      cachedLayout = sanitizeLayoutForPersistence(parsed);
       return cachedLayout;
     }
   } catch (err) {
@@ -27856,17 +28101,35 @@ var loadSeatsLayout = async () => {
   return defaultLayout;
 };
 app.get("/api/health", (req, res) => {
-  res.json({ status: "ok", time: Date.now(), seatsFile: SEATS_FILE });
+  const discovery = discoveryService.getHealth();
+  res.json({
+    status: discovery.listening ? "ok" : "degraded",
+    time: Date.now(),
+    components: {
+      http: { listening: server.listening },
+      discovery,
+      websocket: {
+        authenticatedAgents: agentSockets.size,
+        activeViewerTargets: viewerSockets.size
+      },
+      snapshots: {
+        cacheKeys: snapshotCache.size,
+        maxKeys: SNAPSHOT_CACHE_MAX_KEYS,
+        ttlMs: SNAPSHOT_CACHE_TTL_MS
+      },
+      broadcast: { active: broadcastStreamer.isActive() }
+    }
+  });
 });
 app.get("/api/server-info", (req, res) => {
   res.json({
-    version: "5.4.6",
+    version: "5.6.0",
     teacherIp: activeTeacherIp,
     port: PORT,
     nicName: activeNicName
   });
 });
-app.get("/api/layout", async (req, res) => {
+app.get("/api/layout", requireTeacherAuth, async (req, res) => {
   const layout = await loadSeatsLayout();
   res.json({ success: true, layout, file: SEATS_FILE });
 });
@@ -27906,7 +28169,71 @@ app.post("/api/broadcast/stop", requireTeacherAuth, (req, res) => {
   res.json({ status: "stopped", active: false });
 });
 app.get("/api/broadcast/status", requireTeacherAuth, (req, res) => {
-  res.json({ active: broadcastStreamer.isActive() });
+  res.json({ active: broadcastStreamer.isActive(), mode: broadcastStreamer.getMode() });
+});
+app.post(
+  "/api/broadcast/test-media",
+  requireTeacherAuth,
+  import_express.default.raw({ type: ["*/*"], limit: "400mb" }),
+  async (req, res) => {
+    try {
+      await ensureBroadcastTestDirectory();
+      const rawFilename = req.headers["x-filename"] || "test_media.mp4";
+      let filename = "test_media.mp4";
+      try {
+        filename = decodeURIComponent(rawFilename);
+      } catch {
+        filename = rawFilename;
+      }
+      const safeName = import_path4.default.basename(filename).replace(/[/\\?%*:|"<>]/g, "_");
+      const ext = import_path4.default.extname(safeName).toLowerCase() || ".mp4";
+      const fileId = Date.now().toString(36) + Math.random().toString(36).substring(2, 6);
+      const storedName = `media_${fileId}${ext}`;
+      const savedPath = import_path4.default.join(BROADCAST_TEST_DIR, storedName);
+      const totalBytes = Buffer.isBuffer(req.body) ? req.body.length : 0;
+      if (!totalBytes) {
+        return res.status(400).json({ error: "\u6E2C\u8A66\u5A92\u9AD4\u6A94\u6848\u5167\u5BB9\u4E0D\u53EF\u70BA\u7A7A" });
+      }
+      await import_fs4.default.promises.writeFile(savedPath, req.body);
+      logger.info(`[Broadcast Test] Media file saved to ${savedPath} (${totalBytes} bytes)`);
+      res.json({ success: true, fileId, filename: safeName, filePath: savedPath, fileSize: totalBytes });
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      logger.error(`[Broadcast Test] Failed to store media file: ${msg}`);
+      res.status(500).json({ error: `\u5132\u5B58\u6E2C\u8A66\u5A92\u9AD4\u6A94\u6848\u5931\u6557: ${msg}` });
+    }
+  }
+);
+app.post("/api/broadcast/test/start", requireTeacherAuth, async (req, res) => {
+  const { sourceType, source, fps, bitrateKbps, scale } = req.body || {};
+  const type = sourceType === "file" || sourceType === "url" ? sourceType : "url";
+  const src = typeof source === "string" ? source.trim() : "";
+  if (!src) {
+    return res.status(400).json({ error: "\u8ACB\u63D0\u4F9B\u6E2C\u8A66\u5A92\u9AD4\u4F86\u6E90 (\u672C\u6A5F\u6A94\u6848\u8DEF\u5F91\u6216\u7DB2\u5740)" });
+  }
+  if (type === "file" && !import_fs4.default.existsSync(src)) {
+    return res.status(400).json({ error: "\u6E2C\u8A66\u5A92\u9AD4\u6A94\u6848\u4E0D\u5B58\u5728\u65BC\u4F3A\u670D\u5668\uFF0C\u8ACB\u5148\u4E0A\u50B3" });
+  }
+  if (type === "url" && !/^https?:\/\//i.test(src)) {
+    return res.status(400).json({ error: "\u8ACB\u63D0\u4F9B\u6709\u6548\u7684\u6E2C\u8A66\u5A92\u9AD4\u7DB2\u5740 (http/https)" });
+  }
+  const result = await broadcastStreamer.startStream({
+    sourceType: type,
+    source: src,
+    fps,
+    bitrateKbps,
+    scale,
+    localIp: activeTeacherIp
+  });
+  if (!result.ok) {
+    return res.status(500).json({ status: "error", active: false, error: result.error || "\u5EE3\u64AD\u6E2C\u8A66\u555F\u52D5\u5931\u6557" });
+  }
+  const already = !!result.alreadyActive;
+  res.json({ status: "streaming", active: true, mode: type, alreadyActive: already });
+});
+app.post("/api/broadcast/test/stop", requireTeacherAuth, (req, res) => {
+  broadcastStreamer.stopStream();
+  res.json({ status: "stopped", active: false });
 });
 app.post("/api/share/url", requireTeacherAuth, (req, res) => {
   let { url, targets } = req.body || {};
@@ -28055,6 +28382,7 @@ app.get("/api/share/download/:fileId/:filename", async (req, res) => {
 });
 app.post(
   "/api/agent/snapshot",
+  requireAgentSnapshotAuth,
   import_express.default.raw({ type: ["image/jpeg", "application/octet-stream", "*/*"], limit: "2mb" }),
   (req, res) => {
     const rawMac = req.headers["x-agent-mac"] || "";
@@ -28073,41 +28401,54 @@ app.post(
       }
     }
     if (buffer && buffer.length > 0) {
-      if (mac) snapshotCache.set(mac, { buffer, timestamp: Date.now() });
-      if (ip) snapshotCache.set(ip, { buffer, timestamp: Date.now() });
+      const entry = { buffer, timestamp: Date.now() };
+      storeSnapshot(mac, entry);
+      storeSnapshot(ip, entry);
       res.status(200).json({ status: "ok" });
     } else {
       res.status(400).json({ error: "empty snapshot" });
     }
   }
 );
-app.get(["/api/snapshot/:id", "/api/snapshot"], async (req, res) => {
+app.get(["/api/snapshot/:id", "/api/snapshot"], requireTeacherAuth, async (req, res) => {
+  pruneSnapshotCache();
   const rawId = req.params.id || req.query.id || req.query.mac || req.query.ip || "";
   const normalizedId = normalizeTarget(rawId);
-  let cachedEntry = snapshotCache.get(normalizedId) || snapshotCache.get(rawId);
-  if (!cachedEntry || Date.now() - cachedEntry.timestamp >= 3e3) {
+  const wantsHighRes = req.query.full === "1" || req.query.highres === "1";
+  let cachedEntry = getSnapshotCached(normalizedId) || getSnapshotCached(rawId);
+  if (wantsHighRes || !cachedEntry || Date.now() - cachedEntry.timestamp >= 3e3) {
     const dev = discoveryService.getDevices().find(
       (d) => normalizeTarget(d.mac) === normalizedId || d.ip === rawId || d.hostname === rawId
     );
     if (dev && dev.ip) {
       const port = dev.port || 8080;
       try {
-        const agentUrl = `http://${dev.ip}:${port}/snapshot`;
+        const agentUrl = `http://${dev.ip}:${port}/snapshot${wantsHighRes ? "?full=1" : ""}`;
         const controller = new AbortController();
-        const timeout = setTimeout(() => controller.abort(), 1200);
-        const resp = await fetch(agentUrl, { signal: controller.signal });
+        const timeout = setTimeout(() => controller.abort(), wantsHighRes ? 3e3 : 1200);
+        const headers = {};
+        if (dev.token) headers["X-Auth-Token"] = dev.token;
+        const resp = await fetch(agentUrl, { signal: controller.signal, headers });
         clearTimeout(timeout);
         if (resp.ok) {
           const ab = await resp.arrayBuffer();
           const buffer = Buffer.from(ab);
+          if (wantsHighRes) {
+            res.setHeader("Content-Type", "image/jpeg");
+            res.setHeader("Cache-Control", "no-cache, no-store, must-revalidate");
+            return res.send(buffer);
+          }
           cachedEntry = { buffer, timestamp: Date.now() };
-          snapshotCache.set(normalizedId, cachedEntry);
-          if (dev.mac) snapshotCache.set(normalizeTarget(dev.mac), cachedEntry);
-          if (dev.ip) snapshotCache.set(dev.ip, cachedEntry);
+          storeSnapshot(normalizedId, cachedEntry);
+          if (dev.mac) storeSnapshot(normalizeTarget(dev.mac), cachedEntry);
+          if (dev.ip) storeSnapshot(dev.ip, cachedEntry);
         }
       } catch {
       }
     }
+  }
+  if (wantsHighRes) {
+    return res.status(502).json({ error: "High-resolution snapshot unavailable" });
   }
   if (cachedEntry) {
     res.setHeader("Content-Type", "image/jpeg");
@@ -28181,82 +28522,16 @@ app.get(["/api/agent/:id/logs", "/api/agent/logs"], requireTeacherAuth, async (r
   }
 });
 app.get("/install-agent.ps1", (req, res) => {
-  let host = req.headers.host || `${req.hostname}:${PORT}`;
-  if (activeTeacherIp && activeTeacherIp !== "127.0.0.1" && (host.startsWith("localhost") || host.startsWith("127.0.0.1"))) {
-    host = `${activeTeacherIp}:${PORT}`;
-  }
-  const hmacSecret = tokenAuth.getHmacSecret();
-  const script = `# ========================================================
-# GridSight Agent One-Click Pull & Launch Script (v5.4.6)
-# ========================================================
-$ErrorActionPreference = "SilentlyContinue"
-$serverHost = "${host}"
-$exeUrl = "http://$serverHost/download/gs-agent.exe"
-$destDir = "$env:TEMP"
-$destPath = "$destDir\\gs-agent.exe"
-$envPath = "$destDir\\gs-agent.env"
-
-Write-Host "=======================================================" -ForegroundColor Cyan
-Write-Host "  GridSight Student Agent v5.4.6 \u90E8\u7F72\u8207\u555F\u52D5\u7A0B\u5E8F" -ForegroundColor Cyan
-Write-Host "=======================================================" -ForegroundColor Cyan
-Write-Host "[GridSight] \u6B63\u5728\u7D42\u6B62\u820A\u7248 gs-agent \u884C\u7A0B..." -ForegroundColor Yellow
-
-# Kill all previous gs-agent instances completely
-taskkill /F /IM gs-agent.exe /T 2>$null | Out-Null
-Start-Sleep -Milliseconds 500
-
-Write-Host "[GridSight] \u6B63\u5728\u5F9E $exeUrl \u4E0B\u8F09\u6700\u65B0\u7248 gs-agent.exe..." -ForegroundColor Cyan
-[Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12 -bor [Net.SecurityProtocolType]::Tls11 -bor [Net.SecurityProtocolType]::Tls
-
-# Download agent binary with error handling
-try {
-    if (Test-Path $destPath) { Remove-Item $destPath -Force }
-    $oldEAP = $ErrorActionPreference
-    $ErrorActionPreference = "Stop"
-    Invoke-WebRequest -Uri $exeUrl -OutFile $destPath -UseBasicParsing
-    $ErrorActionPreference = $oldEAP
-} catch {
-    Write-Host "[GridSight] \u274C \u4E0B\u8F09\u5B78\u751F\u7AEF\u7A0B\u5F0F\u5931\u6557\uFF01\u8ACB\u78BA\u8A8D\u8207\u6559\u5E2B\u7AEF\u4F3A\u670D\u5668 (http://$serverHost) \u9023\u7DDA\u6B63\u5E38\u3002" -ForegroundColor Red
-    Write-Host "[GridSight] \u932F\u8AA4\u8A73\u60C5: $_" -ForegroundColor Red
-    Exit
-}
-
-# Verify downloaded executable size (ensure it's not a small error page HTML/JSON)
-if (!(Test-Path $destPath) -or (Get-Item $destPath).Length -lt 10240) {
-    Write-Host "[GridSight] \u274C \u4E0B\u8F09\u5B78\u751F\u7AEF\u7A0B\u5F0F\u932F\u8AA4\uFF1A\u4E0B\u8F09\u7684\u6A94\u6848\u7121\u6548\u6216\u5927\u5C0F\u7570\u5E38\u3002" -ForegroundColor Red
-    if (Test-Path $destPath) {
-        $content = Get-Content $destPath -TotalCount 5
-        Write-Host "[GridSight] \u4F3A\u670D\u5668\u56DE\u61C9\u5167\u5BB9: $content" -ForegroundColor Red
-        Remove-Item $destPath -Force
-    }
-    Exit
-}
-
-# Write HMAC secret to .env so agent can verify TOKEN_GRANT signatures
-$hmacSecret = "${hmacSecret}"
-Set-Content -Path $envPath -Value "HMAC_SECRET=$hmacSecret" -NoNewline
-Add-Content -Path $envPath -Value "TEACHER_IP=$serverHost"
-Write-Host "[GridSight] \u5DF2\u5BEB\u5165 HMAC \u9A57\u8B49\u8A2D\u5B9A\u81F3 $envPath" -ForegroundColor DarkGray
-
-# Configure Firewall
-try {
-    netsh advfirewall firewall delete rule name="GridSight Agent" 2>$null | Out-Null
-    netsh advfirewall firewall delete rule name="GridSight Agent Out" 2>$null | Out-Null
-    netsh advfirewall firewall add rule name="GridSight Agent" dir=in action=allow program="$destPath" enable=yes profile=any protocol=any 2>$null | Out-Null
-    netsh advfirewall firewall add rule name="GridSight Agent Out" dir=out action=allow program="$destPath" enable=yes profile=any protocol=any 2>$null | Out-Null
-} catch {}
-
-Write-Host "[GridSight] \u6B63\u5728\u555F\u52D5\u6700\u65B0\u7248 gs-agent.exe (v5.4.6)..." -ForegroundColor Green
-Start-Process -FilePath $destPath -WorkingDirectory $destDir -WindowStyle Hidden
-
-Start-Sleep -Seconds 1
-$proc = Get-Process -Name "gs-agent" -ErrorAction SilentlyContinue
-if ($proc) {
-    Write-Host "[GridSight] \u2705 \u5B78\u751F\u7AEF\u4EE3\u7406\u7A0B\u5F0F (v5.4.6) \u5DF2\u6210\u529F\u5728\u80CC\u666F\u555F\u52D5\uFF01 (PID: $($proc[0].Id))" -ForegroundColor Green
-} else {
-    Write-Host "[GridSight] \u26A0\uFE0F \u8B66\u544A\uFF1A\u7121\u6CD5\u78BA\u8A8D\u80CC\u666F\u884C\u7A0B\u72C0\u614B\uFF0C\u8ACB\u6AA2\u67E5\u9632\u6BD2\u8EDF\u9AD4\u6216\u6B0A\u9650\u8A2D\u5B9A\u3002" -ForegroundColor Yellow
-}
-`;
+  const socketAddress = req.socket.localAddress?.replace(/^::ffff:/, "") || "";
+  const candidateHost = activeTeacherIp && activeTeacherIp !== "127.0.0.1" ? activeTeacherIp : socketAddress && socketAddress !== "127.0.0.1" && socketAddress !== "::1" ? socketAddress : req.hostname;
+  const teacherHost = /^[A-Za-z0-9._-]+$/.test(candidateHost) ? candidateHost : "127.0.0.1";
+  const script = buildInstallAgentScript({
+    serverHost: `${teacherHost}:${PORT}`,
+    teacherHost,
+    teacherPort: PORT,
+    hmacSecret: tokenAuth.getHmacSecret(),
+    version: "5.6.0"
+  });
   res.setHeader("Content-Type", "text/plain; charset=utf-8");
   res.send(script);
 });
@@ -28461,11 +28736,16 @@ async function bootstrap() {
   activeNicName = nicResult.nicName;
   const boundHost = nicResult.host || HOST;
   discoveryService.start(activeTeacherIp);
+  server.once("error", (err) => {
+    logger.error(`[GridSight Server] HTTP/WebSocket listen failed: ${err.message}`);
+    discoveryService.stop();
+    process.exitCode = 1;
+  });
   server.listen(PORT, boundHost, () => {
     const localUrl = `http://localhost:${PORT}`;
     const lanUrl = `http://${activeTeacherIp}:${PORT}`;
     logger.info(`=============================================================`);
-    logger.info(`  \u{1F680} GridSight Teacher Console v5.4.6`);
+    logger.info(`  \u{1F680} GridSight Teacher Console v5.6.0`);
     logger.info(`  \u7D81\u5B9A\u7DB2\u8DEF\u5361 (NIC): ${activeNicName} (${activeTeacherIp})`);
     logger.info(`  \u672C\u6A5F\u63A7\u5236\u53F0\u7DB2\u5740:   ${localUrl}`);
     logger.info(`  \u5B78\u751F\u9023\u7DDA\u7DB2\u5740:     ${lanUrl}/join`);
@@ -28477,7 +28757,38 @@ async function bootstrap() {
     }
   });
 }
-bootstrap();
+var shuttingDown = false;
+var shutdown = async (signal) => {
+  if (shuttingDown) return;
+  shuttingDown = true;
+  logger.info(`[GridSight Server] Received ${signal}; shutting down cleanly`);
+  discoveryService.stop();
+  broadcastStreamer.stopStream();
+  for (const socket of agentSockets.values()) socket.close(1001, "Server shutting down");
+  for (const viewers of viewerSockets.values()) {
+    for (const socket of viewers) socket.close(1001, "Server shutting down");
+  }
+  await new Promise((resolve) => {
+    if (!server.listening) return resolve();
+    server.close(() => resolve());
+  });
+};
+if (typeof __dirname !== "undefined" ? process.argv[1] && (import_path4.default.resolve(process.argv[1]) === import_path4.default.resolve(import_path4.default.join(__dirname, "server.cjs")) || import_path4.default.resolve(process.argv[1]) === import_path4.default.resolve(import_path4.default.join(__dirname, "server.ts"))) : process.argv[1] && import_path4.default.resolve(process.argv[1]) === import_path4.default.resolve((0, import_url.fileURLToPath)(import_meta.url))) {
+  process.once("SIGINT", () => void shutdown("SIGINT"));
+  process.once("SIGTERM", () => void shutdown("SIGTERM"));
+  bootstrap().catch((err) => {
+    logger.error(`[GridSight Server] Bootstrap failed: ${err instanceof Error ? err.message : String(err)}`);
+    process.exitCode = 1;
+  });
+}
+// Annotate the CommonJS export names for ESM import in node:
+0 && (module.exports = {
+  generateTeacherToken,
+  isValidTeacherToken,
+  server,
+  teacherSessions,
+  tokenAuth
+});
 /*! Bundled license information:
 
 depd/index.js:

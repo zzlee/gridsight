@@ -17,6 +17,7 @@ import { StudentConnectModal } from './components/Toolbar/StudentConnectModal';
 import { AlertSettingsModal } from './components/Toolbar/AlertSettingsModal';
 import { ShareUrlModal } from './components/Toolbar/ShareUrlModal';
 import { ShareFileModal } from './components/Toolbar/ShareFileModal';
+import { BroadcastTestModal } from './components/Toolbar/BroadcastTestModal';
 import { PollingManager } from './services/pollingManager';
 import { LayoutStorage } from './services/layoutStorage';
 import { useViewport } from './hooks/useViewport';
@@ -43,6 +44,7 @@ export const App: React.FC = () => {
   const [isAlertSettingsOpen, setIsAlertSettingsOpen] = useState(false);
   const [isShareUrlOpen, setIsShareUrlOpen] = useState(false);
   const [isShareFileOpen, setIsShareFileOpen] = useState(false);
+  const [isBroadcastTestOpen, setIsBroadcastTestOpen] = useState(false);
 
   // Viewport Zoom & Pan Persistence
   const { zoom, setZoom, pan, setPan, handleResetView } = useViewport();
@@ -558,6 +560,7 @@ export const App: React.FC = () => {
         onOpenAlertSettings={() => setIsAlertSettingsOpen(true)}
         onOpenShareUrl={() => setIsShareUrlOpen(true)}
         onOpenShareFile={() => setIsShareFileOpen(true)}
+        onOpenBroadcastTest={() => setIsBroadcastTestOpen(true)}
         offTaskCount={offTaskDevices.length}
         unassignedCount={unassignedDevices.length}
         onLock={() => setIsLocked(true)}
@@ -711,6 +714,12 @@ export const App: React.FC = () => {
         selectedTargets={selectedTargets}
         selectedCount={selectedSeats.length}
         totalOnlineCount={totalOnlineCount}
+      />
+
+      {/* Broadcast Test Modal */}
+      <BroadcastTestModal
+        isOpen={isBroadcastTestOpen}
+        onClose={() => setIsBroadcastTestOpen(false)}
       />
 
       {/* Security Auth Lock Modal (PIN Entry) */}

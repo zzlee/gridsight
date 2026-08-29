@@ -19,6 +19,7 @@ import {
   Square,
   Globe,
   FolderUp,
+  Clapperboard,
 } from 'lucide-react';
 
 interface TopNavProps {
@@ -33,6 +34,7 @@ interface TopNavProps {
   onOpenAlertSettings?: () => void;
   onOpenShareUrl?: () => void;
   onOpenShareFile?: () => void;
+  onOpenBroadcastTest?: () => void;
   offTaskCount?: number;
   unassignedCount?: number;
   onLock: () => void;
@@ -52,6 +54,7 @@ export const TopNav: React.FC<TopNavProps> = ({
   onOpenAlertSettings,
   onOpenShareUrl,
   onOpenShareFile,
+  onOpenBroadcastTest,
   offTaskCount = 0,
   unassignedCount = 0,
   onLock,
@@ -207,6 +210,19 @@ export const TopNav: React.FC<TopNavProps> = ({
                 </>
               )}
             </button>
+
+            {/* Broadcast Test Button (media file/URL -> RTP multicast) */}
+            {onOpenBroadcastTest && (
+              <button
+                onClick={onOpenBroadcastTest}
+                className="flex items-center space-x-1.5 px-3 py-1.5 rounded-lg bg-fuchsia-950/40 hover:bg-fuchsia-900/60 border border-fuchsia-500/40 text-xs font-semibold text-fuchsia-300 hover:text-fuchsia-200 transition-all shadow-sm active:scale-95"
+                title="廣播測試：選定媒體檔案或網址，以 RTP Multicast 串流給學生端測試接收"
+              >
+                <Clapperboard className="w-3.5 h-3.5 text-fuchsia-400" />
+                <span>廣播測試</span>
+              </button>
+            )}
+
 
             {/* Share URL Button */}
             {onOpenShareUrl && (

@@ -23,6 +23,8 @@ beacon/gs-agent
 data/*
 !data/.gitkeep
 !data/seats.json.example
+console/server/data/*
+!console/server/data/.gitkeep
 
 # Environment Files
 .env

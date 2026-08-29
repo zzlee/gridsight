@@ -315,6 +315,17 @@ const UPLOADS_DIR = isStandalone
   ? path.resolve(process.cwd(), 'data', 'uploads')
   : '/data/uploads';
 
+// Directory for media files uploaded for a broadcast test (streamed via RTP multicast).
+const BROADCAST_TEST_DIR = path.join(UPLOADS_DIR, 'broadcast-test');
+
+const ensureBroadcastTestDirectory = async () => {
+  try {
+    await fs.promises.mkdir(BROADCAST_TEST_DIR, { recursive: true });
+  } catch (err) {
+    logger.warn(`[Broadcast Test] Failed to create directory ${BROADCAST_TEST_DIR}: ${err}`);
+  }
+};
+
 const ensureSeatsDirectory = async () => {
   const dir = path.dirname(SEATS_FILE);
   try {
@@ -448,7 +459,7 @@ app.get('/api/health', (req, res) => {
 
 app.get('/api/server-info', (req, res) => {
   res.json({
-    version: '5.6.0',
+    version: '5.7.0',
     teacherIp: activeTeacherIp,
     port: PORT,
     nicName: activeNicName,
@@ -501,7 +512,80 @@ app.post('/api/broadcast/stop', requireTeacherAuth, (req, res) => {
 });
 
 app.get('/api/broadcast/status', requireTeacherAuth, (req, res) => {
-  res.json({ active: broadcastStreamer.isActive() });
+  res.json({ active: broadcastStreamer.isActive(), mode: broadcastStreamer.getMode() });
+});
+
+// Route: Broadcast Test - upload a media file for RTP multicast test streaming
+app.post(
+  '/api/broadcast/test-media',
+  requireTeacherAuth,
+  express.raw({ type: ['*/*'], limit: '400mb' }),
+  async (req, res) => {
+    try {
+      await ensureBroadcastTestDirectory();
+      const rawFilename = (req.headers['x-filename'] as string) || 'test_media.mp4';
+      let filename = 'test_media.mp4';
+      try {
+        filename = decodeURIComponent(rawFilename);
+      } catch {
+        filename = rawFilename;
+      }
+      const safeName = path.basename(filename).replace(/[/\\?%*:|"<>]/g, '_');
+      const ext = path.extname(safeName).toLowerCase() || '.mp4';
+      const fileId = Date.now().toString(36) + Math.random().toString(36).substring(2, 6);
+      const storedName = `media_${fileId}${ext}`;
+      const savedPath = path.join(BROADCAST_TEST_DIR, storedName);
+
+      const totalBytes = Buffer.isBuffer(req.body) ? req.body.length : 0;
+      if (!totalBytes) {
+        return res.status(400).json({ error: '測試媒體檔案內容不可為空' });
+      }
+      await fs.promises.writeFile(savedPath, req.body);
+      logger.info(`[Broadcast Test] Media file saved to ${savedPath} (${totalBytes} bytes)`);
+      res.json({ success: true, fileId, filename: safeName, filePath: savedPath, fileSize: totalBytes });
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : String(err);
+      logger.error(`[Broadcast Test] Failed to store media file: ${msg}`);
+      res.status(500).json({ error: `儲存測試媒體檔案失敗: ${msg}` });
+    }
+  }
+);
+
+// Route: Broadcast Test - start streaming a media file or remote URL via RTP multicast
+app.post('/api/broadcast/test/start', requireTeacherAuth, async (req, res) => {
+  const { sourceType, source, fps, bitrateKbps, scale } = req.body || {};
+  const type = sourceType === 'file' || sourceType === 'url' ? sourceType : 'url';
+  const src = typeof source === 'string' ? source.trim() : '';
+
+  if (!src) {
+    return res.status(400).json({ error: '請提供測試媒體來源 (本機檔案路徑或網址)' });
+  }
+  if (type === 'file' && !fs.existsSync(src)) {
+    return res.status(400).json({ error: '測試媒體檔案不存在於伺服器，請先上傳' });
+  }
+  if (type === 'url' && !/^https?:\/\//i.test(src)) {
+    return res.status(400).json({ error: '請提供有效的測試媒體網址 (http/https)' });
+  }
+
+  const result = await broadcastStreamer.startStream({
+    sourceType: type,
+    source: src,
+    fps,
+    bitrateKbps,
+    scale,
+    localIp: activeTeacherIp,
+  });
+  if (!result.ok) {
+    return res.status(500).json({ status: 'error', active: false, error: result.error || '廣播測試啟動失敗' });
+  }
+  const already = !!result.alreadyActive;
+  res.json({ status: 'streaming', active: true, mode: type, alreadyActive: already });
+});
+
+// Route: Broadcast Test - stop the RTP multicast test stream
+app.post('/api/broadcast/test/stop', requireTeacherAuth, (req, res) => {
+  broadcastStreamer.stopStream();
+  res.json({ status: 'stopped', active: false });
 });
 
 // Route: Share URL to Student Agents (Opens Default Browser)
@@ -854,7 +938,7 @@ app.get('/install-agent.ps1', (req, res) => {
     teacherHost,
     teacherPort: PORT,
     hmacSecret: tokenAuth.getHmacSecret(),
-    version: '5.6.0',
+    version: '5.7.0',
   });
   res.setHeader('Content-Type', 'text/plain; charset=utf-8');
   res.send(script);
@@ -1101,7 +1185,7 @@ async function bootstrap() {
     const lanUrl = `http://${activeTeacherIp}:${PORT}`;
 
     logger.info(`=============================================================`);
-    logger.info(`  🚀 GridSight Teacher Console v5.6.0`);
+    logger.info(`  🚀 GridSight Teacher Console v5.7.0`);
     logger.info(`  綁定網路卡 (NIC): ${activeNicName} (${activeTeacherIp})`);
     logger.info(`  本機控制台網址:   ${localUrl}`);
     logger.info(`  學生連線網址:     ${lanUrl}/join`);

@@ -1134,7 +1134,9 @@ const shutdown = async (signal: string) => {
   });
 };
 
-if (process.argv[1] && path.resolve(process.argv[1]) === path.resolve(fileURLToPath(import.meta.url))) {
+if (typeof __dirname !== 'undefined'
+  ? process.argv[1] && (path.resolve(process.argv[1]) === path.resolve(path.join(__dirname, 'server.cjs')) || path.resolve(process.argv[1]) === path.resolve(path.join(__dirname, 'server.ts')))
+  : process.argv[1] && path.resolve(process.argv[1]) === path.resolve(fileURLToPath(import.meta.url))) {
   process.once('SIGINT', () => void shutdown('SIGINT'));
   process.once('SIGTERM', () => void shutdown('SIGTERM'));
   bootstrap().catch((err) => {

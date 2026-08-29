@@ -811,10 +811,19 @@ bool RTPReceiver::Start() {
     int reuse = 1;
 #ifdef _WIN32
     setsockopt(sock, SOL_SOCKET, SO_REUSEADDR, (const char*)&reuse, sizeof(reuse));
+    // The 1080p30 H.264 multicast stream is 4-8 Mbps (~475+ datagrams/sec at
+    // pkt_size=1316 with bursts on keyframes). The Windows default UDP receive
+    // buffer (~64KB) overflows before ReceiveLoop + decode can drain it, which
+    // shows up as [RTP Gap/Loss] and dropped FU-A orphan fragments in the logs.
+    // Enlarge the kernel buffer so bursty frames are queued instead of dropped.
+    int rcvbuf = 4 * 1024 * 1024;
+    setsockopt(sock, SOL_SOCKET, SO_RCVBUF, (const char*)&rcvbuf, sizeof(rcvbuf));
     DWORD timeout = 500;
     setsockopt(sock, SOL_SOCKET, SO_RCVTIMEO, (const char*)&timeout, sizeof(timeout));
 #else
     setsockopt(sock, SOL_SOCKET, SO_REUSEADDR, &reuse, sizeof(reuse));
+    int rcvbuf = 4 * 1024 * 1024;
+    setsockopt(sock, SOL_SOCKET, SO_RCVBUF, &rcvbuf, sizeof(rcvbuf));
     struct timeval tv = {0, 500000};
     setsockopt(sock, SOL_SOCKET, SO_RCVTIMEO, &tv, sizeof(tv));
 #endif
@@ -869,12 +878,16 @@ bool RTPReceiver::Start() {
     socket_fd_.store((uintptr_t)sock);
     try {
         receive_thread_ = std::thread(&RTPReceiver::ReceiveLoop, this);
+        decode_thread_ = std::thread(&RTPReceiver::DecodeThreadLoop, this);
     } catch (const std::exception& err) {
         uintptr_t owned_socket = socket_fd_.exchange(0);
         if (owned_socket != 0 && (SOCKET)owned_socket != INVALID_SOCKET) {
             closesocket((SOCKET)owned_socket);
         }
         running_ = false;
+        // Wake the (possibly started) decode thread so it can observe stop.
+        au_cv_.notify_all();
+        if (decode_thread_.joinable()) decode_thread_.join();
         Utils::Log("ERROR", "RTPReceiver worker startup failed: " + std::string(err.what()));
         return false;
     }
@@ -890,7 +903,12 @@ void RTPReceiver::Stop() {
     if (owned_socket != 0 && (SOCKET)owned_socket != INVALID_SOCKET) {
         closesocket((SOCKET)owned_socket);
     }
+    // Wake the decode thread and wait for it to finish decoding any
+    // currently-held access unit, so it never touches the decoder after
+    // the MFT is released below.
+    au_cv_.notify_all();
     if (receive_thread_.joinable()) receive_thread_.join();
+    if (decode_thread_.joinable()) decode_thread_.join();
 
     rtp_stream_initialized_ = false;
     rtp_last_seq_ = 0;
@@ -903,6 +921,10 @@ void RTPReceiver::Stop() {
     access_unit_active_ = false;
     access_unit_has_idr_ = false;
     access_unit_corrupt_ = false;
+    {
+        std::lock_guard<std::mutex> lock(au_mutex_);
+        pending_au_queue_.clear();
+    }
 
     CloseOverlayWindow();
 #ifdef _WIN32
@@ -911,6 +933,51 @@ void RTPReceiver::Stop() {
         decoder_ = nullptr;
     }
 #endif
+}
+
+void RTPReceiver::EnqueueAU(std::vector<uint8_t> au) {
+    {
+        std::lock_guard<std::mutex> lock(au_mutex_);
+        // Bound the queue so a decode that temporarily falls behind the
+        // live stream cannot grow an unbounded backlog (which would turn
+        // into ever-increasing display latency). When full, discard the
+        // oldest frame instead.
+        const size_t kMaxQueuedAUs = 8;
+        while (pending_au_queue_.size() >= kMaxQueuedAUs) {
+            pending_au_queue_.pop_front();
+        }
+        pending_au_queue_.push_back(std::move(au));
+    }
+    au_cv_.notify_one();
+}
+
+void RTPReceiver::DecodeThreadLoop() {
+    while (true) {
+        std::vector<uint8_t> au;
+        {
+            std::unique_lock<std::mutex> lock(au_mutex_);
+            au_cv_.wait(lock, [&] {
+                return !running_ || !pending_au_queue_.empty();
+            });
+            if (!running_ && pending_au_queue_.empty()) break;
+            if (pending_au_queue_.empty()) continue;
+
+            /*
+             * Keep-live edge: if more than one complete access unit is
+             * queued, the decoder has fallen behind the live stream.
+             * Discard all but the newest so the presented frame tracks
+             * the teacher's live screen instead of replaying an old
+             * backlog (the source of visible delay and "jump back").
+             */
+            while (pending_au_queue_.size() > 1) {
+                pending_au_queue_.pop_front();
+            }
+            au = std::move(pending_au_queue_.front());
+            pending_au_queue_.pop_front();
+        }
+
+        RenderFrame(au.data(), au.size());
+    }
 }
 
 void RTPReceiver::ReceiveLoop() {
@@ -924,6 +991,16 @@ void RTPReceiver::ReceiveLoop() {
     std::vector<uint8_t> fua_reassembly_buffer;
     std::vector<uint8_t> cached_sps_pps;
     uint64_t last_packet_time = 0;
+
+    /*
+     * Hot-path loss diagnostics are throttled to at most one line per
+     * 500ms. During a loss storm the per-packet [RTP Gap/Loss] and
+     * [RTP FU-A] Dropping orphan fragment logs would otherwise flood
+     * hundreds of thousands of lines/second through the logger, whose
+     * I/O then starves the very socket-drain loop that is dropping.
+     */
+    uint64_t last_gap_log_ms = 0;
+    uint64_t last_orphan_log_ms = 0;
 
     /*
      * Time of the last packet that belonged to the currently
@@ -1068,15 +1145,20 @@ void RTPReceiver::ReceiveLoop() {
                 static_cast<int16_t>(
                     static_cast<uint16_t>(pkt.sequence - expected_seq));
 
-            Utils::Log(
-                "WARN",
-                "⚠️ [RTP Gap/Loss] Expected seq=" +
-                std::to_string(expected_seq) +
-                ", got seq=" +
-                std::to_string(pkt.sequence) +
-                " (delta=" +
-                std::to_string(gap) +
-                ")");
+            if (now - last_gap_log_ms >= 500) {
+                last_gap_log_ms = now;
+                Utils::Log(
+                    "WARN",
+                    "⚠️ [RTP Gap/Loss] Expected seq=" +
+                    std::to_string(expected_seq) +
+                    ", got seq=" +
+                    std::to_string(pkt.sequence) +
+                    " (delta=" +
+                    std::to_string(gap) +
+                    ")");
+            }
+            /* Else: suppress the per-packet spam during a loss storm so
+             * logger I/O does not starve the socket-drain loop. */
 
             fua_reassembly_buffer.clear();
             fua_active_ = false;
@@ -1157,9 +1239,12 @@ void RTPReceiver::ReceiveLoop() {
                  * corresponding START fragment is active.
                  */
                 if (!fua_active_) {
-                    Utils::Log(
-                        "WARN",
-                        "⚠️ [RTP FU-A] Dropping orphan fragment");
+                    if (now - last_orphan_log_ms >= 500) {
+                        last_orphan_log_ms = now;
+                        Utils::Log(
+                            "WARN",
+                            "⚠️ [RTP FU-A] Dropping orphan fragment");
+                    }
                     continue;
                 }
 
@@ -1428,9 +1513,14 @@ void RTPReceiver::ReceiveLoop() {
 
         /*
          * RTP marker=1 terminates the current video frame/AU.
-         * Decode exactly once per AU.
+         * The AU is handed to the dedicated decode thread (via a bounded
+         * queue) rather than decoded inline, so the receive loop never
+         * blocks on the (comparatively slow) MFT decode. This keeps the
+         * UDP socket drained (no kernel drops) and lets the decode thread
+         * drop stale frames to stay at the live edge.
          */
         if (pkt.marker) {
+            std::vector<uint8_t> au_to_decode;
             if (access_unit_has_idr_ &&
                 !cached_sps_pps.empty()) {
 
@@ -1438,21 +1528,21 @@ void RTPReceiver::ReceiveLoop() {
                  * If SPS/PPS are not already present in this AU,
                  * prepend the cached parameter sets before IDR.
                  */
-                std::vector<uint8_t> complete_au =
-                    cached_sps_pps;
-
-                complete_au.insert(
-                    complete_au.end(),
+                au_to_decode = cached_sps_pps;
+                au_to_decode.insert(
+                    au_to_decode.end(),
                     access_unit_buffer_.begin(),
                     access_unit_buffer_.end());
-
-                if (!access_unit_corrupt_) {
-                    RenderFrame(
-                        complete_au.data(),
-                        complete_au.size());
-                }
             } else {
-                FlushAccessUnit();
+                au_to_decode = access_unit_buffer_;
+            }
+
+            if (access_unit_corrupt_) {
+                Utils::Log(
+                    "WARN",
+                    "⚠️ [RTP AU] Dropping corrupt H.264 access unit");
+            } else if (!au_to_decode.empty()) {
+                EnqueueAU(std::move(au_to_decode));
             }
         }
 

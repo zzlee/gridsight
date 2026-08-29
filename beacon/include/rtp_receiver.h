@@ -1,6 +1,9 @@
 #pragma once
 #include <atomic>
+#include <condition_variable>
 #include <cstdint>
+#include <deque>
+#include <mutex>
 #include <thread>
 #include <string>
 #include <vector>
@@ -17,8 +20,10 @@ public:
 
 private:
     void ReceiveLoop();
+    void DecodeThreadLoop();
     void UIThreadLoop();
     void CreateFullScreenOverlayWindow();
+    void EnqueueAU(std::vector<uint8_t> au);
     void RenderFrame(const uint8_t* h264_data, size_t size);
     void CloseOverlayWindow();
     void AppendAccessUnitNAL(const uint8_t* nal, size_t size, bool is_idr);
@@ -29,10 +34,22 @@ private:
     std::atomic<bool> running_{false};
     std::atomic<bool> overlay_active_{false};
     std::thread receive_thread_;
+    std::thread decode_thread_;
     std::thread ui_thread_;
     std::atomic<uintptr_t> socket_fd_{0};
     void* hwnd_overlay_ = nullptr;
     void* decoder_ = nullptr;
+
+    // Bounded access-unit queue feeding the dedicated decode thread.
+    // The receive loop only does fast RTP parsing/assembly and enqueues
+    // complete AUs; the decode thread drains them. When the decoder falls
+    // behind the live stream, stale queued frames are dropped so the
+    // presentation stays at the live edge instead of accumulating latency
+    // or replaying an old backlog (which manifests as visible "delay" and
+    // a periodic "jump back" of the picture).
+    std::deque<std::vector<uint8_t>> pending_au_queue_;
+    std::mutex au_mutex_;
+    std::condition_variable au_cv_;
 
     // RTP stream state
     bool rtp_stream_initialized_ = false;

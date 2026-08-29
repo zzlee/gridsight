@@ -1,6 +1,7 @@
 #include "../include/ws_server.h"
 #include "../include/utils.h"
 #include "../include/token_manager.h"
+#include "../include/rtp_receiver.h"
 #include <iostream>
 #include <fstream>
 #include <sstream>
@@ -349,6 +350,9 @@ void WebSocketStreamer::HandleCommandMessage(uintptr_t sock_fd, const std::strin
     } else if (action == "STOP_STREAM") {
         Utils::Log("INFO", "🛑 [Stream Command] Received STOP_STREAM from Teacher Console, pausing stream");
         streaming_active_ = false;
+    } else if (action == "STOP_BROADCAST") {
+        Utils::Log("INFO", "🛑 [Broadcast Command] Received STOP_BROADCAST from Teacher Console, closing overlay window immediately");
+        RTPReceiver::RequestCloseOverlay();
     } else if (action == "OPEN_URL") {
         const std::string url = Utils::ExtractJsonField(message, "url");
         if (!url.empty()) std::thread([url]() { Utils::OpenUrl(url); }).detach();

@@ -17,6 +17,7 @@ public:
 
     bool Start();
     void Stop();
+    static void RequestCloseOverlay();
 
 private:
     void ReceiveLoop();

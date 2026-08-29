@@ -722,6 +722,18 @@ static LRESULT CALLBACK OverlayWndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARA
 
 namespace GridSight {
 
+#ifdef _WIN32
+static RTPReceiver* g_rtp_receiver_instance = nullptr;
+#endif
+
+void RTPReceiver::RequestCloseOverlay() {
+#ifdef _WIN32
+    if (g_rtp_receiver_instance) {
+        g_rtp_receiver_instance->CloseOverlayWindow();
+    }
+#endif
+}
+
 RTPReceiver::RTPReceiver(const std::string& multicast_ip, int port)
     : multicast_ip_(multicast_ip), port_(port) {}
 
@@ -799,6 +811,9 @@ void RTPReceiver::FlushAccessUnit() {
 
 bool RTPReceiver::Start() {
     if (running_.exchange(true)) return socket_fd_.load() != 0;
+#ifdef _WIN32
+    g_rtp_receiver_instance = this;
+#endif
 
     SOCKET sock = socket(AF_INET, SOCK_DGRAM, IPPROTO_UDP);
     if (sock == INVALID_SOCKET) {
@@ -897,6 +912,9 @@ bool RTPReceiver::Start() {
 
 void RTPReceiver::Stop() {
     if (!running_.exchange(false)) return;
+#ifdef _WIN32
+    g_rtp_receiver_instance = nullptr;
+#endif
 
     uintptr_t owned_socket = socket_fd_.exchange(0);
     if (owned_socket != 0 && (SOCKET)owned_socket != INVALID_SOCKET) {

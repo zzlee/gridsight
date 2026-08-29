@@ -498,6 +498,19 @@ app.get('/api/devices', requireTeacherAuth, (req, res) => {
   });
 });
 
+const notifyStopBroadcast = () => {
+  logger.info(`[Broadcast] Broadcasting STOP_BROADCAST to all ${agentSockets.size} agents`);
+  agentSockets.forEach((ws, mac) => {
+    if (ws.readyState === WebSocket.OPEN) {
+      try {
+        ws.send(JSON.stringify({ action: 'STOP_BROADCAST' }));
+      } catch (err) {
+        logger.error(`[Broadcast] Failed to send STOP_BROADCAST to agent ${mac}: ${err}`);
+      }
+    }
+  });
+};
+
 app.post('/api/broadcast/start', requireTeacherAuth, async (req, res) => {
   const result = await broadcastStreamer.startStream({ ...(req.body || {}), localIp: activeTeacherIp });
   if (!result.ok) {
@@ -508,6 +521,7 @@ app.post('/api/broadcast/start', requireTeacherAuth, async (req, res) => {
 
 app.post('/api/broadcast/stop', requireTeacherAuth, (req, res) => {
   broadcastStreamer.stopStream();
+  notifyStopBroadcast();
   res.json({ status: 'stopped', active: false });
 });
 
@@ -585,6 +599,7 @@ app.post('/api/broadcast/test/start', requireTeacherAuth, async (req, res) => {
 // Route: Broadcast Test - stop the RTP multicast test stream
 app.post('/api/broadcast/test/stop', requireTeacherAuth, (req, res) => {
   broadcastStreamer.stopStream();
+  notifyStopBroadcast();
   res.json({ status: 'stopped', active: false });
 });
 

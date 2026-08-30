@@ -14,8 +14,7 @@
 | **HTTP Snapshot Fetch** | `TCP 3000` (`GET /api/snapshot/:id`) | 前端瀏覽器 | 教師端 (Console) | 瀏覽器 ➔ 教師 (HTTP GET) | 前端監控面板向教師端後端讀取快取之最新學生縮圖 | 教師端 TCP 3000 入站允許 |
 | **Reverse WebSocket Relay** | `TCP 3000` (`/ws/agent?mac=...&ip=...&token=...`) | 學生端 (Agent) | 教師端 (Console) | 學生 ➔ 教師 (Outbound WS) | 學生端主動向教師端建立反向持久 WS 連線，接收控制指令與傳輸 H.264 串流 | 學生端出站 TCP 3000，可穿越一般客戶端防火牆 |
 | **Teacher Viewer WS** | `TCP 3000` (`/ws/stream/:target`) | 前端瀏覽器 | 教師端 (Console) | 瀏覽器 ➔ 教師 (WS GET) | 前端 30 FPS 焦點調閱播放器連接教師端中繼以接收 H.264 串流 | 教師端 TCP 3000 入站允許 |
-| **Direct WebSocket Fallback** | `TCP 8081` (`ws://<STUDENT_IP>:8081/stream`) | 前端 / 測試工具 | 學生端 (Agent) | 客戶端 ➔ 學生 (Direct WS) | 學生端本地直接 WebSocket 串流監聽端點（備援路徑） | 需開啟學生端 TCP 8081 入站防火牆 |
-| **Local HTTP Agent API** | `TCP 8080` (`/snapshot`, `/status`, `/ping`) | 教師端 / 測試工具 | 學生端 (Agent) | 教師 ➔ 學生 (HTTP GET) | 學生端本地 HTTP 伺服器，支援高清對照縮圖調閱及健康檢查 | 需開啟學生端 TCP 8080 入站防火牆 |
+| **Reverse WebSocket Relay** | `TCP 3000` (`/ws/agent`) | 學生端 (Agent) | 教師端 (Server) | 學生 ➔ 教師 (Outbound WS) | 學生端向教師端建立長連線，用於 30 FPS 焦點畫面與指令中繼 | 無需開啟學生端入站防火牆 |
 | **RTP Multicast Broadcast** | `239.255.42.100:9000` | 教師端 (FFmpeg/Console) | 學生端 (Agent) | 教師 ➔ 學生 (UDP Multicast) | 教師畫面 1080p 30FPS H.264 廣播串流 | 交換器需開啟 IGMP Snooping 轉發多播封包 |
 
 ---
@@ -56,7 +55,7 @@ sequenceDiagram
         alt 快取存在且非過期 (< 3s)
             Teacher-->>Browser: HTTP 200 OK (image/jpeg)
         else 快取過期或不存在
-            Teacher->>Student: HTTP GET http://<STUDENT_IP>:8080/snapshot (Fallback Proxy)
+            Student->>Teacher: Outbound HTTP POST /api/agent/snapshot
             Student-->>Teacher: HTTP 200 OK (image/jpeg)
             Teacher-->>Browser: HTTP 200 OK (image/jpeg)
         end
@@ -199,7 +198,7 @@ sequenceDiagram
       - `filename`：伺服器端已消毒之檔名（`path.basename` + 非法字元取代為 `_`），學生端存檔時據此避免目錄攻擊。
       - `fileSize`：檔案大小（位元組），供學生端校驗下載完整性（目前學生端實作尚未消費此欄位，僅供保留/未來驗證用）。
 
-### 3.6 學生端本地 HTTP API (Port 8080)
+### 3.6 學生端出站推播與反向 WebSocket (零入站開埠)
 - **`GET /snapshot`**：
   - 支持 Query 參數 `full=1` 或 `highres=1`。若指定高解析度，則即時擷取 1:1 螢幕解析度並編碼 JPEG (Quality 85) 回傳；否則回傳本地快取之 480×270 縮圖。
   - 支持 `X-Auth-Token` Header 鑑權。

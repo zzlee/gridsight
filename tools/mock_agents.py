@@ -102,16 +102,15 @@ class MockAgent:
 
         return {
             "type": "BEACON",
-            "version": "5.4.3",
+            "version": "5.7.2",
             "hostname": self.hostname,
             "ip": self.ip,
-            "port": self.port,
             "mac": self.mac,
             "username": self.username,
             "active_window": self.active_window,
             "timestamp": int(time.time() * 1000),
             "specs": {
-                "agent_version": "5.4.3",
+                "agent_version": "5.7.2",
                 "os": "Windows 11 Pro (Mock)",
                 "uptime": 3600,
                 "cpu": {"model": "Intel Core i7-12700 (Mock)", "cores": 12, "usage_percent": self.metrics["cpu"]},
@@ -339,7 +338,7 @@ async def snapshot_push_loop(agents: List[MockAgent], teacher_ip: str, teacher_p
 async def main():
     parser = argparse.ArgumentParser(description="GridSight High-Concurrency Mock Agent Cluster")
     parser.add_argument("--count", type=int, default=70, help="Number of simulated agents (default: 70)")
-    parser.add_argument("--base-port", type=int, default=18081, help="Starting HTTP port for agents (default: 18081)")
+    parser.add_argument("--base-port", type=int, default=18081, help="Starting port (deprecated)")
     parser.add_argument("--local-ip", type=str, default="", help="Custom local IP to advertise (auto-detect if empty)")
     parser.add_argument("--teacher-ip", type=str, default="", help="Teacher console IP for direct unicast / HTTP push")
     parser.add_argument("--teacher-port", type=int, default=3000, help="Teacher console HTTP port (default: 3000)")

@@ -48,8 +48,8 @@ void ShutdownSocket(SOCKET socket_fd) {
 }
 } // namespace
 
-WebSocketStreamer::WebSocketStreamer(int port, std::shared_ptr<ScreenCapturer> capturer)
-    : port_(port), capturer_(capturer), encoder_(std::make_unique<H264Encoder>()) {}
+WebSocketStreamer::WebSocketStreamer(std::shared_ptr<ScreenCapturer> capturer)
+    : capturer_(capturer), encoder_(std::make_unique<H264Encoder>()) {}
 
 WebSocketStreamer::~WebSocketStreamer() {
     Stop();
@@ -63,44 +63,13 @@ void WebSocketStreamer::SetTeacherHost(const std::string& host, int port) {
 }
 
 bool WebSocketStreamer::Start() {
-    if (running_.exchange(true)) return listen_fd_.load() != 0;
+    if (running_.exchange(true)) return true;
     const bool h264_ready = encoder_->Initialize(1280, 720, 30, 2500);
     if (!h264_ready) {
         Utils::Log("WARN", "H.264 encoder initialization failed; focus streaming will use MJPEG fallback");
     }
 
-    bool inbound_ready = false;
-    SOCKET server_fd = socket(AF_INET, SOCK_STREAM, IPPROTO_TCP);
-    if (server_fd == INVALID_SOCKET) {
-        Utils::Log("ERROR", "WebSocket inbound socket creation failed (error " + std::to_string(LastWebSocketError()) + "); reverse outbound streaming remains enabled");
-    } else {
-        int opt = 1;
-#ifdef _WIN32
-        setsockopt(server_fd, SOL_SOCKET, SO_REUSEADDR, (const char*)&opt, sizeof(opt));
-#else
-        setsockopt(server_fd, SOL_SOCKET, SO_REUSEADDR, &opt, sizeof(opt));
-#endif
-        sockaddr_in addr = {0};
-        addr.sin_family = AF_INET;
-        addr.sin_addr.s_addr = INADDR_ANY;
-        addr.sin_port = htons(port_);
-
-        if (bind(server_fd, (sockaddr*)&addr, sizeof(addr)) == SOCKET_ERROR) {
-            Utils::Log("ERROR", "WebSocket inbound bind failed on port " + std::to_string(port_) + " (error " + std::to_string(LastWebSocketError()) + "); reverse outbound streaming remains enabled");
-            closesocket(server_fd);
-        } else if (listen(server_fd, 5) == SOCKET_ERROR) {
-            Utils::Log("ERROR", "WebSocket inbound listen failed on port " + std::to_string(port_) + " (error " + std::to_string(LastWebSocketError()) + "); reverse outbound streaming remains enabled");
-            closesocket(server_fd);
-        } else {
-            listen_fd_.store((uintptr_t)server_fd);
-            inbound_ready = true;
-        }
-    }
-
     try {
-        if (inbound_ready) {
-            accept_thread_ = std::thread(&WebSocketStreamer::AcceptLoop, this);
-        }
         outbound_thread_ = std::thread(&WebSocketStreamer::ConnectOutboundLoop, this);
         stream_thread_ = std::thread(&WebSocketStreamer::StreamLoop, this);
     } catch (const std::exception& err) {
@@ -109,41 +78,24 @@ bool WebSocketStreamer::Start() {
         return false;
     }
 
-    if (inbound_ready) {
-        Utils::Log("INFO", "WebSocket inbound fallback listening on port " + std::to_string(port_));
-    }
-    Utils::Log("INFO", "WebSocket reverse outbound and stream worker threads started");
-    return inbound_ready;
+    Utils::Log("INFO", "WebSocket reverse outbound client and stream worker threads started");
+    return true;
 }
 
 void WebSocketStreamer::Stop() {
     if (!running_.exchange(false)) return;
 
-    uintptr_t listener = listen_fd_.exchange(0);
-    if (listener != 0 && (SOCKET)listener != INVALID_SOCKET) {
-        closesocket((SOCKET)listener);
-    }
-
-    // Socket-owning threads perform the final close. Shutdown only interrupts
-    // blocking I/O here so each descriptor is closed exactly once.
     {
         std::lock_guard<std::mutex> lock(client_mutex_);
-        ShutdownSocket((SOCKET)active_client_fd_);
         ShutdownSocket((SOCKET)outbound_sock_);
-        client_connected_ = false;
         streaming_active_ = false;
     }
 
-    if (accept_thread_.joinable()) accept_thread_.join();
     if (outbound_thread_.joinable()) outbound_thread_.join();
     if (stream_thread_.joinable()) stream_thread_.join();
 
     {
         std::lock_guard<std::mutex> lock(client_mutex_);
-        if (active_client_fd_ != 0 && (SOCKET)active_client_fd_ != INVALID_SOCKET) {
-            closesocket((SOCKET)active_client_fd_);
-            active_client_fd_ = 0;
-        }
         if (outbound_sock_ != 0 && (SOCKET)outbound_sock_ != INVALID_SOCKET) {
             closesocket((SOCKET)outbound_sock_);
             outbound_sock_ = 0;
@@ -227,7 +179,7 @@ void WebSocketStreamer::ConnectOutboundLoop() {
             Utils::Log("INFO", "✅ Reverse WebSocket Outbound Stream connected to Teacher " + host);
             Utils::UpdateHeartbeat("ws-connected");
 
-            // Receive commands (START_STREAM / STOP_STREAM)
+            // Receive commands (START_STREAM / STOP_STREAM / GET_HIGHRES_SNAPSHOT / GET_LOGS etc)
             ReceiveCommands((uintptr_t)s);
             if (running_) {
                 Utils::Log("WARN", "Reverse WebSocket disconnected, retrying...");
@@ -265,10 +217,6 @@ void WebSocketStreamer::ReceiveCommands(uintptr_t sock_fd) {
     while (running_) {
         const int bytes = recv(sock, reinterpret_cast<char*>(buffer), sizeof(buffer), 0);
         if (bytes < 0) {
-            // A benign idle timeout is NOT a disconnection. The reverse WS is
-            // otherwise silent between commands (the server only writes on
-            // viewer events), so 3s of no data would otherwise be mistaken for
-            // a drop and trigger an endless reconnect loop that never relays frames.
             const int recv_err = LastWebSocketError();
 #ifdef _WIN32
             const bool is_timeout = (recv_err == WSAETIMEDOUT || recv_err == WSAEWOULDBLOCK);
@@ -276,7 +224,7 @@ void WebSocketStreamer::ReceiveCommands(uintptr_t sock_fd) {
             const bool is_timeout = (recv_err == EAGAIN || recv_err == EWOULDBLOCK);
 #endif
             if (is_timeout) continue;
-            break; // genuine error (including shutdown() during Stop)
+            break; // genuine error
         }
         if (bytes == 0) break; // peer closed cleanly
         Utils::UpdateHeartbeat("ws-rx");
@@ -369,6 +317,17 @@ void WebSocketStreamer::HandleCommandMessage(uintptr_t sock_fd, const std::strin
         const std::string url = Utils::ExtractJsonField(message, "url");
         const std::string filename = Utils::ExtractJsonField(message, "filename");
         if (!url.empty()) std::thread([url, filename]() { Utils::DownloadAndOpenFile(url, filename); }).detach();
+    } else if (action == "GET_HIGHRES_SNAPSHOT") {
+        Utils::Log("INFO", "📸 [Command] Received GET_HIGHRES_SNAPSHOT request from Teacher Console");
+        FrameData frame;
+        if (capturer_ && capturer_->CaptureFrame(frame)) {
+            std::vector<uint8_t> jpeg_bytes;
+            if (ImageEncoder::EncodeToJPEG(frame.bgra_buffer.data(), frame.width, frame.height, frame.width, frame.height, 85, jpeg_bytes)) {
+                const std::string b64 = Utils::Base64Encode(jpeg_bytes.data(), jpeg_bytes.size());
+                const std::string response = "{\"action\":\"HIGHRES_SNAPSHOT_REPORT\",\"image\":\"" + b64 + "\"}";
+                SendWsClientText(sock_fd, response);
+            }
+        }
     } else if (action == "GET_LOGS") {
         std::string log_path = "gs-agent.log";
 #ifdef _WIN32
@@ -439,86 +398,6 @@ void WebSocketStreamer::SendWsClientBinary(uintptr_t sock_fd, const uint8_t* dat
     if (len > 0) SendWsClientFrame(sock_fd, 0x2, data, len);
 }
 
-void WebSocketStreamer::AcceptLoop() {
-    SOCKET server_fd = (SOCKET)listen_fd_.load();
-    if (server_fd == INVALID_SOCKET || server_fd == 0) {
-        Utils::Log("ERROR", "WebSocket accept worker started without a valid listener");
-        return;
-    }
-
-    while (running_) {
-        sockaddr_in client_addr;
-        socklen_t client_len = sizeof(client_addr);
-        SOCKET client_fd = accept(server_fd, (sockaddr*)&client_addr, &client_len);
-        if (client_fd == INVALID_SOCKET) {
-            if (!running_) break;
-            Utils::Log("WARN", "WebSocket inbound accept failed (error " + std::to_string(LastWebSocketError()) + ")");
-            Utils::SleepMs(100);
-            continue;
-        }
-        if (!running_) {
-            closesocket(client_fd);
-            break;
-        }
-
-        // Bound incomplete handshakes so Stop can always drain accept_thread_.
-#ifdef _WIN32
-        DWORD handshake_timeout = 3000;
-        setsockopt(client_fd, SOL_SOCKET, SO_RCVTIMEO, (const char*)&handshake_timeout, sizeof(handshake_timeout));
-        setsockopt(client_fd, SOL_SOCKET, SO_SNDTIMEO, (const char*)&handshake_timeout, sizeof(handshake_timeout));
-#else
-        struct timeval handshake_timeout = {3, 0};
-        setsockopt(client_fd, SOL_SOCKET, SO_RCVTIMEO, &handshake_timeout, sizeof(handshake_timeout));
-        setsockopt(client_fd, SOL_SOCKET, SO_SNDTIMEO, &handshake_timeout, sizeof(handshake_timeout));
-#endif
-
-        // Read WebSocket Handshake
-        char buffer[2048] = {0};
-        int bytes = recv(client_fd, buffer, sizeof(buffer) - 1, 0);
-        if (bytes <= 0) {
-            closesocket(client_fd);
-            continue;
-        }
-
-        std::string req_str(buffer, bytes);
-        size_t key_pos = req_str.find("Sec-WebSocket-Key:");
-        if (key_pos == std::string::npos) {
-            closesocket(client_fd);
-            continue;
-        }
-
-        key_pos += 18;
-        while (key_pos < req_str.size() && (req_str[key_pos] == ' ' || req_str[key_pos] == '\t')) key_pos++;
-        size_t end_pos = req_str.find("\r\n", key_pos);
-        if (end_pos == std::string::npos) end_pos = req_str.find('\n', key_pos);
-        if (end_pos == std::string::npos) {
-            closesocket(client_fd);
-            continue;
-        }
-
-        std::string client_key = req_str.substr(key_pos, end_pos - key_pos);
-        std::string accept_key = Utils::ComputeWebSocketAcceptKey(client_key);
-
-        std::string response = 
-            "HTTP/1.1 101 Switching Protocols\r\n"
-            "Upgrade: websocket\r\n"
-            "Connection: Upgrade\r\n"
-            "Sec-WebSocket-Accept: " + accept_key + "\r\n\r\n";
-
-        send(client_fd, response.c_str(), (int)response.length(), 0);
-
-        {
-            std::lock_guard<std::mutex> lock(client_mutex_);
-            if (active_client_fd_ != 0 && (SOCKET)active_client_fd_ != INVALID_SOCKET) {
-                closesocket((SOCKET)active_client_fd_);
-            }
-            active_client_fd_ = (uintptr_t)client_fd;
-            client_connected_ = true;
-        }
-        Utils::Log("INFO", "Inbound WebSocket client connected for 30FPS stream");
-    }
-}
-
 void WebSocketStreamer::StreamLoop() {
     bool force_idr = true;
     int frame_count = 0;
@@ -526,7 +405,7 @@ void WebSocketStreamer::StreamLoop() {
     int current_enc_h = 0;
 
     while (running_) {
-        bool should_stream = streaming_active_ || client_connected_;
+        bool should_stream = streaming_active_;
 
         if (should_stream) {
             FrameData frame;
@@ -562,37 +441,9 @@ void WebSocketStreamer::StreamLoop() {
 
                     std::lock_guard<std::mutex> lock(client_mutex_);
 
-                    // 1. Send to Outbound Teacher Relay (Outbound reverse WebSocket connection)
+                    // Send to Outbound Teacher Relay
                     if (outbound_sock_ != 0) {
                         SendWsClientBinary(outbound_sock_, payload.data(), payload.size());
-                    }
-
-                    // 2. Send to Inbound Client (if connected directly)
-                    if (active_client_fd_ != 0) {
-                        std::vector<uint8_t> ws_frame;
-                        ws_frame.push_back(0x82); // FIN = 1, Opcode = 2
-                        size_t payload_len = payload.size();
-                        if (payload_len < 126) {
-                            ws_frame.push_back((uint8_t)payload_len);
-                        } else if (payload_len <= 65535) {
-                            ws_frame.push_back(126);
-                            ws_frame.push_back((uint8_t)((payload_len >> 8) & 0xFF));
-                            ws_frame.push_back((uint8_t)(payload_len & 0xFF));
-                        } else {
-                            ws_frame.push_back(127);
-                            for (int i = 7; i >= 0; i--) {
-                                ws_frame.push_back((uint8_t)((payload_len >> (i * 8)) & 0xFF));
-                            }
-                        }
-                        ws_frame.insert(ws_frame.end(), payload.begin(), payload.end());
-
-                        SOCKET client_sock = (SOCKET)active_client_fd_;
-                        int sent = send(client_sock, (const char*)ws_frame.data(), (int)ws_frame.size(), 0);
-                        if (sent <= 0) {
-                            closesocket(client_sock);
-                            active_client_fd_ = 0;
-                            client_connected_ = false;
-                        }
                     }
                 }
             }

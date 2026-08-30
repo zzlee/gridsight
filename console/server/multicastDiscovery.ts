@@ -30,7 +30,6 @@ export interface DeviceSystemInfo {
 export interface DiscoveredAgent {
   hostname: string;
   ip: string;
-  port?: number;
   mac: string;
   username?: string;
   token?: string;
@@ -139,7 +138,6 @@ export class MulticastDiscoveryService {
           const agent: DiscoveredAgent = {
             hostname: payload.hostname || `Host-${rinfo.address.replace(/\./g, '-')}`,
             ip: rinfo.address,
-            port: payload.port ? parseInt(payload.port, 10) : 8080,
             mac,
             username: payload.username || 'Student',
             token,

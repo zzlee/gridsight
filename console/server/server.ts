@@ -472,7 +472,7 @@ app.get('/api/health', (req, res) => {
 
 app.get('/api/server-info', (req, res) => {
   res.json({
-    version: '5.7.2',
+    version: '5.8.0',
     teacherIp: activeTeacherIp,
     port: PORT,
     nicName: activeNicName,
@@ -928,7 +928,7 @@ app.get('/install-agent.ps1', (req, res) => {
     teacherHost,
     teacherPort: PORT,
     hmacSecret: tokenAuth.getHmacSecret(),
-    version: '5.7.2',
+    version: '5.8.0',
   });
   res.setHeader('Content-Type', 'text/plain; charset=utf-8');
   res.send(script);
@@ -1175,7 +1175,7 @@ async function bootstrap() {
     const lanUrl = `http://${activeTeacherIp}:${PORT}`;
 
     logger.info(`=============================================================`);
-    logger.info(`  🚀 GridSight Teacher Console v5.7.2`);
+    logger.info(`  🚀 GridSight Teacher Console v5.8.0`);
     logger.info(`  綁定網路卡 (NIC): ${activeNicName} (${activeTeacherIp})`);
     logger.info(`  本機控制台網址:   ${localUrl}`);
     logger.info(`  學生連線網址:     ${lanUrl}/join`);

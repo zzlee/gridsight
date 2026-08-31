@@ -132,7 +132,7 @@ sequenceDiagram
   "timestamp": 1723812345678,
   "active_window": "Visual Studio Code - main.cpp",
   "specs": {
-    "agent_version": "5.7.2",
+    "agent_version": "5.8.0",
     "os": "Windows 11 Pro 64-bit",
     "uptime": 3600,
     "cpu": {

@@ -208,7 +208,7 @@ int main(int argc, char* argv[]) {
     }
 
     GridSight::Utils::Log("INFO", "=======================================================");
-    GridSight::Utils::Log("INFO", " GridSight Beacon Agent v5.7.2 (Outbound Relay + Win32)");
+    GridSight::Utils::Log("INFO", " GridSight Beacon Agent v5.8.0 (Outbound Relay + Win32)");
     GridSight::Utils::Log("INFO", "=======================================================");
 
 #ifdef _WIN32

@@ -22,6 +22,16 @@ const findFfmpegBinary = (): string => {
   return 'ffmpeg';
 };
 
+export type BroadcastQuality = 'high' | 'medium' | 'low';
+
+/** Presets for the teacher screen broadcast. Applied when the caller only
+ *  selects a quality level instead of tuning fps / bitrate / scale directly. */
+export const QUALITY_PRESETS: Record<BroadcastQuality, { label: string; fps: number; bitrateKbps: number; scale: number }> = {
+  high:   { label: '高',   fps: 30, bitrateKbps: 8000, scale: 0 },
+  medium: { label: '中',   fps: 30, bitrateKbps: 4000, scale: 720 },
+  low:    { label: '低',   fps: 15, bitrateKbps: 1500, scale: 480 },
+};
+
 export interface StreamerOptions {
   multicastIp?: string;
   port?: number;
@@ -30,6 +40,9 @@ export interface StreamerOptions {
   localIp?: string;
   /** 'screen' captures the teacher display (default); 'file'/'url' stream a media source via RTP for test purposes. */
   sourceType?: 'screen' | 'file' | 'url';
+  /** Convenience three-level quality preset for the screen broadcast. When set,
+   *  it overrides fps / bitrateKbps / scale unless those are provided explicitly. */
+  quality?: BroadcastQuality;
   /** For sourceType 'file'/'url': the local file path or remote media URL to stream. */
   source?: string;
   /** For sourceType 'file'/'url': optional max output frame height for the test stream (e.g. 720 lower decode load on student agents). Auto-fits width, preserves aspect. */
@@ -74,9 +87,14 @@ export class TeacherBroadcastStreamer {
   private isStreaming = false;
   private killTimers = new Set<NodeJS.Timeout>();
   private currentSourceType: string = 'screen';
+  private currentQuality: BroadcastQuality | null = null;
 
   getMode(): string | null {
     return this.isStreaming ? this.currentSourceType : null;
+  }
+
+  getQuality(): BroadcastQuality | null {
+    return this.isStreaming ? this.currentQuality : null;
   }
 
   async startStream(options: StreamerOptions = {}): Promise<StreamStartResult> {
@@ -91,8 +109,14 @@ export class TeacherBroadcastStreamer {
           ? process.env.BROADCAST_MULTICAST_IP
           : '239.255.42.100';
     const port = clampInt(options.port ?? process.env.BROADCAST_PORT, 9000, 1024, 65535);
-    const fps = clampInt(options.fps, 30, 1, 120);
-    const bitrate = clampInt(options.bitrateKbps, 5000, 100, 50000);
+    // A quality preset, when selected, provides sensible defaults that can be
+    // overridden by explicitly-passed fps / bitrate / scale values.
+    const preset =
+      options.quality && options.quality in QUALITY_PRESETS ? QUALITY_PRESETS[options.quality] : null;
+    const fps = clampInt(options.fps ?? preset?.fps, 30, 1, 120);
+    const bitrate = clampInt(options.bitrateKbps ?? preset?.bitrateKbps, 5000, 100, 50000);
+    const presetScale = preset?.scale ?? 0;
+    const scale = clampInt(options.scale ?? presetScale, 0, 144, 2160);
 
     let localaddr = '';
     if (options.localIp && options.localIp !== '127.0.0.1' && isLocalIp(options.localIp)) {
@@ -103,6 +127,7 @@ export class TeacherBroadcastStreamer {
 
     logger.info(
       `[Broadcast] Initiating RTP Multicast Stream -> ${multicastIp}:${port} @ ${fps}fps (${bitrate}kbps)` +
+        (scale > 0 ? `, scaled to <=${scale}p` : ', native resolution') +
         (localaddr ? ` via ${localaddr}` : '')
     );
 
@@ -110,8 +135,13 @@ export class TeacherBroadcastStreamer {
     const platform = os.platform();
     const sourceType = options.sourceType || 'screen';
     const mediaSource = options.source?.trim() || '';
-    // Framerate/output constraints inserted for the media (file/url) path only.
+    // Framerate/output constraints inserted after the capture/input args.
     let mediaConstraints: string[] = [];
+    // Downscale helper: shared by the screen-capture and media (file/url) paths so
+    // lowering quality also reduces resolution (saving bandwidth + decode load).
+    const appendScale = () => {
+      if (scale > 0) mediaConstraints.push('-vf', `scale=-2:${scale}`);
+    };
 
     if (sourceType === 'file' || sourceType === 'url') {
       // Media broadcast test: stream a local file or remote URL over the same
@@ -131,15 +161,16 @@ export class TeacherBroadcastStreamer {
       mediaConstraints = ['-r', String(fps)];
       // Optionally downscale (typical test streams are 1080p; agents may struggle
       // to decode 1080p60 in software). Auto-fit width to preserve aspect ratio.
-      const maxHeight = clampInt(options.scale, 0, 144, 2160);
-      if (maxHeight > 0) mediaConstraints.push('-vf', `scale=-2:${maxHeight}`);
+      appendScale();
     } else if (platform === 'win32') {
       // macOS is not a supported platform (see docs/roadmap.md)
       inputArgs = ['-f', 'gdigrab', '-framerate', String(fps), '-i', 'desktop'];
+      appendScale();
     } else {
       // Linux: omit -video_size so x11grab captures the full screen at native resolution
       const display = process.env.DISPLAY || ':0';
       inputArgs = ['-f', 'x11grab', '-framerate', String(fps), '-i', display];
+      appendScale();
     }
 
     const rtpUrl = `rtp://${multicastIp}:${port}?pkt_size=1316&ttl=2${localaddr ? `&localaddr=${localaddr}` : ''}`;
@@ -201,6 +232,8 @@ export class TeacherBroadcastStreamer {
     this.process = child;
     this.isStreaming = true;
     this.currentSourceType = sourceType;
+    this.currentQuality =
+      options.quality && options.quality in QUALITY_PRESETS ? options.quality : null;
 
     child.on('close', (code) => {
       if (this.process !== child) return;
@@ -208,6 +241,7 @@ export class TeacherBroadcastStreamer {
       this.isStreaming = false;
       this.process = null;
       this.currentSourceType = 'screen';
+      this.currentQuality = null;
     });
 
     child.on('error', (err) => {
@@ -227,6 +261,7 @@ export class TeacherBroadcastStreamer {
         this.isStreaming = false;
         this.process = null;
         this.currentSourceType = 'screen';
+        this.currentQuality = null;
       }
       return { ok: false, error: reason };
     } 
@@ -239,6 +274,7 @@ export class TeacherBroadcastStreamer {
     this.process = null;
     this.isStreaming = false;
     this.currentSourceType = 'screen';
+    this.currentQuality = null;
 
     if (child && child.exitCode === null) {
       try {

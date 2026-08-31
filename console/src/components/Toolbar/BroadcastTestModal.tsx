@@ -4,6 +4,14 @@ import { Clapperboard, X, Send, Square, FileVideo, Link2, UploadCloud, AlertCirc
 
 const DEFAULT_TEST_URL = 'https://test-videos.co.uk/vids/bigbuckbunny/mp4/h264/1080/Big_Buck_Bunny_1080_10s_1MB.mp4';
 
+type TestQuality = 'high' | 'medium' | 'low' | 'custom';
+
+const QUALITY_PRESETS: Record<Exclude<TestQuality, 'custom'>, { label: string; desc: string; fps: number; bitrateKbps: number; scale: number }> = {
+  high:   { label: '高', desc: '1080p · 30FPS · 8Mbps',  fps: 30, bitrateKbps: 8000, scale: 1080 },
+  medium: { label: '中', desc: '720p · 30FPS · 4Mbps',   fps: 30, bitrateKbps: 4000, scale: 720 },
+  low:    { label: '低', desc: '480p · 15FPS · 1.5Mbps', fps: 15, bitrateKbps: 1500, scale: 540 },
+};
+
 interface BroadcastTestModalProps {
   isOpen: boolean;
   onClose: () => void;
@@ -22,6 +30,7 @@ export const BroadcastTestModal: React.FC<BroadcastTestModalProps> = ({ isOpen, 
   const [errorMsg, setErrorMsg] = useState('');
   const [successMsg, setSuccessMsg] = useState('');
   const [loop, setLoop] = useState(true);
+  const [quality, setQuality] = useState<TestQuality>('medium');
   const [resolution, setResolution] = useState<'auto' | 540 | 720 | 1080>(720);
   const [fps, setFps] = useState<number>(30);
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -95,10 +104,14 @@ export const BroadcastTestModal: React.FC<BroadcastTestModalProps> = ({ isOpen, 
       const sourceType = tab;
       const source = tab === 'file' ? uploadedPath : mediaUrl.trim();
       const scale = resolution === 'auto' ? 1080 : resolution;
+      const payload =
+        quality !== 'custom'
+          ? { sourceType, source, quality, loop }
+          : { sourceType, source, fps, bitrateKbps: 3000, scale, loop };
       const resp = await AuthService.fetchWithAuth('/api/broadcast/test/start', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ sourceType, source, fps, bitrateKbps: 3000, scale, loop }),
+        body: JSON.stringify(payload),
       });
       const data = await resp.json().catch(() => ({}));
       if (resp.ok && data.active) {
@@ -308,7 +321,32 @@ export const BroadcastTestModal: React.FC<BroadcastTestModalProps> = ({ isOpen, 
           )}
 
           {/* Stream Settings */}
-          <div className="grid grid-cols-2 gap-3">
+          <div className="space-y-3">
+            <div className="space-y-1.5">
+              <label className="text-xs font-semibold text-slate-300">廣播品質</label>
+              <div className="grid grid-cols-4 gap-1.5">
+                {([...(['high', 'medium', 'low'] as const).map((q) => [QUALITY_PRESETS[q].label, q] as const), ['自訂', 'custom'] as const]).map(([label, val]) => (
+                  <button
+                    key={val}
+                    type="button"
+                    onClick={() => setQuality(val as TestQuality)}
+                    title={val === 'custom' ? '手動指定解析度與 FPS' : `${QUALITY_PRESETS[val as Exclude<TestQuality, 'custom'>]?.desc ?? ''}`}
+                    className={`py-1.5 rounded-lg border text-[11px] font-semibold transition-all ${
+                      quality === val
+                        ? 'bg-fuchsia-600 border-fuchsia-500 text-white'
+                        : 'bg-slate-950 border-slate-800 text-slate-400 hover:text-slate-200'
+                    }`}
+                  >
+                    {label}
+                  </button>
+                ))}
+              </div>
+              {quality !== 'custom' && (
+                <p className="text-[11px] text-fuchsia-300/90">{QUALITY_PRESETS[quality as Exclude<TestQuality, 'custom'>].desc}</p>
+              )}
+            </div>
+
+            <div className="grid grid-cols-2 gap-3">
             <div className="space-y-1.5">
               <label className="text-xs font-semibold text-slate-300">測試解析度</label>
               <div className="grid grid-cols-4 gap-1.5">
@@ -316,8 +354,9 @@ export const BroadcastTestModal: React.FC<BroadcastTestModalProps> = ({ isOpen, 
                   <button
                     key={String(val)}
                     type="button"
+                    disabled={quality !== 'custom'}
                     onClick={() => setResolution(val)}
-                    className={`py-1.5 rounded-lg border text-[11px] font-semibold transition-all ${
+                    className={`py-1.5 rounded-lg border text-[11px] font-semibold transition-all disabled:opacity-40 disabled:cursor-not-allowed ${
                       resolution === val
                         ? 'bg-fuchsia-600 border-fuchsia-500 text-white'
                         : 'bg-slate-950 border-slate-800 text-slate-400 hover:text-slate-200'
@@ -335,8 +374,9 @@ export const BroadcastTestModal: React.FC<BroadcastTestModalProps> = ({ isOpen, 
                   <button
                     key={f}
                     type="button"
+                    disabled={quality !== 'custom'}
                     onClick={() => setFps(f)}
-                    className={`py-1.5 rounded-lg border text-[11px] font-semibold transition-all ${
+                    className={`py-1.5 rounded-lg border text-[11px] font-semibold transition-all disabled:opacity-40 disabled:cursor-not-allowed ${
                       fps === f
                         ? 'bg-fuchsia-600 border-fuchsia-500 text-white'
                         : 'bg-slate-950 border-slate-800 text-slate-400 hover:text-slate-200'
@@ -347,8 +387,9 @@ export const BroadcastTestModal: React.FC<BroadcastTestModalProps> = ({ isOpen, 
                 ))}
               </div>
             </div>
+            </div>
           </div>
-          <p className="text-[11px] text-slate-500">提示：解析度越低、FPS 越低，學生端解碼負擔越小，實測越穩定。</p>
+          <p className="text-[11px] text-slate-500">提示：品質越低（解析度/碼率/FPS 越低），學生端解碼負擔越小，實測越穩定。選擇「自訂」可手動指定解析度與 FPS。</p>
 
           {/* Action */}
           <div className="flex items-center justify-end space-x-3 pt-2">

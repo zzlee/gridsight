@@ -1,7 +1,7 @@
 import React from 'react';
 import { AppMode, ClassroomLayout } from '../../types';
 import { TrafficStats } from '../../services/pollingManager';
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { AuthService } from '../../services/authService';
 import {
   Edit3,
@@ -20,7 +20,16 @@ import {
   Globe,
   FolderUp,
   Clapperboard,
+  ChevronDown,
 } from 'lucide-react';
+
+type BroadcastQuality = 'high' | 'medium' | 'low';
+
+const QUALITY_PRESETS: Record<BroadcastQuality, { label: string; desc: string; fps: number; bitrateKbps: number }> = {
+  high:   { label: '高',   desc: '1080p · 30FPS · 8Mbps', fps: 30, bitrateKbps: 8000 },
+  medium: { label: '中',   desc: '720p · 30FPS · 4Mbps',  fps: 30, bitrateKbps: 4000 },
+  low:    { label: '低',   desc: '480p · 15FPS · 1.5Mbps', fps: 15, bitrateKbps: 1500 },
+};
 
 interface TopNavProps {
   mode: AppMode;
@@ -67,6 +76,9 @@ export const TopNav: React.FC<TopNavProps> = ({
 
   const [isBroadcasting, setIsBroadcasting] = useState(false);
   const [broadcastLoading, setBroadcastLoading] = useState(false);
+  const [broadcastQuality, setBroadcastQuality] = useState<BroadcastQuality>('medium');
+  const [qualityMenuOpen, setQualityMenuOpen] = useState(false);
+  const qualityMenuRef = useRef<HTMLDivElement>(null);
 
   // Check broadcast status periodically
   useEffect(() => {
@@ -76,6 +88,9 @@ export const TopNav: React.FC<TopNavProps> = ({
         if (resp.ok) {
           const data = await resp.json();
           setIsBroadcasting(!!data.active);
+          if (data.quality && data.quality in QUALITY_PRESETS) {
+            setBroadcastQuality(data.quality);
+          }
         }
       } catch {}
     };
@@ -83,6 +98,17 @@ export const TopNav: React.FC<TopNavProps> = ({
     checkBroadcastStatus();
     const interval = setInterval(checkBroadcastStatus, 3000);
     return () => clearInterval(interval);
+  }, []);
+
+  // Close the quality menu on outside click
+  useEffect(() => {
+    const onMouseDown = (e: MouseEvent) => {
+      if (qualityMenuRef.current && !qualityMenuRef.current.contains(e.target as Node)) {
+        setQualityMenuOpen(false);
+      }
+    };
+    document.addEventListener('mousedown', onMouseDown);
+    return () => document.removeEventListener('mousedown', onMouseDown);
   }, []);
 
   const handleToggleBroadcast = async () => {
@@ -94,10 +120,11 @@ export const TopNav: React.FC<TopNavProps> = ({
           setIsBroadcasting(false);
         }
       } else {
+        const preset = QUALITY_PRESETS[broadcastQuality];
         const resp = await AuthService.fetchWithAuth('/api/broadcast/start', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ fps: 30, bitrateKbps: 5000 }),
+          body: JSON.stringify({ quality: broadcastQuality, fps: preset.fps, bitrateKbps: preset.bitrateKbps }),
         });
         if (resp.ok) {
           setIsBroadcasting(true);
@@ -106,6 +133,7 @@ export const TopNav: React.FC<TopNavProps> = ({
     } catch {
     } finally {
       setBroadcastLoading(false);
+      setQualityMenuOpen(false);
     }
   };
 
@@ -187,29 +215,69 @@ export const TopNav: React.FC<TopNavProps> = ({
               </div>
             )}
 
-            {/* H.264 RTP Multicast Screen Broadcast Button */}
-            <button
-              onClick={handleToggleBroadcast}
-              disabled={broadcastLoading}
-              className={`flex items-center space-x-1.5 px-3 py-1.5 rounded-lg border text-xs font-semibold transition-all active:scale-95 ${
-                isBroadcasting
-                  ? 'bg-red-600 hover:bg-red-700 border-red-500 text-white ring-2 ring-red-500/50 shadow-lg shadow-red-950/50 animate-pulse'
-                  : 'bg-purple-950/40 hover:bg-purple-900/60 border border-purple-500/40 text-purple-300 hover:text-purple-200'
-              }`}
-              title={isBroadcasting ? '停止教師畫面全體廣播' : '啟動教師畫面全體廣播 (H.264 UDP Multicast)'}
-            >
-              {isBroadcasting ? (
-                <>
-                  <Square className="w-3.5 h-3.5 fill-current text-white animate-bounce" />
-                  <span>停止廣播</span>
-                </>
-              ) : (
-                <>
-                  <Radio className="w-3.5 h-3.5 text-purple-400" />
-                  <span>廣播畫面</span>
-                </>
-              )}
-            </button>
+            {/* H.264 RTP Multicast Screen Broadcast Button + Quality Selector */}
+            <div ref={qualityMenuRef} className="relative flex items-center">
+              {/* Quality drop-down (locked while broadcasting) */}
+              <div className="relative">
+                <button
+                  onClick={() => setQualityMenuOpen((v) => !v)}
+                  disabled={isBroadcasting || broadcastLoading}
+                  className="flex items-center space-x-1 px-2 py-2.5 rounded-l-lg border border-r-0 border-purple-500/40 bg-purple-950/40 hover:bg-purple-900/60 text-purple-300 hover:text-purple-200 text-xs font-semibold transition-all active:scale-95 disabled:opacity-50 disabled:cursor-not-allowed"
+                  title={`廣播品質：${QUALITY_PRESETS[broadcastQuality].desc}${isBroadcasting ? '（廣播中無法切換）' : ''}`}
+                >
+                  <span>{QUALITY_PRESETS[broadcastQuality].label}</span>
+                  <ChevronDown className="w-3.5 h-3.5" />
+                </button>
+                {qualityMenuOpen && !isBroadcasting && (
+                  <div className="absolute top-full left-0 mt-1.5 w-56 rounded-xl bg-slate-900 border border-slate-800 shadow-2xl z-40 overflow-hidden animate-in fade-in slide-in-from-top-1 duration-150">
+                    {(Object.keys(QUALITY_PRESETS) as BroadcastQuality[]).map((q) => (
+                      <button
+                        key={q}
+                        onClick={() => { setBroadcastQuality(q); setQualityMenuOpen(false); }}
+                        className={`w-full flex items-center justify-between px-3 py-2.5 text-left border-b border-slate-800/70 last:border-b-0 transition-colors ${
+                          q === broadcastQuality
+                            ? 'bg-purple-900/40 text-white'
+                            : 'text-slate-300 hover:bg-slate-800'
+                        }`}
+                      >
+                        <span className="flex items-center space-x-2">
+                          <span className="w-5 h-5 rounded-md bg-purple-600/20 border border-purple-500/40 flex items-center justify-center text-xs font-bold text-purple-300">
+                            {QUALITY_PRESETS[q].label}
+                          </span>
+                          <span className="text-xs">{QUALITY_PRESETS[q].desc}</span>
+                        </span>
+                        {q === broadcastQuality && <span className="text-purple-400 text-xs font-bold">✓</span>}
+                      </button>
+                    ))}
+                  </div>
+                )}
+              </div>
+
+              <button
+                onClick={handleToggleBroadcast}
+                disabled={broadcastLoading}
+                className={`flex items-center space-x-1.5 px-3 py-2.5 rounded-r-lg border text-xs font-semibold transition-all active:scale-95 ${
+                  isBroadcasting
+                    ? 'bg-red-600 hover:bg-red-700 border-red-500 text-white ring-2 ring-red-500/50 shadow-lg shadow-red-950/50 animate-pulse'
+                    : 'bg-purple-950/40 hover:bg-purple-900/60 border border-purple-500/40 text-purple-300 hover:text-purple-200'
+                }`}
+                title={isBroadcasting
+                  ? `停止教師畫面全體廣播（${QUALITY_PRESETS[broadcastQuality].desc}）`
+                  : `啟動教師畫面全體廣播 (H.264 UDP Multicast · ${QUALITY_PRESETS[broadcastQuality].desc})`}
+              >
+                {isBroadcasting ? (
+                  <>
+                    <Square className="w-3.5 h-3.5 fill-current text-white animate-bounce" />
+                    <span>停止廣播</span>
+                  </>
+                ) : (
+                  <>
+                    <Radio className="w-3.5 h-3.5 text-purple-400" />
+                    <span>廣播畫面</span>
+                  </>
+                )}
+              </button>
+            </div>
 
             {/* Broadcast Test Button (media file/URL -> RTP multicast) */}
             {onOpenBroadcastTest && (

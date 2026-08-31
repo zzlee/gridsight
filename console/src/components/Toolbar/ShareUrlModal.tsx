@@ -20,14 +20,18 @@ export const ShareUrlModal: React.FC<ShareUrlModalProps> = ({
   const [url, setUrl] = useState('');
   const [sendToAll, setSendToAll] = useState(selectedCount === 0);
   const [isLoading, setIsLoading] = useState(false);
+  const [progress, setProgress] = useState(0);
   const [errorMsg, setErrorMsg] = useState('');
   const [successMsg, setSuccessMsg] = useState('');
+  const [stats, setStats] = useState<{ total: number; success: number; failed: number } | null>(null);
 
   useEffect(() => {
     if (isOpen) {
       setUrl('');
       setErrorMsg('');
       setSuccessMsg('');
+      setProgress(0);
+      setStats(null);
       setSendToAll(selectedCount === 0);
     }
   }, [isOpen, selectedCount]);
@@ -44,6 +48,15 @@ export const ShareUrlModal: React.FC<ShareUrlModalProps> = ({
     setIsLoading(true);
     setErrorMsg('');
     setSuccessMsg('');
+    setProgress(15);
+    setStats(null);
+
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), 15000);
+
+    const timer = setInterval(() => {
+      setProgress((prev) => (prev < 90 ? prev + 15 : prev));
+    }, 120);
 
     try {
       const targets = sendToAll || selectedCount === 0 ? [] : selectedTargets;
@@ -51,19 +64,42 @@ export const ShareUrlModal: React.FC<ShareUrlModalProps> = ({
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ url: url.trim(), targets }),
+        signal: controller.signal,
       });
+
+      clearInterval(timer);
+      clearTimeout(timeoutId);
 
       const data = await resp.json();
       if (resp.ok && data.success) {
-        setSuccessMsg(data.message || `網址已發送！學生端自動開啟瀏覽器`);
+        setProgress(100);
+        const total = data.totalTargets ?? (targets.length || totalOnlineCount);
+        const succ = data.successCount ?? data.count ?? 0;
+        const fail = data.failedCount ?? Math.max(0, total - succ);
+        setStats({ total, success: succ, failed: fail });
+
+        setSuccessMsg(data.message || `網址已成功發送！`);
         setTimeout(() => {
           onClose();
-        }, 1500);
+        }, fail > 0 ? 3000 : 1800);
       } else {
+        setProgress(0);
         setErrorMsg(data.error || '網址發送失敗');
       }
-    } catch (err) {
-      setErrorMsg('傳送失敗，請檢查網路連線或伺服器狀態');
+    } catch (err: unknown) {
+      clearInterval(timer);
+      clearTimeout(timeoutId);
+      setProgress(0);
+      if (err instanceof Error && err.name === 'AbortError') {
+        setErrorMsg('連線逾時 (超過 15 秒)，請檢查網路或學生端狀態');
+        setStats({
+          total: sendToAll || selectedCount === 0 ? totalOnlineCount : selectedTargets.length,
+          success: 0,
+          failed: sendToAll || selectedCount === 0 ? totalOnlineCount : selectedTargets.length,
+        });
+      } else {
+        setErrorMsg('傳送失敗，請檢查網路連線或伺服器狀態');
+      }
     } finally {
       setIsLoading(false);
     }
@@ -143,6 +179,40 @@ export const ShareUrlModal: React.FC<ShareUrlModalProps> = ({
             </div>
             <p className="text-[11px] text-slate-500">若未輸入 http:// 或 https://，系統將自動補充 http://</p>
           </div>
+
+          {/* Progress Bar */}
+          {isLoading && (
+            <div className="space-y-1.5 p-3 rounded-xl bg-slate-950/80 border border-slate-800 animate-in fade-in">
+              <div className="flex justify-between text-xs font-medium">
+                <span className="text-sky-400">正在廣播網址至學生機...</span>
+                <span className="text-slate-300 font-mono">{progress}%</span>
+              </div>
+              <div className="w-full h-2 bg-slate-800 rounded-full overflow-hidden">
+                <div
+                  className="h-full bg-gradient-to-r from-sky-500 to-sky-400 transition-all duration-150 rounded-full"
+                  style={{ width: `${progress}%` }}
+                />
+              </div>
+            </div>
+          )}
+
+          {/* Stats Summary */}
+          {stats && (
+            <div className="grid grid-cols-3 gap-2 p-3 rounded-xl bg-slate-950/80 border border-slate-800 text-xs">
+              <div className="text-center">
+                <p className="text-slate-400 text-[11px]">總目標數</p>
+                <p className="font-bold text-slate-200 text-sm font-mono">{stats.total}</p>
+              </div>
+              <div className="text-center">
+                <p className="text-emerald-400 text-[11px]">成功連線</p>
+                <p className="font-bold text-emerald-400 text-sm font-mono">{stats.success}</p>
+              </div>
+              <div className="text-center">
+                <p className="text-rose-400 text-[11px]">連線錯誤/逾時</p>
+                <p className="font-bold text-rose-400 text-sm font-mono">{stats.failed}</p>
+              </div>
+            </div>
+          )}
 
           {/* Error / Success Feedback */}
           {errorMsg && (

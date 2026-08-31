@@ -33,10 +33,13 @@ try {
     body: JSON.stringify({ url: 'example.com', targets: [] }),
   });
   assert.equal(urlResp.status, 200);
-  const urlData = await urlResp.json() as { success: boolean; count: number; url: string };
+  const urlData = await urlResp.json() as { success: boolean; count: number; totalTargets: number; successCount: number; failedCount: number; url: string };
   assert.equal(urlData.success, true);
   assert.equal(urlData.url, 'http://example.com');
   assert.equal(urlData.count, 1);
+  assert.equal(urlData.totalTargets, 1);
+  assert.equal(urlData.successCount, 1);
+  assert.equal(urlData.failedCount, 0);
   const urlMsg = JSON.parse((await urlCmd)[0].toString());
   assert.equal(urlMsg.action, 'OPEN_URL');
   assert.equal(urlMsg.url, 'http://example.com');
@@ -70,6 +73,9 @@ try {
   const fileData = await fileResp.json() as {
     success: boolean;
     count: number;
+    totalTargets: number;
+    successCount: number;
+    failedCount: number;
     fileId: string;
     filename: string;
     fileSize: number;
@@ -77,6 +83,9 @@ try {
   };
   assert.equal(fileData.success, true);
   assert.equal(fileData.count, 1);
+  assert.equal(fileData.totalTargets, 1);
+  assert.equal(fileData.successCount, 1);
+  assert.equal(fileData.failedCount, 0);
   assert.equal(fileData.fileSize, Buffer.byteLength(payload));
   assert.equal(fileData.filename, 'test 分享 文件.txt');
 

@@ -653,26 +653,40 @@ app.post('/api/share/url', requireTeacherAuth, (req, res) => {
     targetMacs = targets.map((t) => normalizeTarget(t)).filter(Boolean);
   }
 
-  let count = 0;
+  let successCount = 0;
+  let totalTargets = 0;
+
   if (targetMacs.length === 0 || targetMacs.includes('ALL')) {
+    totalTargets = agentSockets.size;
     agentSockets.forEach((ws, mac) => {
       if (ws.readyState === WebSocket.OPEN) {
         ws.send(payload);
-        count++;
+        successCount++;
       }
     });
   } else {
+    totalTargets = targetMacs.length;
     targetMacs.forEach((mac) => {
       const ws = agentSockets.get(mac);
       if (ws && ws.readyState === WebSocket.OPEN) {
         ws.send(payload);
-        count++;
+        successCount++;
       }
     });
   }
 
-  logger.info(`[Share] Shared URL "${finalUrl}" to ${count} student agents`);
-  res.json({ success: true, count, url: finalUrl, message: `已將網址發送至 ${count} 台學生機` });
+  const failedCount = Math.max(0, totalTargets - successCount);
+
+  logger.info(`[Share] Shared URL "${finalUrl}" to ${successCount}/${totalTargets} student agents (${failedCount} failed/offline)`);
+  res.json({
+    success: true,
+    count: successCount,
+    totalTargets,
+    successCount,
+    failedCount,
+    url: finalUrl,
+    message: `已將網址發送至 ${successCount} 台學生機 (總目標: ${totalTargets}，失敗/離線: ${failedCount})`,
+  });
 });
 
 // Route: Share File to Student Agents (Downloads to Downloads directory & opens File Explorer)
@@ -741,33 +755,42 @@ app.post(
         targetMacs = targets.map((t) => normalizeTarget(t)).filter(Boolean);
       }
 
-      let count = 0;
+      let successCount = 0;
+      let totalTargets = 0;
+
       if (targetMacs.length === 0 || targetMacs.includes('ALL')) {
+        totalTargets = agentSockets.size;
         agentSockets.forEach((ws, mac) => {
           if (ws.readyState === WebSocket.OPEN) {
             ws.send(payload);
-            count++;
+            successCount++;
           }
         });
       } else {
+        totalTargets = targetMacs.length;
         targetMacs.forEach((mac) => {
           const ws = agentSockets.get(mac);
           if (ws && ws.readyState === WebSocket.OPEN) {
             ws.send(payload);
-            count++;
+            successCount++;
           }
         });
       }
 
-      logger.info(`[Share] Shared file "${safeFilename}" (${(totalBytes / 1048576).toFixed(1)} MB) to ${count} student agents via ${downloadUrl}`);
+      const failedCount = Math.max(0, totalTargets - successCount);
+
+      logger.info(`[Share] Shared file "${safeFilename}" (${(totalBytes / 1048576).toFixed(1)} MB) to ${successCount}/${totalTargets} student agents via ${downloadUrl}`);
       res.json({
         success: true,
-        count,
+        count: successCount,
+        totalTargets,
+        successCount,
+        failedCount,
         fileId,
         filename: safeFilename,
         fileSize: totalBytes,
         downloadUrl,
-        message: `已將檔案 "${safeFilename}" (${(totalBytes / 1048576).toFixed(1)} MB) 發送至 ${count} 台學生機`,
+        message: `已將檔案 "${safeFilename}" (${(totalBytes / 1048576).toFixed(1)} MB) 發送至 ${successCount} 台學生機 (總目標: ${totalTargets}，失敗/離線: ${failedCount})`,
       });
     } catch (err: unknown) {
       const msg = err instanceof Error ? err.message : String(err);

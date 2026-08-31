@@ -25,3 +25,10 @@ body {
 ::-webkit-scrollbar-thumb:hover {
   background: #475569;
 }
+
+/* Canvas Card CSS Containment for rendering performance */
+.card-containment {
+  contain: layout style paint;
+  content-visibility: auto;
+  contain-intrinsic-size: 190px 150px;
+}

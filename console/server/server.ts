@@ -78,6 +78,7 @@ const SNAPSHOT_CACHE_TTL_MS = 30_000;
 const agentSockets = new Map<string, WebSocket>();
 const viewerSockets = new Map<string, Set<WebSocket>>();
 const pendingLogRequests = new Map<string, (logs: string) => void>();
+const pendingHighResRequests = new Map<string, (b64Image: string) => void>();
 
 // Normalizes MAC addresses and targets by decoding URL characters and standardizing case
 const normalizeTarget = (raw: string) => {
@@ -186,6 +187,12 @@ wss.on('connection', (ws, req) => {
             if (cb) {
               cb(json.logs || '');
               pendingLogRequests.delete(mac);
+            }
+          } else if (json.action === 'HIGHRES_SNAPSHOT_REPORT') {
+            const cb = pendingHighResRequests.get(mac);
+            if (cb) {
+              cb(json.image || '');
+              pendingHighResRequests.delete(mac);
             }
           }
         } catch {}
@@ -810,54 +817,44 @@ app.post(
   }
 );
 
-// Route: Serve cached JPEG snapshots to Teacher Browser UI (with on-demand proxy fallback)
+// Route: Serve cached JPEG snapshots to Teacher Browser UI (with WebSocket fallback for full-res)
 app.get(['/api/snapshot/:id', '/api/snapshot'], requireTeacherAuth, async (req, res) => {
   pruneSnapshotCache();
   const rawId = req.params.id || (req.query.id as string) || (req.query.mac as string) || (req.query.ip as string) || '';
   const normalizedId = normalizeTarget(rawId);
   const wantsHighRes = req.query.full === '1' || req.query.highres === '1';
-  let cachedEntry = getSnapshotCached(normalizedId) || getSnapshotCached(rawId);
 
-  // High-resolution requests always bypass the thumbnail cache. Ordinary
-  // requests proxy only when the authenticated outbound cache is stale.
-  if (wantsHighRes || !cachedEntry || Date.now() - cachedEntry.timestamp >= 3000) {
+  if (wantsHighRes) {
     const dev = discoveryService.getDevices().find(
       (d) => normalizeTarget(d.mac) === normalizedId || d.ip === rawId || d.hostname === rawId
     );
-    if (dev && dev.ip) {
-      const port = dev.port || 8080;
+    const targetMac = dev ? normalizeTarget(dev.mac) : normalizedId;
+    const ws = agentSockets.get(targetMac);
+    if (ws && ws.readyState === WebSocket.OPEN) {
       try {
-        const agentUrl = `http://${dev.ip}:${port}/snapshot${wantsHighRes ? '?full=1' : ''}`;
-        const controller = new AbortController();
-        const timeout = setTimeout(() => controller.abort(), wantsHighRes ? 3000 : 1200);
-        const headers: Record<string, string> = {};
-        if (dev.token) headers['X-Auth-Token'] = dev.token;
-        const resp = await fetch(agentUrl, { signal: controller.signal, headers });
-        clearTimeout(timeout);
-        if (resp.ok) {
-          const ab = await resp.arrayBuffer();
-          const buffer = Buffer.from(ab);
-          if (wantsHighRes) {
-            res.setHeader('Content-Type', 'image/jpeg');
-            res.setHeader('Cache-Control', 'no-cache, no-store, must-revalidate');
-            return res.send(buffer);
-          }
-          cachedEntry = { buffer, timestamp: Date.now() };
-          storeSnapshot(normalizedId, cachedEntry);
-          if (dev.mac) storeSnapshot(normalizeTarget(dev.mac), cachedEntry);
-          if (dev.ip) storeSnapshot(dev.ip, cachedEntry);
+        const b64Image = await new Promise<string>((resolve) => {
+          const timer = setTimeout(() => {
+            pendingHighResRequests.delete(targetMac);
+            resolve('');
+          }, 3000);
+          pendingHighResRequests.set(targetMac, (data: string) => {
+            clearTimeout(timer);
+            resolve(data);
+          });
+          ws.send(JSON.stringify({ action: 'GET_HIGHRES_SNAPSHOT' }));
+        });
+        if (b64Image) {
+          const buffer = Buffer.from(b64Image, 'base64');
+          res.setHeader('Content-Type', 'image/jpeg');
+          res.setHeader('Cache-Control', 'no-cache, no-store, must-revalidate');
+          return res.send(buffer);
         }
-      } catch {
-        // Fall through to existing cache if available
-      }
+      } catch {}
     }
-  }
-
-  if (wantsHighRes) {
     return res.status(502).json({ error: 'High-resolution snapshot unavailable' });
   }
 
-  // Graceful return from snapshot cache
+  const cachedEntry = getSnapshotCached(normalizedId) || getSnapshotCached(rawId);
   if (cachedEntry) {
     res.setHeader('Content-Type', 'image/jpeg');
     res.setHeader('Cache-Control', 'no-cache, no-store, must-revalidate');
@@ -911,38 +908,10 @@ app.get(['/api/agent/:id/logs', '/api/agent/logs'], requireTeacherAuth, async (r
     } catch {}
   }
 
-  // 2. Fallback to direct HTTP fetch
-  const port = dev.port || 8080;
-  const agentUrl = `http://${dev.ip}:${port}/logs`;
-
-  try {
-    const controller = new AbortController();
-    const timeout = setTimeout(() => controller.abort(), 3000);
-    const headers: Record<string, string> = {};
-    if (dev.token) {
-      headers['X-Auth-Token'] = dev.token;
-    }
-    const resp = await fetch(agentUrl, { signal: controller.signal, headers });
-    clearTimeout(timeout);
-
-    if (resp.ok) {
-      const logs = await resp.text();
-      res.setHeader('Content-Type', 'text/plain; charset=utf-8');
-      return res.send(logs);
-    } else {
-      return res.status(resp.status).json({
-        error: '學生端回應錯誤',
-        message: `學生端 HTTP 回應狀態碼 ${resp.status}`,
-      });
-    }
-  } catch (err: unknown) {
-    const msg = err instanceof Error ? err.message : String(err);
-    logger.warn(`[Agent Logs] Failed to fetch logs from ${agentUrl}: ${msg}`);
-    return res.status(502).json({
-      error: '無法連線至學生端抓取日誌',
-      message: `目標學生機 (${dev.hostname} - ${dev.ip}:${port}) 尚未回應，可能連線中斷或受防火牆阻擋。`,
-    });
-  }
+  return res.status(502).json({
+    error: '無法連線至學生端抓取日誌',
+    message: `目標學生機 (${dev.hostname} - ${dev.ip}) 的反向 WebSocket 未連線。`,
+  });
 });
 
 // Route: One-click PowerShell installation script for Student PCs

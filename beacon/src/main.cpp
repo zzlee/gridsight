@@ -226,8 +226,6 @@ int main(int argc, char* argv[]) {
 
     std::string multicast_ip = GridSight::Utils::GetEnv("MULTICAST_IP", "239.255.42.99");
     int multicast_port = GridSight::Utils::GetEnvInt("MULTICAST_PORT", 8888);
-    int http_port = GridSight::Utils::GetEnvInt("HTTP_PORT", 8080);
-    int ws_port = GridSight::Utils::GetEnvInt("WS_PORT", 8081);
     std::string rtp_ip = GridSight::Utils::GetEnv("RTP_IP", "239.255.42.100");
     int rtp_port = GridSight::Utils::GetEnvInt("RTP_PORT", 9000);
     std::string hmac_secret = GridSight::Utils::GetEnv("HMAC_SECRET", "");
@@ -258,16 +256,12 @@ int main(int argc, char* argv[]) {
 
     // 1. Start snapshot and focus-stream services with the configured
     // bootstrap endpoint. A verified TOKEN_GRANT updates both destinations.
-    auto http_server = std::make_shared<GridSight::HttpServer>(http_port, capturer);
-    auto ws_streamer = std::make_shared<GridSight::WebSocketStreamer>(ws_port, capturer);
+    auto http_server = std::make_shared<GridSight::HttpServer>(capturer);
+    auto ws_streamer = std::make_shared<GridSight::WebSocketStreamer>(capturer);
     http_server->SetTeacherHost(teacher_host, teacher_port);
     ws_streamer->SetTeacherHost(teacher_host, teacher_port);
-    if (!http_server->Start()) {
-        GridSight::Utils::Log("WARN", "HttpServer inbound listener is unavailable; outbound snapshot worker may still be active");
-    }
-    if (!ws_streamer->Start()) {
-        GridSight::Utils::Log("WARN", "WebSocket inbound fallback is unavailable; reverse outbound focus streaming may still be active");
-    }
+    http_server->Start();
+    ws_streamer->Start();
 
     // 2. Start discovery only after both consumers exist, so every verified
     // teacher endpoint update is applied atomically to snapshot and WS paths.
@@ -288,8 +282,6 @@ int main(int argc, char* argv[]) {
     }
 
     GridSight::Utils::Log("INFO", "GridSight Beacon shutting down...");
-    // Stop discovery first so it cannot publish a new endpoint while the
-    // destination consumers are draining.
     beacon_client.Stop();
     rtp_receiver.Stop();
     ws_streamer->Stop();

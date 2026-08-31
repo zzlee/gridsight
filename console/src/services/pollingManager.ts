@@ -56,24 +56,12 @@ export class PollingManager {
           batch.map(async (device) => {
             const start = performance.now();
             try {
-              // 1. Primary: Fetch outbound cached snapshot from Teacher Console Server
+              // Fetch outbound cached snapshot from Teacher Console Server
               const serverSnapshotUrl = `/api/snapshot/${encodeURIComponent(device.mac || device.ip)}?t=${Date.now()}`;
               const teacherToken = AuthService.getToken();
-              let resp = await this.circuitBreaker.fetchWithTimeout(serverSnapshotUrl, {
+              const resp = await this.circuitBreaker.fetchWithTimeout(serverSnapshotUrl, {
                 headers: teacherToken ? { Authorization: `Bearer ${teacherToken}` } : {},
               });
-
-              // 2. Fallback: If not cached on server yet, try direct student port 8080
-              if (!resp.ok && device.ip) {
-                try {
-                  const directUrl = `http://${device.ip}:8080/snapshot?t=${Date.now()}`;
-                  resp = await this.circuitBreaker.fetchWithTimeout(directUrl, {
-                    headers: device.token ? { 'X-Auth-Token': device.token } : {},
-                  });
-                } catch {
-                  // Direct connection blocked by firewall, wait for outbound push
-                }
-              }
 
               if (resp && resp.ok) {
                 const blob = await resp.blob();

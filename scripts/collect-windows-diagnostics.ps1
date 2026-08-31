@@ -76,7 +76,7 @@ Save-Step "06-network" {
 # 6. Connectivity probes toward teacher console (port 3000)
 Save-Step "07-connectivity" {
     "Ping sweep of default gateway and common teacher reachability:"
-    Test-NetConnection -ComputerName 127.0.0.1 -Port 8080 -WarningAction SilentlyContinue |
+    Test-NetConnection -ComputerName 127.0.0.1 -Port 3000 -WarningAction SilentlyContinue |
         Format-List ComputerName, RemotePort, TcpTestSucceeded
 }
 

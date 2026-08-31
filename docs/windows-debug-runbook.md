@@ -54,7 +54,7 @@ make -C beacon CXX=x86_64-w64-mingw32-g++ LDFLAGS="-mconsole"
 | # | 步驟 | 預期結果 | 失敗時檢查 |
 | :- | :--- | :--- | :--- |
 | 2.1 | 手動啟動 debug 版 agent | `gs-agent.log` 出現 `Watchdog spawned worker process` | 缺 VC++ Runtime?（靜態編譯應無）；防毒攔截？ |
-| 2.2 | `curl http://127.0.0.1:8080/ping` | `{"status":"ok","service":"GridSight Beacon"}` | 8080 被占？`netstat -ano \| findstr 8080` |
+| 2.2 | `curl http://127.0.0.1:3000/api/health` | `{"status":"ok",...}` | 教師端服務未啟動？ |
 | 2.3 | 啟動 console（同機） | server.log：`Multicast listener joined 239.255.42.99:8888` | 多播被防火牆擋？見 §5 |
 | 2.4 | 等待 ≤ 5 秒 | server.log 出現該機 BEACON 註冊；Web UI 設備池出現本機 | TTL=2 與網卡選擇（虛擬網卡優先問題，§5.4） |
 | 2.5 | 點擊座位開啟焦點監看 | 30 FPS 畫面出現 | 看 HUD 幀型；agent.log 的 START_STREAM 行 |

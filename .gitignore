@@ -39,6 +39,11 @@ console/server/data/*
 *.swo
 .DS_Store
 
+# Python Cache
+__pycache__/
+*.pyc
+*.pyo
+
 # Logs & Temp
 *.log
 npm-debug.log*

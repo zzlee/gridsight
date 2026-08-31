@@ -22,6 +22,7 @@ import {
   Clapperboard,
   ChevronDown,
   Power,
+  Video,
 } from 'lucide-react';
 
 type BroadcastQuality = 'high' | 'medium' | 'low';
@@ -45,6 +46,7 @@ interface TopNavProps {
   onOpenShareUrl?: () => void;
   onOpenShareFile?: () => void;
   onOpenBroadcastTest?: () => void;
+  onOpenTeacherRecord?: () => void;
   onOpenShutdown?: () => void;
   offTaskCount?: number;
   unassignedCount?: number;
@@ -66,6 +68,7 @@ export const TopNav: React.FC<TopNavProps> = ({
   onOpenShareUrl,
   onOpenShareFile,
   onOpenBroadcastTest,
+  onOpenTeacherRecord,
   onOpenShutdown,
   offTaskCount = 0,
   unassignedCount = 0,
@@ -294,6 +297,18 @@ export const TopNav: React.FC<TopNavProps> = ({
               </button>
             )}
 
+
+            {/* Teacher Screen Recording Button */}
+            {onOpenTeacherRecord && (
+              <button
+                onClick={onOpenTeacherRecord}
+                className="flex items-center space-x-1.5 px-3 py-1.5 rounded-lg bg-red-950/40 hover:bg-red-900/60 border border-red-500/40 text-xs font-semibold text-red-300 hover:text-red-200 transition-all shadow-sm active:scale-95"
+                title="錄製教師畫面與教學過程 (支援麥克風與聲音混合)"
+              >
+                <Video className="w-3.5 h-3.5 text-red-400" />
+                <span>螢幕錄影</span>
+              </button>
+            )}
 
             {/* Share URL Button */}
             {onOpenShareUrl && (

@@ -21,6 +21,11 @@ import {
   Copy,
   RefreshCw,
   Loader2,
+  Video,
+  Square,
+  Pause,
+  Play,
+  Clock,
 } from 'lucide-react';
 
 interface FocusModalProps {
@@ -47,6 +52,15 @@ export const FocusModal: React.FC<FocusModalProps> = ({ device, onClose }) => {
   const [isLoadingLogs, setIsLoadingLogs] = useState<boolean>(false);
   const [logError, setLogError] = useState<string | null>(null);
 
+  // Student Screen Recording states
+  const [isRecordingStudent, setIsRecordingStudent] = useState(false);
+  const [isStudentRecordPaused, setIsStudentRecordPaused] = useState(false);
+  const [studentRecordTime, setStudentRecordTime] = useState(0);
+
+  const studentRecorderRef = useRef<MediaRecorder | null>(null);
+  const studentChunksRef = useRef<Blob[]>([]);
+  const studentRecordTimerRef = useRef<number | null>(null);
+
   // Sync fullscreen state with browser events (e.g. Esc key)
   useEffect(() => {
     const handleFullscreenChange = () => {
@@ -56,14 +70,125 @@ export const FocusModal: React.FC<FocusModalProps> = ({ device, onClose }) => {
     return () => document.removeEventListener('fullscreenchange', handleFullscreenChange);
   }, []);
 
-  // 3-second stream connection timeout checker
+  // 3-second stream connection timeout checker & recording cleanup on device change
   useEffect(() => {
     setIsStreamTimeout(false);
     const timer = setTimeout(() => {
       setIsStreamTimeout(true);
     }, 3000);
-    return () => clearTimeout(timer);
+
+    return () => {
+      clearTimeout(timer);
+      stopStudentRecordingCleanup();
+    };
   }, [device?.id]);
+
+  const stopStudentRecordingCleanup = () => {
+    if (studentRecordTimerRef.current) {
+      clearInterval(studentRecordTimerRef.current);
+      studentRecordTimerRef.current = null;
+    }
+    if (studentRecorderRef.current && studentRecorderRef.current.state !== 'inactive') {
+      try {
+        studentRecorderRef.current.stop();
+      } catch {}
+    }
+    studentRecorderRef.current = null;
+  };
+
+  const handleToggleStudentRecord = () => {
+    if (isRecordingStudent) {
+      if (studentRecorderRef.current && studentRecorderRef.current.state !== 'inactive') {
+        studentRecorderRef.current.stop();
+      }
+      return;
+    }
+
+    const canvas = playerRef.current?.getCanvas();
+    if (!canvas) {
+      setToastMessage('❌ 尚未取得學生畫面 Canvas，無法啟動錄影');
+      setTimeout(() => setToastMessage(null), 3000);
+      return;
+    }
+
+    try {
+      const stream = canvas.captureStream(30);
+      const mimeTypes = [
+        'video/webm;codecs=vp9',
+        'video/webm;codecs=vp8',
+        'video/webm',
+        'video/mp4',
+      ];
+      let mimeType = 'video/webm';
+      for (const type of mimeTypes) {
+        if (typeof MediaRecorder !== 'undefined' && MediaRecorder.isTypeSupported(type)) {
+          mimeType = type;
+          break;
+        }
+      }
+
+      studentChunksRef.current = [];
+      const recorder = new MediaRecorder(stream, { mimeType });
+      studentRecorderRef.current = recorder;
+
+      recorder.ondataavailable = (e) => {
+        if (e.data && e.data.size > 0) {
+          studentChunksRef.current.push(e.data);
+        }
+      };
+
+      recorder.onstop = () => {
+        const chunks = studentChunksRef.current;
+        if (chunks.length > 0) {
+          const blob = new Blob(chunks, { type: mimeType });
+          const ext = mimeType.includes('mp4') ? 'mp4' : 'webm';
+          const timestamp = new Date().toISOString().replace(/[:.]/g, '-').slice(0, 19);
+            const filename = `GridSight_${device?.seatNo || device?.hostname || 'Student'}_Record_${timestamp}.${ext}`;
+          const sizeMB = (blob.size / (1024 * 1024)).toFixed(2);
+          const sizeKB = (blob.size / 1024).toFixed(0);
+          const displaySize = blob.size >= 1048576 ? `${sizeMB} MB` : `${sizeKB} KB`;
+
+          const url = URL.createObjectURL(blob);
+          const link = document.createElement('a');
+          link.href = url;
+          link.download = filename;
+          document.body.appendChild(link);
+          link.click();
+          document.body.removeChild(link);
+          URL.revokeObjectURL(url);
+
+          setToastMessage(`🎥 學生畫面錄影已儲存：${filename} (${displaySize})`);
+          setTimeout(() => setToastMessage(null), 4000);
+        }
+
+        setIsRecordingStudent(false);
+        setIsStudentRecordPaused(false);
+        if (studentRecordTimerRef.current) {
+          clearInterval(studentRecordTimerRef.current);
+          studentRecordTimerRef.current = null;
+        }
+      };
+
+      recorder.start(1000);
+      setIsRecordingStudent(true);
+      setIsStudentRecordPaused(false);
+      setStudentRecordTime(0);
+
+      studentRecordTimerRef.current = window.setInterval(() => {
+        setStudentRecordTime((t) => t + 1);
+      }, 1000);
+    } catch (err) {
+      console.warn('[FocusModal] Student record start failed:', err);
+      setToastMessage('❌ 學生畫面錄影啟動失敗');
+      setTimeout(() => setToastMessage(null), 3000);
+    }
+  };
+
+  const formatRecordTime = (seconds: number) => {
+    const mins = Math.floor(seconds / 60);
+    const secs = seconds % 60;
+    return `${String(mins).padStart(2, '0')}:${String(secs).padStart(2, '0')}`;
+  };
 
   if (!device) return null;
 
@@ -281,6 +406,18 @@ export const FocusModal: React.FC<FocusModalProps> = ({ device, onClose }) => {
               <Camera className="w-4 h-4" />
             </button>
             <button
+              onClick={handleToggleStudentRecord}
+              className={`p-1.5 rounded-lg border transition-all active:scale-95 flex items-center space-x-1 text-xs font-semibold ${
+                isRecordingStudent
+                  ? 'bg-red-600 border-red-500 text-white ring-2 ring-red-500/50 shadow-lg animate-pulse'
+                  : 'bg-slate-800 border-slate-700 text-red-400 hover:bg-red-500/20 hover:border-red-500/40'
+              }`}
+              title={isRecordingStudent ? '停止學生畫面錄影並存檔' : '錄製此學生機即時畫面'}
+            >
+              <Video className="w-4 h-4 fill-current" />
+              {isRecordingStudent && <span>{formatRecordTime(studentRecordTime)}</span>}
+            </button>
+            <button
               onClick={handleToggleFullscreen}
               className="p-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-300 hover:text-white transition-colors"
               title={isFullscreen ? '退出全螢幕' : '全螢幕 (F11)'}
@@ -311,6 +448,27 @@ export const FocusModal: React.FC<FocusModalProps> = ({ device, onClose }) => {
               }
             }}
           />
+
+          {/* Student Screen Recording OSD Floating Timer */}
+          {isRecordingStudent && (
+            <div className="absolute top-4 left-1/2 -translate-x-1/2 z-40 bg-slate-950/90 border border-red-500/60 rounded-xl p-2.5 px-4 shadow-2xl backdrop-blur-md flex items-center space-x-3 select-none">
+              <div className="flex items-center space-x-2">
+                <span className="w-2.5 h-2.5 rounded-full bg-red-500 animate-pulse" />
+                <span className="text-xs font-semibold text-slate-200">學生畫面錄製中</span>
+                <span className="text-xs font-mono font-bold text-red-400 flex items-center space-x-1">
+                  <Clock className="w-3.5 h-3.5" />
+                  <span>{formatRecordTime(studentRecordTime)}</span>
+                </span>
+              </div>
+              <button
+                onClick={handleToggleStudentRecord}
+                className="px-2.5 py-1 bg-red-600 hover:bg-red-700 text-white rounded-lg text-xs font-bold flex items-center space-x-1 transition-all shadow-md active:scale-95"
+              >
+                <Square className="w-3.5 h-3.5 fill-current" />
+                <span>停止並存檔</span>
+              </button>
+            </div>
+          )}
 
           {/* Stream Failure / No Frames Overlay Banner */}
           {(streamStatus === 'Snapshot Fallback' || streamStatus === 'Offline' || (packetsReceived === 0 && isStreamTimeout)) && (

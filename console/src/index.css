@@ -10,6 +10,13 @@ body {
   color: #f8fafc;
 }
 
+/* Viewport culling CSS containment optimization */
+.card-containment {
+  contain: layout style paint;
+  content-visibility: auto;
+  contain-intrinsic-size: 190px 150px;
+}
+
 /* Custom scrollbars */
 ::-webkit-scrollbar {
   width: 6px;

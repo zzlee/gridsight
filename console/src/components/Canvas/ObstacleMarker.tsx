@@ -9,7 +9,7 @@ interface ObstacleMarkerProps {
   onDelete?: (id: string) => void;
 }
 
-export const ObstacleMarker: React.FC<ObstacleMarkerProps> = ({
+const ObstacleMarkerComponent: React.FC<ObstacleMarkerProps> = ({
   obstacle,
   isEditMode = false,
   onEdit,
@@ -114,3 +114,16 @@ export const ObstacleMarker: React.FC<ObstacleMarkerProps> = ({
     </div>
   );
 };
+
+export const ObstacleMarker = React.memo(ObstacleMarkerComponent, (prev, next) => {
+  return (
+    prev.isEditMode === next.isEditMode &&
+    prev.obstacle.id === next.obstacle.id &&
+    prev.obstacle.type === next.obstacle.type &&
+    prev.obstacle.label === next.obstacle.label &&
+    prev.obstacle.gridX === next.obstacle.gridX &&
+    prev.obstacle.gridY === next.obstacle.gridY &&
+    prev.obstacle.width === next.obstacle.width &&
+    prev.obstacle.height === next.obstacle.height
+  );
+});

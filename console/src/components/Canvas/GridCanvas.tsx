@@ -68,6 +68,11 @@ export const GridCanvas: React.FC<GridCanvasProps> = ({
   const [dragOverSeatId, setDragOverSeatId] = useState<string | null>(null);
   const [dragOverCell, setDragOverCell] = useState<{ x: number; y: number } | null>(null);
 
+  // Viewport culling state (null indicates initial render before calculation)
+  const [visibleSeatIds, setVisibleSeatIds] = useState<Set<string> | null>(null);
+  const rafIdRef = useRef<number | null>(null);
+  const lastVisibleSetRef = useRef<Set<string> | null>(null);
+
   // Card dimensions (16:9 ratio card matching 480x270 thumbnail)
   const cardWidth = 190;
   const cardHeight = 150;
@@ -212,49 +217,79 @@ export const GridCanvas: React.FC<GridCanvasProps> = ({
     return () => window.removeEventListener('keydown', handleKeyDown);
   }, [onSelectAll, onClearSelection]);
 
-  // Viewport calculation: determine which seats are inside the visible canvas viewport
+  // Viewport calculation: determine which seats are inside the visible canvas viewport with RAF throttling
   const calculateVisibleSeats = useCallback(() => {
-    if (!containerRef.current || !onVisibleSeatsChange) return;
+    if (rafIdRef.current !== null) {
+      cancelAnimationFrame(rafIdRef.current);
+    }
 
-    const container = containerRef.current;
-    const viewportWidth = container.clientWidth || window.innerWidth;
-    const viewportHeight = container.clientHeight || window.innerHeight;
+    rafIdRef.current = requestAnimationFrame(() => {
+      rafIdRef.current = null;
+      if (!containerRef.current) return;
 
-    const visibleSet = new Set<string>();
-    const margin = 100; // Buffer margin in screen pixels for pre-fetching ahead of scrolling
+      const container = containerRef.current;
+      const viewportWidth = container.clientWidth || window.innerWidth;
+      const viewportHeight = container.clientHeight || window.innerHeight;
 
-    layout.seats.forEach((seat) => {
-      const cardLeft = getVisualX(seat.gridX);
-      const cardTop = getVisualY(seat.gridY);
-      const cardRight = cardLeft + cardWidth;
-      const cardBottom = cardTop + cardHeight;
+      const visibleSet = new Set<string>();
+      const margin = 150; // Buffer margin in screen pixels for pre-fetching ahead of scrolling
 
-      // Project world coordinates to screen coordinates
-      const screenLeft = cardLeft * zoom + (pan.x + 30);
-      const screenTop = cardTop * zoom + (pan.y + 20);
-      const screenRight = cardRight * zoom + (pan.x + 30);
-      const screenBottom = cardBottom * zoom + (pan.y + 20);
+      layout.seats.forEach((seat) => {
+        const cardLeft = getVisualX(seat.gridX);
+        const cardTop = getVisualY(seat.gridY);
+        const cardRight = cardLeft + cardWidth;
+        const cardBottom = cardTop + cardHeight;
 
-      // Check if card bounding box intersects with viewport bounding box
-      const isVisible =
-        screenRight >= -margin &&
-        screenLeft <= viewportWidth + margin &&
-        screenBottom >= -margin &&
-        screenTop <= viewportHeight + margin;
+        // Project world coordinates to screen coordinates
+        const screenLeft = cardLeft * zoom + (pan.x + 30);
+        const screenTop = cardTop * zoom + (pan.y + 20);
+        const screenRight = cardRight * zoom + (pan.x + 30);
+        const screenBottom = cardBottom * zoom + (pan.y + 20);
 
-      if (isVisible) {
-        visibleSet.add(seat.id);
-        if (seat.mac) visibleSet.add(seat.mac);
+        // Check if card bounding box intersects with viewport bounding box
+        const isVisible =
+          screenRight >= -margin &&
+          screenLeft <= viewportWidth + margin &&
+          screenBottom >= -margin &&
+          screenTop <= viewportHeight + margin;
+
+        if (isVisible) {
+          visibleSet.add(seat.id);
+          if (seat.mac) visibleSet.add(seat.mac);
+        }
+      });
+
+      // Set equality guard: only update when visible seat set content changes
+      const prevSet = lastVisibleSetRef.current;
+      let isEqual = prevSet !== null && prevSet.size === visibleSet.size;
+      if (isEqual && prevSet !== null) {
+        for (const id of visibleSet) {
+          if (!prevSet.has(id)) {
+            isEqual = false;
+            break;
+          }
+        }
+      }
+
+      if (!isEqual) {
+        lastVisibleSetRef.current = visibleSet;
+        setVisibleSeatIds(visibleSet);
+        if (onVisibleSeatsChange) {
+          onVisibleSeatsChange(visibleSet);
+        }
       }
     });
-
-    onVisibleSeatsChange(visibleSet);
   }, [layout.seats, pan, zoom, onVisibleSeatsChange, getVisualX, getVisualY]);
 
   useEffect(() => {
     calculateVisibleSeats();
     window.addEventListener('resize', calculateVisibleSeats);
-    return () => window.removeEventListener('resize', calculateVisibleSeats);
+    return () => {
+      if (rafIdRef.current !== null) {
+        cancelAnimationFrame(rafIdRef.current);
+      }
+      window.removeEventListener('resize', calculateVisibleSeats);
+    };
   }, [calculateVisibleSeats]);
 
   // Reset any residual drag state globally when drag ends or drops anywhere
@@ -403,27 +438,26 @@ export const GridCanvas: React.FC<GridCanvasProps> = ({
         {/* Render Drop-Target Grid Matrix for Empty Cells */}
         <div className="absolute inset-0 pointer-events-none">
           {Array.from({ length: totalRows }).map((_, r) => {
+            const rowLabel = String.fromCharCode(65 + (r % 26));
             return Array.from({ length: totalCols }).map((_, c) => {
               const key = `${c},${r}`;
               const isOccupied = occupiedCells.has(key);
               if (isOccupied) return null;
 
-              const isTarget = dragOverCell && dragOverCell.x === c && dragOverCell.y === r;
-              const rowLabel = String.fromCharCode(65 + (r % 26));
-
-              const isInteractive = mode === 'EDIT_LAYOUT' || draggedSeatId;
+              const isInteractive = mode === 'EDIT_LAYOUT' || draggedSeatId !== null;
+              const isTarget = isInteractive && dragOverCell && dragOverCell.x === c && dragOverCell.y === r;
 
               return (
                 <div
                   key={key}
-                  onDragOver={(e) => handleCellDragOver(e, c, r)}
-                  onDrop={(e) => handleCellDrop(e, c, r)}
+                  onDragOver={isInteractive ? (e) => handleCellDragOver(e, c, r) : undefined}
+                  onDrop={isInteractive ? (e) => handleCellDrop(e, c, r) : undefined}
                   className={`absolute rounded-lg border transition-all ${
                     isInteractive
                       ? isTarget
                         ? 'border-sky-400 bg-sky-500/30 ring-2 ring-sky-400 pointer-events-auto scale-105 shadow-lg'
                         : 'border-slate-800/80 border-dashed bg-slate-900/30 hover:border-sky-500/50 hover:bg-slate-900/60 pointer-events-auto'
-                      : 'border-slate-900/80 bg-slate-950/40 pointer-events-none'
+                      : 'border-slate-900/60 bg-slate-950/20 pointer-events-none'
                   }`}
                   style={{
                     left: getVisualX(c),
@@ -526,13 +560,15 @@ export const GridCanvas: React.FC<GridCanvasProps> = ({
           );
         })}
 
-        {/* Render Assigned Student Cards */}
+        {/* Render Assigned Student Cards with Viewport Culling */}
         {layout.seats.map((seat) => {
           const isDimmed = filterOnlyOffTask && !seat.isOffTask;
+          const isVisible = visibleSeatIds === null || visibleSeatIds.has(seat.id) || (seat.mac ? visibleSeatIds.has(seat.mac) : false);
+
           return (
             <div
               key={seat.id}
-              className={`transition-all duration-200 ${
+              className={`card-containment transition-all duration-200 ${
                 isDimmed ? 'opacity-20 grayscale hover:opacity-100 hover:grayscale-0' : 'opacity-100'
               }`}
               style={{
@@ -544,22 +580,50 @@ export const GridCanvas: React.FC<GridCanvasProps> = ({
                 zIndex: draggedSeatId === seat.id ? 50 : 1,
               }}
             >
-              <StudentCard
-                device={seat}
-                isEditMode={mode === 'EDIT_LAYOUT'}
-                onSelect={onSelectStudent}
-                onDoubleClick={onFocusStudent}
-                onUnbind={onUnbindSeat}
-                onOpenSpecs={onOpenSpecs}
-                onEditSeat={onEditSeat}
-                onDragStart={handleCardDragStart}
-                onDragEnd={handleCardDragEnd}
-                onDragOver={handleCardDragOver}
-                onDragLeave={handleCardDragLeave}
-                onDrop={handleCardDrop}
-                isDragging={draggedSeatId === seat.id}
-                isDragOver={dragOverSeatId === seat.id}
-              />
+              {isVisible ? (
+                <StudentCard
+                  device={seat}
+                  isEditMode={mode === 'EDIT_LAYOUT'}
+                  onSelect={onSelectStudent}
+                  onDoubleClick={onFocusStudent}
+                  onUnbind={onUnbindSeat}
+                  onOpenSpecs={onOpenSpecs}
+                  onEditSeat={onEditSeat}
+                  onDragStart={handleCardDragStart}
+                  onDragEnd={handleCardDragEnd}
+                  onDragOver={handleCardDragOver}
+                  onDragLeave={handleCardDragLeave}
+                  onDrop={handleCardDrop}
+                  isDragging={draggedSeatId === seat.id}
+                  isDragOver={dragOverSeatId === seat.id}
+                />
+              ) : (
+                /* Lightweight DOM Placeholder for Off-screen Seats */
+                <div
+                  onClick={(e) => onSelectStudent(seat.id, e.ctrlKey || e.metaKey)}
+                  className={`w-full h-full rounded-lg border bg-slate-900/40 backdrop-blur-xs flex flex-col justify-between p-2 select-none transition-colors ${
+                    seat.selected
+                      ? 'border-sky-500 ring-1 ring-sky-500/50 bg-sky-950/20'
+                      : 'border-slate-800/80 hover:border-slate-700'
+                  }`}
+                >
+                  <div className="flex items-center justify-between">
+                    <span className="px-1.5 py-0.5 rounded bg-slate-800/90 text-sky-400 font-mono text-[11px]">
+                      {seat.seatNo || '未分配'}
+                    </span>
+                    <span className="text-[10px] text-slate-500 font-mono truncate max-w-[70px]">
+                      {seat.hostname}
+                    </span>
+                  </div>
+                  <div className="flex items-center justify-center opacity-30">
+                    <Monitor className="w-5 h-5 text-slate-500" />
+                  </div>
+                  <div className="flex items-center justify-between text-[9px] font-mono text-slate-600">
+                    <span className="truncate max-w-[80px]">{seat.ip}</span>
+                    <span className="text-[8px] uppercase tracking-wider text-slate-600">Offscreen</span>
+                  </div>
+                </div>
+              )}
             </div>
           );
         })}

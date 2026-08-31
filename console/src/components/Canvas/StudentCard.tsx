@@ -19,7 +19,7 @@ interface StudentCardProps {
   isDragOver?: boolean;
 }
 
-export const StudentCard: React.FC<StudentCardProps> = ({
+const StudentCardComponent: React.FC<StudentCardProps> = ({
   device,
   isEditMode,
   onSelect,
@@ -242,3 +242,49 @@ export const StudentCard: React.FC<StudentCardProps> = ({
     </div>
   );
 };
+
+export const StudentCard = React.memo(StudentCardComponent, (prevProps, nextProps) => {
+  if (
+    prevProps.isEditMode !== nextProps.isEditMode ||
+    prevProps.isDragging !== nextProps.isDragging ||
+    prevProps.isDragOver !== nextProps.isDragOver
+  ) {
+    return false;
+  }
+
+  const prev = prevProps.device;
+  const next = nextProps.device;
+
+  if (
+    prev.id !== next.id ||
+    prev.seatNo !== next.seatNo ||
+    prev.hostname !== next.hostname ||
+    prev.status !== next.status ||
+    prev.isOffTask !== next.isOffTask ||
+    prev.selected !== next.selected ||
+    prev.thumbnailUrl !== next.thumbnailUrl ||
+    prev.latencyMs !== next.latencyMs ||
+    prev.activeWindow !== next.activeWindow ||
+    prev.username !== next.username ||
+    prev.ip !== next.ip
+  ) {
+    return false;
+  }
+
+  const pSpecs = prev.specs;
+  const nSpecs = next.specs;
+
+  if (pSpecs !== nSpecs) {
+    if (!pSpecs || !nSpecs) return false;
+    if (
+      pSpecs.cpu.usage_percent !== nSpecs.cpu.usage_percent ||
+      pSpecs.ram.usage_percent !== nSpecs.ram.usage_percent ||
+      pSpecs.disk.free_gb !== nSpecs.disk.free_gb ||
+      pSpecs.agent_version !== nSpecs.agent_version
+    ) {
+      return false;
+    }
+  }
+
+  return true;
+});

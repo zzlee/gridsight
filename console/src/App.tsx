@@ -19,6 +19,7 @@ import { ShareUrlModal } from './components/Toolbar/ShareUrlModal';
 import { ShareFileModal } from './components/Toolbar/ShareFileModal';
 import { BroadcastTestModal } from './components/Toolbar/BroadcastTestModal';
 import { ShutdownModal } from './components/Toolbar/ShutdownModal';
+import { TeacherRecordModal } from './components/Toolbar/TeacherRecordModal';
 import { PollingManager } from './services/pollingManager';
 import { LayoutStorage } from './services/layoutStorage';
 import { useViewport } from './hooks/useViewport';
@@ -47,6 +48,7 @@ export const App: React.FC = () => {
   const [isShareFileOpen, setIsShareFileOpen] = useState(false);
   const [isBroadcastTestOpen, setIsBroadcastTestOpen] = useState(false);
   const [isShutdownOpen, setIsShutdownOpen] = useState(false);
+  const [isTeacherRecordOpen, setIsTeacherRecordOpen] = useState(false);
 
   // Viewport Zoom & Pan Persistence
   const { zoom, setZoom, pan, setPan, handleResetView } = useViewport();
@@ -563,6 +565,7 @@ export const App: React.FC = () => {
         onOpenShareUrl={() => setIsShareUrlOpen(true)}
         onOpenShareFile={() => setIsShareFileOpen(true)}
         onOpenBroadcastTest={() => setIsBroadcastTestOpen(true)}
+        onOpenTeacherRecord={() => setIsTeacherRecordOpen(true)}
         onOpenShutdown={() => setIsShutdownOpen(true)}
         offTaskCount={offTaskDevices.length}
         unassignedCount={unassignedDevices.length}
@@ -708,6 +711,12 @@ export const App: React.FC = () => {
         selectedTargets={selectedTargets}
         selectedCount={selectedSeats.length}
         totalOnlineCount={totalOnlineCount}
+      />
+
+      {/* Teacher Screen Recording Modal */}
+      <TeacherRecordModal
+        isOpen={isTeacherRecordOpen}
+        onClose={() => setIsTeacherRecordOpen(false)}
       />
 
       {/* Share File Modal */}

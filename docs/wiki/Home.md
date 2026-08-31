@@ -20,3 +20,5 @@
    - 網卡綁定、防火牆規則、Defender 排除與 Session 0 隔離診斷。
 7. **[AI Agent 與開發者核心知識庫 (AGENTS.md)](../../AGENTS.md)**
    - 連接埠規範、佈局持久化原則、跨平台相容性與開發防呆準則。
+8. **[前端畫布 Viewport Culling 與渲染效能改進計畫 (Viewport Culling Plan)](viewport-culling-optimization-plan.md)**
+   - 詳細分析 70~100 台規模下的 DOM 節點虛擬化、React.memo 記憶化與 60 FPS 平移優化策略。

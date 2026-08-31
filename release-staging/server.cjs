@@ -1603,14 +1603,14 @@ var require_node = __commonJS({
       obj[prop] = val;
       return obj;
     }, {});
-    var fd = parseInt(process.env.DEBUG_FD, 10) || 2;
-    if (1 !== fd && 2 !== fd) {
+    var fd2 = parseInt(process.env.DEBUG_FD, 10) || 2;
+    if (1 !== fd2 && 2 !== fd2) {
       util2.deprecate(function() {
       }, "except for stderr(2) and stdout(1), any other usage of DEBUG_FD is deprecated. Override debug.log if you want to use a different log function (https://git.io/debug_fd)")();
     }
-    var stream = 1 === fd ? process.stdout : 2 === fd ? process.stderr : createWritableStdioStream(fd);
+    var stream = 1 === fd2 ? process.stdout : 2 === fd2 ? process.stderr : createWritableStdioStream(fd2);
     function useColors() {
-      return "colors" in exports2.inspectOpts ? Boolean(exports2.inspectOpts.colors) : tty.isatty(fd);
+      return "colors" in exports2.inspectOpts ? Boolean(exports2.inspectOpts.colors) : tty.isatty(fd2);
     }
     exports2.formatters.o = function(v) {
       this.inspectOpts.colors = this.useColors;
@@ -1647,12 +1647,12 @@ var require_node = __commonJS({
     function load() {
       return process.env.DEBUG;
     }
-    function createWritableStdioStream(fd2) {
+    function createWritableStdioStream(fd3) {
       var stream2;
       var tty_wrap = process.binding("tty_wrap");
-      switch (tty_wrap.guessHandleType(fd2)) {
+      switch (tty_wrap.guessHandleType(fd3)) {
         case "TTY":
-          stream2 = new tty.WriteStream(fd2);
+          stream2 = new tty.WriteStream(fd3);
           stream2._type = "tty";
           if (stream2._handle && stream2._handle.unref) {
             stream2._handle.unref();
@@ -1660,14 +1660,14 @@ var require_node = __commonJS({
           break;
         case "FILE":
           var fs5 = require("fs");
-          stream2 = new fs5.SyncWriteStream(fd2, { autoClose: false });
+          stream2 = new fs5.SyncWriteStream(fd3, { autoClose: false });
           stream2._type = "fs";
           break;
         case "PIPE":
         case "TCP":
           var net = require("net");
           stream2 = new net.Socket({
-            fd: fd2,
+            fd: fd3,
             readable: false,
             writable: true
           });
@@ -1681,7 +1681,7 @@ var require_node = __commonJS({
         default:
           throw new Error("Implement me. Unknown stream file type!");
       }
-      stream2.fd = fd2;
+      stream2.fd = fd3;
       stream2._isStdio = true;
       return stream2;
     }
@@ -27112,20 +27112,113 @@ var import_os = __toESM(require("os"), 1);
 var import_fs2 = __toESM(require("fs"), 1);
 var import_path2 = __toESM(require("path"), 1);
 var import_util = __toESM(require("util"), 1);
-var logFilePath = process.env.LOG_FILE_PATH || import_path2.default.resolve(process.cwd(), "gridsight-server.log");
-var logStream = null;
-logStream = import_fs2.default.createWriteStream(logFilePath, { flags: "a" });
-logStream.on("error", (error) => {
-  console.error(`[ERROR] Failed to open log file at ${logFilePath}:`, error);
-  logStream = null;
-});
+var DEFAULT_MAX_SIZE = 5 * 1024 * 1024;
+var DEFAULT_MAX_FILES = 3;
+var fd = null;
+var currentLogFilePath = "";
+var currentSize = 0;
+function getMaxSizeBytes() {
+  const envVal = process.env.LOG_MAX_SIZE;
+  if (envVal) {
+    const parsed = parseInt(envVal, 10);
+    if (!isNaN(parsed) && parsed > 0) return parsed;
+  }
+  return DEFAULT_MAX_SIZE;
+}
+function getMaxFiles() {
+  const envVal = process.env.LOG_MAX_FILES;
+  if (envVal) {
+    const parsed = parseInt(envVal, 10);
+    if (!isNaN(parsed) && parsed >= 0) return parsed;
+  }
+  return DEFAULT_MAX_FILES;
+}
+function getLogFilePath() {
+  return process.env.LOG_FILE_PATH || import_path2.default.resolve(process.cwd(), "gridsight-server.log");
+}
+function closeLogger() {
+  if (fd !== null) {
+    try {
+      import_fs2.default.closeSync(fd);
+    } catch {
+    }
+    fd = null;
+  }
+}
+function openLogFile(filePath = getLogFilePath()) {
+  closeLogger();
+  try {
+    const dir = import_path2.default.dirname(filePath);
+    if (!import_fs2.default.existsSync(dir)) {
+      import_fs2.default.mkdirSync(dir, { recursive: true });
+    }
+    if (import_fs2.default.existsSync(filePath)) {
+      const stats = import_fs2.default.statSync(filePath);
+      currentSize = stats.size;
+    } else {
+      currentSize = 0;
+    }
+    fd = import_fs2.default.openSync(filePath, "a");
+    currentLogFilePath = filePath;
+  } catch (error) {
+    console.error(`[ERROR] Failed to open log file at ${filePath}:`, error);
+    fd = null;
+  }
+}
+function rotateLogs() {
+  const filePath = getLogFilePath();
+  const maxFiles = getMaxFiles();
+  closeLogger();
+  if (maxFiles > 0) {
+    for (let i = maxFiles; i >= 1; i--) {
+      const target = `${filePath}.${i}`;
+      const source = i === 1 ? filePath : `${filePath}.${i - 1}`;
+      if (import_fs2.default.existsSync(source)) {
+        try {
+          if (import_fs2.default.existsSync(target)) {
+            import_fs2.default.unlinkSync(target);
+          }
+          import_fs2.default.renameSync(source, target);
+        } catch (err) {
+          console.error(`[ERROR] Log rotation failed for ${source} -> ${target}:`, err);
+        }
+      }
+    }
+  } else {
+    try {
+      if (import_fs2.default.existsSync(filePath)) {
+        import_fs2.default.unlinkSync(filePath);
+      }
+    } catch (err) {
+      console.error(`[ERROR] Log truncation failed for ${filePath}:`, err);
+    }
+  }
+  openLogFile(filePath);
+}
 function writeLog(level, ...args) {
   const timestamp = (/* @__PURE__ */ new Date()).toISOString();
   const prefix = `[${timestamp}] [${level}]`;
-  if (logStream) {
+  const targetFilePath = getLogFilePath();
+  if (fd === null || targetFilePath !== currentLogFilePath) {
+    openLogFile(targetFilePath);
+  }
+  if (fd !== null) {
     const formattedArgs = import_util.default.format(...args);
-    logStream.write(`${prefix} ${formattedArgs}
-`);
+    const logLine = `${prefix} ${formattedArgs}
+`;
+    const lineSize = Buffer.byteLength(logLine, "utf-8");
+    const maxSizeBytes = getMaxSizeBytes();
+    if (currentSize > 0 && currentSize + lineSize > maxSizeBytes) {
+      rotateLogs();
+    }
+    if (fd !== null) {
+      try {
+        import_fs2.default.writeSync(fd, logLine);
+        currentSize += lineSize;
+      } catch (err) {
+        console.error(`[ERROR] Failed to write to log file at ${currentLogFilePath}:`, err);
+      }
+    }
   }
   if (level === "ERROR") {
     console.error(prefix, ...args);
@@ -27218,7 +27311,6 @@ var MulticastDiscoveryService = class {
           const agent = {
             hostname: payload.hostname || `Host-${rinfo.address.replace(/\./g, "-")}`,
             ip: rinfo.address,
-            port: payload.port ? parseInt(payload.port, 10) : 8080,
             mac,
             username: payload.username || "Student",
             token,
@@ -27794,6 +27886,7 @@ var SNAPSHOT_CACHE_TTL_MS = 3e4;
 var agentSockets = /* @__PURE__ */ new Map();
 var viewerSockets = /* @__PURE__ */ new Map();
 var pendingLogRequests = /* @__PURE__ */ new Map();
+var pendingHighResRequests = /* @__PURE__ */ new Map();
 var normalizeTarget = (raw) => {
   if (!raw) return "";
   return decodeURIComponent(raw).replace(/%3A/gi, ":").trim().toUpperCase();
@@ -27880,6 +27973,12 @@ wss.on("connection", (ws, req) => {
             if (cb) {
               cb(json.logs || "");
               pendingLogRequests.delete(mac);
+            }
+          } else if (json.action === "HIGHRES_SNAPSHOT_REPORT") {
+            const cb = pendingHighResRequests.get(mac);
+            if (cb) {
+              cb(json.image || "");
+              pendingHighResRequests.delete(mac);
             }
           }
         } catch {
@@ -27985,9 +28084,18 @@ app.get("/api/stream/debug", requireTeacherAuth, (req, res) => {
   });
 });
 var isStandalone = process.pkg !== void 0 || process.platform === "win32";
-var defaultSeatsFile = isStandalone ? import_path4.default.resolve(process.cwd(), "data", "seats.json") : "/data/seats.json";
+var defaultDataDir = (() => {
+  if (isStandalone) return import_path4.default.resolve(process.cwd(), "data");
+  try {
+    if (import_fs4.default.existsSync("/data")) return "/data";
+  } catch {
+  }
+  return import_path4.default.resolve(process.cwd(), "data");
+})();
+var defaultSeatsFile = import_path4.default.join(defaultDataDir, "seats.json");
 var SEATS_FILE = process.env.SEATS_FILE || defaultSeatsFile;
-var UPLOADS_DIR = isStandalone ? import_path4.default.resolve(process.cwd(), "data", "uploads") : "/data/uploads";
+var defaultUploadsDir = import_path4.default.join(defaultDataDir, "uploads");
+var UPLOADS_DIR = process.env.UPLOADS_DIR || defaultUploadsDir;
 var BROADCAST_TEST_DIR = import_path4.default.join(UPLOADS_DIR, "broadcast-test");
 var ensureBroadcastTestDirectory = async () => {
   try {
@@ -28123,7 +28231,7 @@ app.get("/api/health", (req, res) => {
 });
 app.get("/api/server-info", (req, res) => {
   res.json({
-    version: "5.6.0",
+    version: "5.7.2",
     teacherIp: activeTeacherIp,
     port: PORT,
     nicName: activeNicName
@@ -28157,6 +28265,18 @@ app.get("/api/devices", requireTeacherAuth, (req, res) => {
     count: discoveryService.getDevices().length
   });
 });
+var notifyStopBroadcast = () => {
+  logger.info(`[Broadcast] Broadcasting STOP_BROADCAST to all ${agentSockets.size} agents`);
+  agentSockets.forEach((ws, mac) => {
+    if (ws.readyState === import_websocket.default.OPEN) {
+      try {
+        ws.send(JSON.stringify({ action: "STOP_BROADCAST" }));
+      } catch (err) {
+        logger.error(`[Broadcast] Failed to send STOP_BROADCAST to agent ${mac}: ${err}`);
+      }
+    }
+  });
+};
 app.post("/api/broadcast/start", requireTeacherAuth, async (req, res) => {
   const result = await broadcastStreamer.startStream({ ...req.body || {}, localIp: activeTeacherIp });
   if (!result.ok) {
@@ -28166,6 +28286,7 @@ app.post("/api/broadcast/start", requireTeacherAuth, async (req, res) => {
 });
 app.post("/api/broadcast/stop", requireTeacherAuth, (req, res) => {
   broadcastStreamer.stopStream();
+  notifyStopBroadcast();
   res.json({ status: "stopped", active: false });
 });
 app.get("/api/broadcast/status", requireTeacherAuth, (req, res) => {
@@ -28233,6 +28354,7 @@ app.post("/api/broadcast/test/start", requireTeacherAuth, async (req, res) => {
 });
 app.post("/api/broadcast/test/stop", requireTeacherAuth, (req, res) => {
   broadcastStreamer.stopStream();
+  notifyStopBroadcast();
   res.json({ status: "stopped", active: false });
 });
 app.post("/api/share/url", requireTeacherAuth, (req, res) => {
@@ -28415,41 +28537,37 @@ app.get(["/api/snapshot/:id", "/api/snapshot"], requireTeacherAuth, async (req, 
   const rawId = req.params.id || req.query.id || req.query.mac || req.query.ip || "";
   const normalizedId = normalizeTarget(rawId);
   const wantsHighRes = req.query.full === "1" || req.query.highres === "1";
-  let cachedEntry = getSnapshotCached(normalizedId) || getSnapshotCached(rawId);
-  if (wantsHighRes || !cachedEntry || Date.now() - cachedEntry.timestamp >= 3e3) {
+  if (wantsHighRes) {
     const dev = discoveryService.getDevices().find(
       (d) => normalizeTarget(d.mac) === normalizedId || d.ip === rawId || d.hostname === rawId
     );
-    if (dev && dev.ip) {
-      const port = dev.port || 8080;
+    const targetMac = dev ? normalizeTarget(dev.mac) : normalizedId;
+    const ws = agentSockets.get(targetMac);
+    if (ws && ws.readyState === import_websocket.default.OPEN) {
       try {
-        const agentUrl = `http://${dev.ip}:${port}/snapshot${wantsHighRes ? "?full=1" : ""}`;
-        const controller = new AbortController();
-        const timeout = setTimeout(() => controller.abort(), wantsHighRes ? 3e3 : 1200);
-        const headers = {};
-        if (dev.token) headers["X-Auth-Token"] = dev.token;
-        const resp = await fetch(agentUrl, { signal: controller.signal, headers });
-        clearTimeout(timeout);
-        if (resp.ok) {
-          const ab = await resp.arrayBuffer();
-          const buffer = Buffer.from(ab);
-          if (wantsHighRes) {
-            res.setHeader("Content-Type", "image/jpeg");
-            res.setHeader("Cache-Control", "no-cache, no-store, must-revalidate");
-            return res.send(buffer);
-          }
-          cachedEntry = { buffer, timestamp: Date.now() };
-          storeSnapshot(normalizedId, cachedEntry);
-          if (dev.mac) storeSnapshot(normalizeTarget(dev.mac), cachedEntry);
-          if (dev.ip) storeSnapshot(dev.ip, cachedEntry);
+        const b64Image = await new Promise((resolve) => {
+          const timer = setTimeout(() => {
+            pendingHighResRequests.delete(targetMac);
+            resolve("");
+          }, 3e3);
+          pendingHighResRequests.set(targetMac, (data) => {
+            clearTimeout(timer);
+            resolve(data);
+          });
+          ws.send(JSON.stringify({ action: "GET_HIGHRES_SNAPSHOT" }));
+        });
+        if (b64Image) {
+          const buffer = Buffer.from(b64Image, "base64");
+          res.setHeader("Content-Type", "image/jpeg");
+          res.setHeader("Cache-Control", "no-cache, no-store, must-revalidate");
+          return res.send(buffer);
         }
       } catch {
       }
     }
-  }
-  if (wantsHighRes) {
     return res.status(502).json({ error: "High-resolution snapshot unavailable" });
   }
+  const cachedEntry = getSnapshotCached(normalizedId) || getSnapshotCached(rawId);
   if (cachedEntry) {
     res.setHeader("Content-Type", "image/jpeg");
     res.setHeader("Cache-Control", "no-cache, no-store, must-revalidate");
@@ -28491,35 +28609,10 @@ app.get(["/api/agent/:id/logs", "/api/agent/logs"], requireTeacherAuth, async (r
     } catch {
     }
   }
-  const port = dev.port || 8080;
-  const agentUrl = `http://${dev.ip}:${port}/logs`;
-  try {
-    const controller = new AbortController();
-    const timeout = setTimeout(() => controller.abort(), 3e3);
-    const headers = {};
-    if (dev.token) {
-      headers["X-Auth-Token"] = dev.token;
-    }
-    const resp = await fetch(agentUrl, { signal: controller.signal, headers });
-    clearTimeout(timeout);
-    if (resp.ok) {
-      const logs = await resp.text();
-      res.setHeader("Content-Type", "text/plain; charset=utf-8");
-      return res.send(logs);
-    } else {
-      return res.status(resp.status).json({
-        error: "\u5B78\u751F\u7AEF\u56DE\u61C9\u932F\u8AA4",
-        message: `\u5B78\u751F\u7AEF HTTP \u56DE\u61C9\u72C0\u614B\u78BC ${resp.status}`
-      });
-    }
-  } catch (err) {
-    const msg = err instanceof Error ? err.message : String(err);
-    logger.warn(`[Agent Logs] Failed to fetch logs from ${agentUrl}: ${msg}`);
-    return res.status(502).json({
-      error: "\u7121\u6CD5\u9023\u7DDA\u81F3\u5B78\u751F\u7AEF\u6293\u53D6\u65E5\u8A8C",
-      message: `\u76EE\u6A19\u5B78\u751F\u6A5F (${dev.hostname} - ${dev.ip}:${port}) \u5C1A\u672A\u56DE\u61C9\uFF0C\u53EF\u80FD\u9023\u7DDA\u4E2D\u65B7\u6216\u53D7\u9632\u706B\u7246\u963B\u64CB\u3002`
-    });
-  }
+  return res.status(502).json({
+    error: "\u7121\u6CD5\u9023\u7DDA\u81F3\u5B78\u751F\u7AEF\u6293\u53D6\u65E5\u8A8C",
+    message: `\u76EE\u6A19\u5B78\u751F\u6A5F (${dev.hostname} - ${dev.ip}) \u7684\u53CD\u5411 WebSocket \u672A\u9023\u7DDA\u3002`
+  });
 });
 app.get("/install-agent.ps1", (req, res) => {
   const socketAddress = req.socket.localAddress?.replace(/^::ffff:/, "") || "";
@@ -28530,7 +28623,7 @@ app.get("/install-agent.ps1", (req, res) => {
     teacherHost,
     teacherPort: PORT,
     hmacSecret: tokenAuth.getHmacSecret(),
-    version: "5.6.0"
+    version: "5.7.2"
   });
   res.setHeader("Content-Type", "text/plain; charset=utf-8");
   res.send(script);
@@ -28745,7 +28838,7 @@ async function bootstrap() {
     const localUrl = `http://localhost:${PORT}`;
     const lanUrl = `http://${activeTeacherIp}:${PORT}`;
     logger.info(`=============================================================`);
-    logger.info(`  \u{1F680} GridSight Teacher Console v5.6.0`);
+    logger.info(`  \u{1F680} GridSight Teacher Console v5.7.2`);
     logger.info(`  \u7D81\u5B9A\u7DB2\u8DEF\u5361 (NIC): ${activeNicName} (${activeTeacherIp})`);
     logger.info(`  \u672C\u6A5F\u63A7\u5236\u53F0\u7DB2\u5740:   ${localUrl}`);
     logger.info(`  \u5B78\u751F\u9023\u7DDA\u7DB2\u5740:     ${lanUrl}/join`);

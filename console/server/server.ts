@@ -18,6 +18,23 @@ import type { ClassroomLayout, StudentDevice } from './types.js';
 
 const currentDirname = typeof __dirname !== 'undefined' ? __dirname : path.dirname(fileURLToPath(import.meta.url || 'file:///'));
 
+// Read version from console/package.json as single source of truth
+const APP_VERSION: string = (() => {
+  const candidates = [
+    path.resolve(currentDirname, '../package.json'),
+    path.resolve(currentDirname, '../../console/package.json'),
+    path.resolve(process.cwd(), 'console/package.json'),
+    path.resolve(process.cwd(), 'package.json'),
+  ];
+  for (const p of candidates) {
+    try {
+      const pkg = JSON.parse(fs.readFileSync(p, 'utf-8'));
+      if (pkg.version) return pkg.version;
+    } catch { /* ignore */ }
+  }
+  return '5.8.0'; // fallback
+})();
+
 const app = express();
 export const server = createServer(app);
 const wss = new WebSocketServer({ server, maxPayload: 8 * 1024 * 1024 });
@@ -472,7 +489,7 @@ app.get('/api/health', (req, res) => {
 
 app.get('/api/server-info', (req, res) => {
   res.json({
-    version: '5.8.0',
+    version: APP_VERSION,
     teacherIp: activeTeacherIp,
     port: PORT,
     nicName: activeNicName,
@@ -928,7 +945,7 @@ app.get('/install-agent.ps1', (req, res) => {
     teacherHost,
     teacherPort: PORT,
     hmacSecret: tokenAuth.getHmacSecret(),
-    version: '5.8.0',
+    version: APP_VERSION,
   });
   res.setHeader('Content-Type', 'text/plain; charset=utf-8');
   res.send(script);
@@ -1067,6 +1084,18 @@ app.get(['/download/gs-agent.exe', '/gs-agent.exe'], (req, res) => {
   }
 });
 
+// Route: Agent auto-update version check (no auth required for agent self-update)
+app.get('/api/agent/latest-version', (req, res) => {
+  const binaryPath = getAgentBinaryPath();
+  const stats = binaryPath ? (() => { try { return fs.statSync(binaryPath); } catch { return null; } })() : null;
+  res.json({
+    version: APP_VERSION,
+    downloadUrl: `/download/gs-agent.exe`,
+    sizeBytes: stats?.size ?? 0,
+    updatedAt: stats?.mtime?.toISOString() ?? new Date().toISOString(),
+  });
+});
+
 // Route: Serve gs-console.exe Windows Standalone binary download
 const possibleConsolePaths = [
   path.resolve(currentDirname, '../../release/gs-console.exe'),
@@ -1175,7 +1204,7 @@ async function bootstrap() {
     const lanUrl = `http://${activeTeacherIp}:${PORT}`;
 
     logger.info(`=============================================================`);
-    logger.info(`  🚀 GridSight Teacher Console v5.8.0`);
+    logger.info(`  🚀 GridSight Teacher Console v${APP_VERSION}`);
     logger.info(`  綁定網路卡 (NIC): ${activeNicName} (${activeTeacherIp})`);
     logger.info(`  本機控制台網址:   ${localUrl}`);
     logger.info(`  學生連線網址:     ${lanUrl}/join`);

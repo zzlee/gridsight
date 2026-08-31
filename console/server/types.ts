@@ -6,6 +6,7 @@ export interface DeviceSystemInfo {
   hostname?: string;
   os?: string;
   uptime?: number;
+  agent_version?: string;
   cpu: {
     model: string;
     cores: number;

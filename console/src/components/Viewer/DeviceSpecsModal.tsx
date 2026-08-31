@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import { StudentDevice, DeviceSystemInfo } from '../../types';
-import { X, Cpu, HardDrive, MemoryStick, Activity, Clock, Laptop, ShieldCheck, RefreshCw, AlertTriangle } from 'lucide-react';
+import { X, Cpu, HardDrive, MemoryStick, Activity, Clock, Laptop, ShieldCheck, RefreshCw, AlertTriangle, Info } from 'lucide-react';
 
 interface DeviceSpecsModalProps {
   device: StudentDevice | null;
@@ -95,6 +95,34 @@ export const DeviceSpecsModal: React.FC<DeviceSpecsModalProps> = ({ device, onCl
                   </div>
                 </div>
               </div>
+
+              {/* Agent Version */}
+              {specs.agent_version && (
+                <div className={`p-3 border rounded-lg flex items-center space-x-3 ${
+                  specs.agent_version === __APP_VERSION__
+                    ? 'bg-slate-950/50 border-emerald-800/60'
+                    : 'bg-amber-950/30 border-amber-700/60'
+                }`}>
+                  <div className={`p-2 rounded-md ${
+                    specs.agent_version === __APP_VERSION__
+                      ? 'bg-emerald-500/10 text-emerald-400'
+                      : 'bg-amber-500/10 text-amber-400'
+                  }`}>
+                    <Info className="w-5 h-5" />
+                  </div>
+                  <div className="flex-1">
+                    <div className="text-[11px] text-slate-400">Agent 版本</div>
+                    <div className="text-sm font-semibold font-mono text-slate-200">
+                      v{specs.agent_version}
+                      {specs.agent_version === __APP_VERSION__ ? (
+                        <span className="ml-2 text-emerald-400 text-xs">✓ 版本一致</span>
+                      ) : (
+                        <span className="ml-2 text-amber-400 text-xs">⚠️ 與 Console v{__APP_VERSION__} 不符</span>
+                      )}
+                    </div>
+                  </div>
+                </div>
+              )}
 
               {/* CPU Hardware Status */}
               <div className="p-4 bg-slate-950/60 border border-slate-800 rounded-lg space-y-2.5">

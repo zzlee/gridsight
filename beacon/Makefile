@@ -1,12 +1,15 @@
 CXX ?= x86_64-w64-mingw32-g++
 HOST_CXX ?= g++
 
+# Read version from root package.json (single source of truth)
+AGENT_VERSION := $(shell node -e "try{console.log(require('../package.json').version)}catch(e){console.log('5.8.0')}" 2>/dev/null || echo 5.8.0)
+
 ifeq ($(findstring mingw,$(CXX)),mingw)
-    CXXFLAGS = -std=c++17 -O3 -Wall -Iinclude -mwindows -D_WIN32_WINNT=0x0602 -finput-charset=UTF-8 -fwide-exec-charset=UTF-16LE
+    CXXFLAGS = -std=c++17 -O3 -Wall -Iinclude -mwindows -D_WIN32_WINNT=0x0602 -finput-charset=UTF-8 -fwide-exec-charset=UTF-16LE -DAGENT_VERSION='"$(AGENT_VERSION)"'
     LDFLAGS = -static -static-libgcc -static-libstdc++ -lws2_32 -liphlpapi -ld3d11 -ldxgi -lgdi32 -lgdiplus -luser32 -lmfplat -lmfuuid -lwmcodecdspuuid -lole32 -lwindowscodecs -loleaut32 -lshell32 -lshlwapi -luuid
     TARGET = gs-agent.exe
 else
-    CXXFLAGS = -std=c++17 -O3 -Wall -Iinclude -pthread
+    CXXFLAGS = -std=c++17 -O3 -Wall -Iinclude -pthread -DAGENT_VERSION='"$(AGENT_VERSION)"'
     LDFLAGS = -pthread
     TARGET = gs-agent
 endif

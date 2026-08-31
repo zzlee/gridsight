@@ -342,7 +342,22 @@ export const FocusModal: React.FC<FocusModalProps> = ({ device, onClose }) => {
             <div className="absolute top-3 right-3 bg-slate-950/85 backdrop-blur-md border border-slate-800/90 rounded-lg p-3 text-xs space-y-2 shadow-xl pointer-events-none max-w-xs animate-in fade-in duration-150">
               <div className="flex items-center justify-between text-slate-300 border-b border-slate-800 pb-1 font-semibold">
                 <span className="text-sky-400">學生端硬體即時監控</span>
-                <span className="font-mono text-[11px] text-slate-400">{specs.os || 'Windows'}</span>
+                <div className="flex items-center space-x-2">
+                  {specs.agent_version && (
+                    <span className={`font-mono text-[10px] px-1.5 py-0.5 rounded ${
+                      specs.agent_version === __APP_VERSION__
+                        ? 'bg-emerald-600/30 text-emerald-300'
+                        : 'bg-amber-600/30 text-amber-300'
+                    }`} title={
+                      specs.agent_version === __APP_VERSION__
+                        ? `Agent v${specs.agent_version} ✓ 版本一致`
+                        : `⚠️ Agent v${specs.agent_version} ≠ Console v${__APP_VERSION__}`
+                    }>
+                      Agent v{specs.agent_version}
+                    </span>
+                  )}
+                  <span className="font-mono text-[11px] text-slate-400">{specs.os || 'Windows'}</span>
+                </div>
               </div>
               <div className="space-y-1.5 font-mono">
                 {/* CPU */}

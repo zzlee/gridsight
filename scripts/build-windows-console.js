@@ -9,6 +9,9 @@ const __dirname = path.dirname(__filename);
 const rootDir = path.resolve(__dirname, '..');
 const consoleDir = path.resolve(rootDir, 'console');
 const releaseDir = path.resolve(rootDir, 'release');
+
+// Read version from console/package.json (single source of truth)
+const APP_VERSION = JSON.parse(fs.readFileSync(path.resolve(consoleDir, 'package.json'), 'utf-8')).version;
 const stagingDir = path.resolve(rootDir, 'release-staging');
 
 console.log('===============================================================');
@@ -56,7 +59,7 @@ if (fs.existsSync(agentSrc)) {
 // Create staging package.json for pkg
 const stagingPackageJson = {
   name: 'gridsight-console',
-  version: '5.8.0',
+  version: APP_VERSION,
   bin: 'server.cjs',
   main: 'server.cjs',
   pkg: {

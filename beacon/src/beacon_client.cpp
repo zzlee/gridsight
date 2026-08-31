@@ -77,7 +77,7 @@ void BeaconClient::DiscoveryLoop() {
         std::ostringstream ss;
         ss << "{"
            << "\"type\":\"BEACON\","
-           << "\"version\":\"5.8.0\","
+           << "\"version\":\"" AGENT_VERSION "\","
            << "\"hostname\":\"" << net_info.hostname << "\","
            << "\"ip\":\"" << net_info.ip << "\","
            << "\"mac\":\"" << net_info.mac << "\","
@@ -85,7 +85,7 @@ void BeaconClient::DiscoveryLoop() {
            << "\"active_window\":\"" << esc_win.str() << "\","
            << "\"timestamp\":" << Utils::GetCurrentTimestampMs() << ","
            << "\"specs\":{"
-           <<   "\"agent_version\":\"5.8.0\","
+           <<   "\"agent_version\":\"" AGENT_VERSION "\","
            <<   "\"os\":\"" << hw.os_name << "\","
            <<   "\"uptime\":" << hw.uptime_seconds << ","
            <<   "\"cpu\":{\"model\":\"" << hw.cpu_model << "\",\"cores\":" << hw.cpu_cores << ",\"usage_percent\":" << hw.cpu_usage_percent << "},"

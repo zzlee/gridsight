@@ -223,6 +223,14 @@ export const StudentCard: React.FC<StudentCardProps> = ({
             <span className="text-slate-500 truncate max-w-[55px]" title={`磁碟可用 ${specs.disk.free_gb} GB`}>
               D:{specs.disk.free_gb}G
             </span>
+            {specs.agent_version && specs.agent_version !== __APP_VERSION__ && (
+              <span
+                className="px-1 py-0.5 rounded bg-amber-600/30 text-amber-300 text-[8px] font-bold"
+                title={`Agent v${specs.agent_version} ≠ Console v${__APP_VERSION__}`}
+              >
+                v{specs.agent_version}
+              </span>
+            )}
           </div>
         ) : (
           <span className="truncate max-w-[85px] text-slate-400" title={device.username}>

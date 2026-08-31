@@ -8,12 +8,28 @@ Used for benchmarking teacher console rendering, network multicast, and snapshot
 import argparse
 import asyncio
 import json
+import os
 import random
 import socket
 import struct
 import sys
 import time
+from pathlib import Path
 from typing import Dict, List
+
+# Read version from root package.json (single source of truth)
+def _read_version() -> str:
+    for candidate in [
+        Path(__file__).resolve().parent.parent / 'package.json',
+        Path.cwd() / 'package.json',
+    ]:
+        try:
+            return json.loads(candidate.read_text()).get('version', '5.8.0')
+        except Exception:
+            pass
+    return '5.8.0'
+
+APP_VERSION = _read_version()
 
 # Try importing PIL for realistic synthetic thumbnail generation; fallback to raw JPEG if not available
 try:
@@ -102,7 +118,7 @@ class MockAgent:
 
         return {
             "type": "BEACON",
-            "version": "5.8.0",
+            "version": APP_VERSION,
             "hostname": self.hostname,
             "ip": self.ip,
             "mac": self.mac,
@@ -110,7 +126,7 @@ class MockAgent:
             "active_window": self.active_window,
             "timestamp": int(time.time() * 1000),
             "specs": {
-                "agent_version": "5.8.0",
+                "agent_version": APP_VERSION,
                 "os": "Windows 11 Pro (Mock)",
                 "uptime": 3600,
                 "cpu": {"model": "Intel Core i7-12700 (Mock)", "cores": 12, "usage_percent": self.metrics["cpu"]},

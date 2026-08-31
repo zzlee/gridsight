@@ -30,47 +30,15 @@ private:
     void AppendAccessUnitNAL(const uint8_t* nal, size_t size, bool is_idr);
     void FlushAccessUnit();
 
-    void MetadataLoop();
-    void CompositePointer(uint8_t* bgra, int width, int height);
-
     std::string multicast_ip_;
     int port_;
     std::atomic<bool> running_{false};
     std::atomic<bool> overlay_active_{false};
     std::atomic<uint64_t> last_stop_broadcast_time_{0};
     std::thread receive_thread_;
-    std::thread metadata_thread_;
     std::thread decode_thread_;
     std::thread ui_thread_;
     std::atomic<uintptr_t> socket_fd_{0};
-    std::atomic<uintptr_t> metadata_socket_fd_{0};
-
-    // Pointer state and metadata effects
-    struct PointerState {
-        int norm_x = 32767;
-        int norm_y = 32767;
-        uint64_t timestamp = 0;
-        std::string cursor = "IDC_ARROW";
-    };
-
-    struct ClickEffect {
-        int norm_x;
-        int norm_y;
-        bool is_left;
-        uint64_t start_time_ms;
-    };
-
-    struct ScrollEffect {
-        int norm_x;
-        int norm_y;
-        bool is_up;
-        uint64_t start_time_ms;
-    };
-
-    PointerState pointer_state_;
-    std::vector<ClickEffect> click_effects_;
-    std::vector<ScrollEffect> scroll_effects_;
-    std::mutex pointer_mutex_;
     void* hwnd_overlay_ = nullptr;
     void* decoder_ = nullptr;
 

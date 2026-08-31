@@ -214,6 +214,7 @@ export const GridCanvas: React.FC<GridCanvasProps> = ({
 
   // Set of visible seat IDs for DOM culling inside the canvas viewport
   const [visibleSeatIds, setVisibleSeatIds] = useState<Set<string>>(() => new Set());
+  const visibleSeatIdsRef = useRef<Set<string>>(new Set());
   const prevVisibleSetRef = useRef<Set<string>>(new Set());
   const rafIdRef = useRef<number | null>(null);
 
@@ -256,16 +257,17 @@ export const GridCanvas: React.FC<GridCanvasProps> = ({
     });
 
     // Set Equality Guard to prevent redundant state updates
-    let isDomChanged = visibleDomSet.size !== visibleSeatIds.size;
+    let isDomChanged = visibleDomSet.size !== visibleSeatIdsRef.current.size;
     if (!isDomChanged) {
       for (const id of visibleDomSet) {
-        if (!visibleSeatIds.has(id)) {
+        if (!visibleSeatIdsRef.current.has(id)) {
           isDomChanged = true;
           break;
         }
       }
     }
     if (isDomChanged) {
+      visibleSeatIdsRef.current = visibleDomSet;
       setVisibleSeatIds(visibleDomSet);
     }
 
@@ -285,7 +287,7 @@ export const GridCanvas: React.FC<GridCanvasProps> = ({
         onVisibleSeatsChange(visibleNetworkSet);
       }
     }
-  }, [layout.seats, pan, zoom, onVisibleSeatsChange, getVisualX, getVisualY, visibleSeatIds]);
+  }, [layout.seats, pan, zoom, onVisibleSeatsChange, getVisualX, getVisualY]);
 
   // RAF Throttled calculation on pan/zoom/resize
   useEffect(() => {

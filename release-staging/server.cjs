@@ -1603,14 +1603,14 @@ var require_node = __commonJS({
       obj[prop] = val;
       return obj;
     }, {});
-    var fd2 = parseInt(process.env.DEBUG_FD, 10) || 2;
-    if (1 !== fd2 && 2 !== fd2) {
+    var fd = parseInt(process.env.DEBUG_FD, 10) || 2;
+    if (1 !== fd && 2 !== fd) {
       util2.deprecate(function() {
       }, "except for stderr(2) and stdout(1), any other usage of DEBUG_FD is deprecated. Override debug.log if you want to use a different log function (https://git.io/debug_fd)")();
     }
-    var stream = 1 === fd2 ? process.stdout : 2 === fd2 ? process.stderr : createWritableStdioStream(fd2);
+    var stream = 1 === fd ? process.stdout : 2 === fd ? process.stderr : createWritableStdioStream(fd);
     function useColors() {
-      return "colors" in exports2.inspectOpts ? Boolean(exports2.inspectOpts.colors) : tty.isatty(fd2);
+      return "colors" in exports2.inspectOpts ? Boolean(exports2.inspectOpts.colors) : tty.isatty(fd);
     }
     exports2.formatters.o = function(v) {
       this.inspectOpts.colors = this.useColors;
@@ -1647,12 +1647,12 @@ var require_node = __commonJS({
     function load() {
       return process.env.DEBUG;
     }
-    function createWritableStdioStream(fd3) {
+    function createWritableStdioStream(fd2) {
       var stream2;
       var tty_wrap = process.binding("tty_wrap");
-      switch (tty_wrap.guessHandleType(fd3)) {
+      switch (tty_wrap.guessHandleType(fd2)) {
         case "TTY":
-          stream2 = new tty.WriteStream(fd3);
+          stream2 = new tty.WriteStream(fd2);
           stream2._type = "tty";
           if (stream2._handle && stream2._handle.unref) {
             stream2._handle.unref();
@@ -1660,14 +1660,14 @@ var require_node = __commonJS({
           break;
         case "FILE":
           var fs5 = require("fs");
-          stream2 = new fs5.SyncWriteStream(fd3, { autoClose: false });
+          stream2 = new fs5.SyncWriteStream(fd2, { autoClose: false });
           stream2._type = "fs";
           break;
         case "PIPE":
         case "TCP":
           var net = require("net");
           stream2 = new net.Socket({
-            fd: fd3,
+            fd: fd2,
             readable: false,
             writable: true
           });
@@ -1681,7 +1681,7 @@ var require_node = __commonJS({
         default:
           throw new Error("Implement me. Unknown stream file type!");
       }
-      stream2.fd = fd3;
+      stream2.fd = fd2;
       stream2._isStdio = true;
       return stream2;
     }

@@ -891,49 +891,18 @@ bool RTPReceiver::Start() {
     }
 
     socket_fd_.store((uintptr_t)sock);
-
-    // Set up Metadata UDP Multicast Socket (port_ + 1)
-    int meta_port = port_ + 1;
-    SOCKET meta_sock = socket(AF_INET, SOCK_DGRAM, IPPROTO_UDP);
-    if (meta_sock != INVALID_SOCKET) {
-        setsockopt(meta_sock, SOL_SOCKET, SO_REUSEADDR, (const char*)&reuse, sizeof(reuse));
-        sockaddr_in meta_addr;
-        memset(&meta_addr, 0, sizeof(meta_addr));
-        meta_addr.sin_family = AF_INET;
-        meta_addr.sin_addr.s_addr = INADDR_ANY;
-        meta_addr.sin_port = htons(meta_port);
-        if (bind(meta_sock, (sockaddr*)&meta_addr, sizeof(meta_addr)) != SOCKET_ERROR) {
-            if (joined) {
-                struct ip_mreq meta_membership;
-                memset(&meta_membership, 0, sizeof(meta_membership));
-                meta_membership.imr_multiaddr = multicast_addr;
-                meta_membership.imr_interface.s_addr = INADDR_ANY;
-                setsockopt(meta_sock, IPPROTO_IP, IP_ADD_MEMBERSHIP, (char*)&meta_membership, sizeof(meta_membership));
-            }
-            metadata_socket_fd_.store((uintptr_t)meta_sock);
-        } else {
-            closesocket(meta_sock);
-        }
-    }
-
     try {
         receive_thread_ = std::thread(&RTPReceiver::ReceiveLoop, this);
-        metadata_thread_ = std::thread(&RTPReceiver::MetadataLoop, this);
         decode_thread_ = std::thread(&RTPReceiver::DecodeThreadLoop, this);
     } catch (const std::exception& err) {
         uintptr_t owned_socket = socket_fd_.exchange(0);
         if (owned_socket != 0 && (SOCKET)owned_socket != INVALID_SOCKET) {
             closesocket((SOCKET)owned_socket);
         }
-        uintptr_t owned_meta_socket = metadata_socket_fd_.exchange(0);
-        if (owned_meta_socket != 0 && (SOCKET)owned_meta_socket != INVALID_SOCKET) {
-            closesocket((SOCKET)owned_meta_socket);
-        }
         running_ = false;
         // Wake the (possibly started) decode thread so it can observe stop.
         au_cv_.notify_all();
         if (decode_thread_.joinable()) decode_thread_.join();
-        if (metadata_thread_.joinable()) metadata_thread_.join();
         Utils::Log("ERROR", "RTPReceiver worker startup failed: " + std::string(err.what()));
         return false;
     }
@@ -952,16 +921,11 @@ void RTPReceiver::Stop() {
     if (owned_socket != 0 && (SOCKET)owned_socket != INVALID_SOCKET) {
         closesocket((SOCKET)owned_socket);
     }
-    uintptr_t owned_meta_socket = metadata_socket_fd_.exchange(0);
-    if (owned_meta_socket != 0 && (SOCKET)owned_meta_socket != INVALID_SOCKET) {
-        closesocket((SOCKET)owned_meta_socket);
-    }
     // Wake the decode thread and wait for it to finish decoding any
     // currently-held access unit, so it never touches the decoder after
     // the MFT is released below.
     au_cv_.notify_all();
     if (receive_thread_.joinable()) receive_thread_.join();
-    if (metadata_thread_.joinable()) metadata_thread_.join();
     if (decode_thread_.joinable()) decode_thread_.join();
 
     rtp_stream_initialized_ = false;
@@ -1003,205 +967,6 @@ void RTPReceiver::EnqueueAU(std::vector<uint8_t> au) {
         pending_au_queue_.push_back(std::move(au));
     }
     au_cv_.notify_one();
-}
-
-static int ExtractJsonInt(const std::string& json, const std::string& key, int fallback = 0) {
-    size_t pos = json.find("\"" + key + "\":");
-    if (pos == std::string::npos) pos = json.find("\"" + key + "\" :");
-    if (pos == std::string::npos) return fallback;
-    size_t start = json.find_first_of("0123456789-", pos + key.length() + 2);
-    if (start == std::string::npos) return fallback;
-    try {
-        return std::stoi(json.substr(start));
-    } catch (...) {
-        return fallback;
-    }
-}
-
-static uint64_t ExtractJsonUint64(const std::string& json, const std::string& key, uint64_t fallback = 0) {
-    size_t pos = json.find("\"" + key + "\":");
-    if (pos == std::string::npos) pos = json.find("\"" + key + "\" :");
-    if (pos == std::string::npos) return fallback;
-    size_t start = json.find_first_of("0123456789", pos + key.length() + 2);
-    if (start == std::string::npos) return fallback;
-    try {
-        return std::stoull(json.substr(start));
-    } catch (...) {
-        return fallback;
-    }
-}
-
-static std::string ExtractJsonString(const std::string& json, const std::string& key, const std::string& fallback = "") {
-    size_t pos = json.find("\"" + key + "\":");
-    if (pos == std::string::npos) pos = json.find("\"" + key + "\" :");
-    if (pos == std::string::npos) return fallback;
-    size_t start = json.find('\"', pos + key.length() + 2);
-    if (start == std::string::npos) return fallback;
-    size_t end = json.find('\"', start + 1);
-    if (end == std::string::npos) return fallback;
-    return json.substr(start + 1, end - start - 1);
-}
-
-void RTPReceiver::MetadataLoop() {
-    SOCKET sock = (SOCKET)metadata_socket_fd_.load();
-    if (sock == INVALID_SOCKET || sock == 0) return;
-
-    std::vector<char> buffer(4096);
-    while (running_) {
-        sockaddr_in from_addr;
-        socklen_t from_len = sizeof(from_addr);
-        int bytes = recvfrom(sock, buffer.data(), (int)buffer.size() - 1, 0, (sockaddr*)&from_addr, &from_len);
-        if (bytes > 0) {
-            buffer[bytes] = '\0';
-            std::string json(buffer.data());
-
-            int norm_x = ExtractJsonInt(json, "x", 32767);
-            int norm_y = ExtractJsonInt(json, "y", 32767);
-            uint64_t timestamp = ExtractJsonUint64(json, "timestamp", 0);
-            std::string cursor = ExtractJsonString(json, "cursor", "IDC_ARROW");
-            std::string click = ExtractJsonString(json, "click", "none");
-            std::string scroll = ExtractJsonString(json, "scroll", "none");
-
-            uint64_t now = Utils::GetCurrentTimestampMs();
-            {
-                std::lock_guard<std::mutex> lock(pointer_mutex_);
-                pointer_state_.norm_x = norm_x;
-                pointer_state_.norm_y = norm_y;
-                pointer_state_.timestamp = timestamp;
-                pointer_state_.cursor = cursor;
-
-                if (click == "left" || click == "right") {
-                    click_effects_.push_back({norm_x, norm_y, click == "left", now});
-                }
-                if (scroll == "up" || scroll == "down") {
-                    scroll_effects_.push_back({norm_x, norm_y, scroll == "up", now});
-                }
-            }
-        }
-    }
-}
-
-void RTPReceiver::CompositePointer(uint8_t* bgra, int width, int height) {
-    if (!bgra || width <= 0 || height <= 0) return;
-
-    PointerState st;
-    std::vector<ClickEffect> clicks;
-    std::vector<ScrollEffect> scrolls;
-    uint64_t now = Utils::GetCurrentTimestampMs();
-
-    {
-        std::lock_guard<std::mutex> lock(pointer_mutex_);
-        st = pointer_state_;
-
-        for (auto it = click_effects_.begin(); it != click_effects_.end();) {
-            if (now - it->start_time_ms > 400) {
-                it = click_effects_.erase(it);
-            } else {
-                clicks.push_back(*it);
-                ++it;
-            }
-        }
-
-        for (auto it = scroll_effects_.begin(); it != scroll_effects_.end();) {
-            if (now - it->start_time_ms > 400) {
-                it = scroll_effects_.erase(it);
-            } else {
-                scrolls.push_back(*it);
-                ++it;
-            }
-        }
-    }
-
-    int px = (int)((double)st.norm_x / 65535.0 * width);
-    int py = (int)((double)st.norm_y / 65535.0 * height);
-
-    // Draw yellow cursor halo
-    int halo_r = 20;
-    for (int dy = -halo_r; dy <= halo_r; ++dy) {
-        int cy = py + dy;
-        if (cy < 0 || cy >= height) continue;
-        for (int dx = -halo_r; dx <= halo_r; ++dx) {
-            int cx = px + dx;
-            if (cx < 0 || cx >= width) continue;
-            if (dx * dx + dy * dy <= halo_r * halo_r) {
-                size_t idx = ((size_t)cy * width + cx) * 4;
-                bgra[idx + 0] = (uint8_t)((bgra[idx + 0] * 180 + 59 * 75) / 255);  // B
-                bgra[idx + 1] = (uint8_t)((bgra[idx + 1] * 180 + 235 * 75) / 255); // G
-                bgra[idx + 2] = (uint8_t)((bgra[idx + 2] * 180 + 255 * 75) / 255); // R
-            }
-        }
-    }
-
-    // Draw click ripples
-    for (const auto& eff : clicks) {
-        int cx = (int)((double)eff.norm_x / 65535.0 * width);
-        int cy = (int)((double)eff.norm_y / 65535.0 * height);
-        double progress = (double)(now - eff.start_time_ms) / 400.0;
-        int r = (int)(10 + progress * 35);
-        int thickness = 3;
-
-        uint8_t cr = eff.is_left ? 0 : 255;
-        uint8_t cg = eff.is_left ? 229 : 152;
-        uint8_t cb = eff.is_left ? 255 : 0;
-
-        for (int dy = -r - thickness; dy <= r + thickness; ++dy) {
-            int y = cy + dy;
-            if (y < 0 || y >= height) continue;
-            for (int dx = -r - thickness; dx <= r + thickness; ++dx) {
-                int x = cx + dx;
-                if (x < 0 || x >= width) continue;
-                int dist2 = dx * dx + dy * dy;
-                if (dist2 >= (r - thickness) * (r - thickness) && dist2 <= (r + thickness) * (r + thickness)) {
-                    size_t idx = ((size_t)y * width + x) * 4;
-                    bgra[idx + 0] = cb;
-                    bgra[idx + 1] = cg;
-                    bgra[idx + 2] = cr;
-                }
-            }
-        }
-    }
-
-    // Draw scroll wheel indicators (Cyan ▲ / ▼)
-    for (const auto& eff : scrolls) {
-        int cx = (int)((double)eff.norm_x / 65535.0 * width) + 25;
-        int cy = (int)((double)eff.norm_y / 65535.0 * height);
-        double progress = (double)(now - eff.start_time_ms) / 400.0;
-        int offset_y = (int)(eff.is_up ? -progress * 20 : progress * 20);
-        int bubble_r = 10;
-        int sy = cy + offset_y;
-
-        for (int dy = -bubble_r; dy <= bubble_r; ++dy) {
-            int y = sy + dy;
-            if (y < 0 || y >= height) continue;
-            for (int dx = -bubble_r; dx <= bubble_r; ++dx) {
-                int x = cx + dx;
-                if (x < 0 || x >= width) continue;
-                if (dx * dx + dy * dy <= bubble_r * bubble_r) {
-                    size_t idx = ((size_t)y * width + x) * 4;
-                    bgra[idx + 0] = 248; // B (Cyan)
-                    bgra[idx + 1] = 189; // G
-                    bgra[idx + 2] = 56;  // R
-                    bgra[idx + 3] = 255;
-                }
-            }
-        }
-    }
-
-    // Draw filled arrow cursor shape with white fill and black border
-    for (int dy = 0; dy <= 16; ++dy) {
-        int max_dx = (int)((16 - dy) * 0.6);
-        for (int dx = 0; dx <= max_dx; ++dx) {
-            int cx = px + dx;
-            int cy = py + dy;
-            if (cx < 0 || cx >= width || cy < 0 || cy >= height) continue;
-            size_t idx = ((size_t)cy * width + cx) * 4;
-            bool is_border = (dx == 0 || dy == 0 || dx == max_dx);
-            bgra[idx + 0] = is_border ? 0 : 255; // B
-            bgra[idx + 1] = is_border ? 0 : 255; // G
-            bgra[idx + 2] = is_border ? 0 : 255; // R
-            bgra[idx + 3] = 255;
-        }
-    }
 }
 
 void RTPReceiver::DecodeThreadLoop() {
@@ -1911,7 +1676,6 @@ void RTPReceiver::RenderFrame(const uint8_t* h264_data, size_t size) {
     H264DecoderMFT* dec = (H264DecoderMFT*)decoder_;
     if (dec && dec->DecodeFrame(h264_data, size, bgra, w, h)) {
         Utils::UpdateHeartbeat("rtp-decode");
-        CompositePointer(bgra.data(), w, h);
         {
             std::lock_guard<std::mutex> lock(g_frame_mutex);
             g_bgra_buffer = std::move(bgra);

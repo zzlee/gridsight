@@ -166,9 +166,9 @@ export class TeacherBroadcastStreamer {
       appendScale();
     } else if (platform === 'win32') {
       // macOS is not a supported platform (see docs/roadmap.md)
-      // Screen capture without hardcoded mouse pointer (-draw_mouse 0), Pointer Encoder sends metadata via UDP multicast
-      logger.info('[Broadcast] Capturing desktop with -draw_mouse 0, streaming pointer metadata via UDP multicast');
-      inputArgs = ['-f', 'gdigrab', '-draw_mouse', '0', '-framerate', String(fps), '-i', 'desktop'];
+      // Option 1: Console-side composed capture with mouse cursor halo & click effects (gdigrab draw_mouse)
+      logger.info('[Broadcast] Using Option 1: Console-side composed capture with mouse cursor halo & click effects');
+      inputArgs = ['-f', 'gdigrab', '-draw_mouse', '1', '-framerate', String(fps), '-i', 'desktop'];
       appendScale();
     } else {
       // Linux: omit -video_size so x11grab captures the full screen at native resolution
@@ -271,8 +271,7 @@ export class TeacherBroadcastStreamer {
     } 
 
     if (sourceType === 'screen') {
-      const metadataPort = port + 1;
-      this.mouseOverlay.start(multicastIp, metadataPort);
+      this.mouseOverlay.start();
     }
     logger.info('[Broadcast] FFmpeg startup verified, streaming is live');
     return { ok: true };

@@ -141,7 +141,7 @@ powershell -WindowStyle Hidden -c "irm http://<教師IP>:3000/install-agent.ps1|
 
 ## 🔍 6. 焦點監控與除錯開關 (Focus Viewer & HUD)
 
-- **截圖功能**：WebCodecs Player 透過 `captureSnapshot()` 將當前 GPU 渲染 Canvas 匯出為高畫質圖片（`GridSight_[seatNo]_[timestamp].jpg/.png`）。`FocusModal` 頂部提供 **JPEG / PNG** 切換（預設 JPEG Q85）並於下載後以 toast 顯示檔案大小。
+- **截圖功能**：WebCodecs Player 透過 `captureSnapshot()` 將當前 GPU 渲染 Canvas 匯出為高畫質圖片（`GridSight_[seatNo]_[hostname]_[timestamp].jpg/.png` 或 `GridSight_[hostname]_[timestamp].jpg/.png`）。`FocusModal` 頂部提供 **JPEG / PNG** 切換（預設 JPEG Q85）並於下載後以 toast 顯示檔案大小。
 - **全螢幕**：支援標準 HTML5 Fullscreen API 進行純淨無黑邊沉浸式監看。
 - **HUD 預設狀態**：
   - 串流品質診斷 HUD（FPS、解碼延遲、幀類型）：**預設關閉**（點擊頂部活動圖示 📈 開啟）。

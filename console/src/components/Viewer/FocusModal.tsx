@@ -137,7 +137,10 @@ export const FocusModal: React.FC<FocusModalProps> = ({ device, onClose }) => {
     const timestamp = new Date().toISOString().replace(/[:.]/g, '-');
     const isJpeg = snapshotFormat === 'jpeg';
     const ext = isJpeg ? 'jpg' : 'png';
-    const filename = `GridSight_${device.seatNo || device.hostname}_${timestamp}.${ext}`;
+    const nameSegment = device.seatNo
+      ? (device.seatNo === device.hostname ? device.hostname : `${device.seatNo}_${device.hostname || 'student'}`)
+      : (device.hostname || 'student');
+    const filename = `GridSight_${nameSegment}_${timestamp}.${ext}`;
     const mimeType = isJpeg ? 'image/jpeg' : 'image/png';
     const quality = isJpeg ? 0.85 : undefined;
 

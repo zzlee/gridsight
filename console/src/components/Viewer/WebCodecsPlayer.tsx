@@ -5,6 +5,9 @@ import { AuthService } from '../../services/authService';
 export interface WebCodecsPlayerHandle {
   captureSnapshot: (format?: 'image/jpeg' | 'image/png', quality?: number) => Promise<Blob | null>;
   getCanvas: () => HTMLCanvasElement | null;
+  startRecording: () => boolean;
+  stopRecording: () => Promise<{ blob: Blob; mimeType: string } | null>;
+  isRecording: () => boolean;
 }
 
 interface WebCodecsPlayerProps {
@@ -15,6 +18,8 @@ interface WebCodecsPlayerProps {
 
 export const WebCodecsPlayer = forwardRef<WebCodecsPlayerHandle, WebCodecsPlayerProps>(({ device, showDebugHud = false, onStreamStatusChange }, ref) => {
   const canvasRef = useRef<HTMLCanvasElement>(null);
+  const mediaRecorderRef = useRef<MediaRecorder | null>(null);
+  const recordedChunksRef = useRef<Blob[]>([]);
   const renderedFrameRef = useRef(false);
   const statusRef = useRef<'Connecting' | 'Live 30FPS' | 'Snapshot Fallback' | 'Offline'>('Connecting');
   const [fps, setFps] = useState(0);
@@ -46,6 +51,65 @@ export const WebCodecsPlayer = forwardRef<WebCodecsPlayerHandle, WebCodecsPlayer
       });
     },
     getCanvas: () => canvasRef.current,
+    startRecording: () => {
+      if (!canvasRef.current || (mediaRecorderRef.current && mediaRecorderRef.current.state !== 'inactive')) {
+        return false;
+      }
+      try {
+        const stream = canvasRef.current.captureStream(30);
+        recordedChunksRef.current = [];
+        let mimeType = 'video/webm;codecs=vp9';
+        if (typeof MediaRecorder !== 'undefined' && !MediaRecorder.isTypeSupported(mimeType)) {
+          mimeType = MediaRecorder.isTypeSupported('video/webm;codecs=vp8')
+            ? 'video/webm;codecs=vp8'
+            : MediaRecorder.isTypeSupported('video/webm')
+            ? 'video/webm'
+            : MediaRecorder.isTypeSupported('video/mp4')
+            ? 'video/mp4'
+            : '';
+        }
+        const recorderOptions = mimeType ? { mimeType } : undefined;
+        const recorder = new MediaRecorder(stream, recorderOptions);
+        recorder.ondataavailable = (event) => {
+          if (event.data && event.data.size > 0) {
+            recordedChunksRef.current.push(event.data);
+          }
+        };
+        recorder.start(1000);
+        mediaRecorderRef.current = recorder;
+        return true;
+      } catch (err) {
+        console.warn('[WebCodecsPlayer] Failed to start MediaRecorder:', err);
+        return false;
+      }
+    },
+    stopRecording: () => {
+      return new Promise<{ blob: Blob; mimeType: string } | null>((resolve) => {
+        const recorder = mediaRecorderRef.current;
+        if (!recorder || recorder.state === 'inactive') {
+          resolve(null);
+          return;
+        }
+        const usedMimeType = recorder.mimeType || 'video/webm';
+        recorder.onstop = () => {
+          const blob = new Blob(recordedChunksRef.current, { type: usedMimeType });
+          recordedChunksRef.current = [];
+          mediaRecorderRef.current = null;
+          resolve({ blob, mimeType: usedMimeType });
+        };
+        try {
+          recorder.stop();
+        } catch (err) {
+          console.warn('[WebCodecsPlayer] Error stopping MediaRecorder:', err);
+          recordedChunksRef.current = [];
+          mediaRecorderRef.current = null;
+          resolve(null);
+        }
+      });
+    },
+    isRecording: () => {
+      return !!mediaRecorderRef.current && mediaRecorderRef.current.state !== 'inactive';
+    },
   }));
 
   useEffect(() => {
@@ -308,6 +372,11 @@ export const WebCodecsPlayer = forwardRef<WebCodecsPlayerHandle, WebCodecsPlayer
       if (ws) {
         ws.close();
         ws = null;
+      }
+      if (mediaRecorderRef.current && mediaRecorderRef.current.state !== 'inactive') {
+        try {
+          mediaRecorderRef.current.stop();
+        } catch {}
       }
       if (decoder && decoder.state !== 'closed') {
         try {

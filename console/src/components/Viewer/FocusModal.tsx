@@ -7,6 +7,7 @@ import {
   Maximize,
   Minimize,
   Camera,
+  Video,
   ShieldCheck,
   Cpu,
   MemoryStick,
@@ -37,6 +38,11 @@ export const FocusModal: React.FC<FocusModalProps> = ({ device, onClose }) => {
   const [toastMessage, setToastMessage] = useState<string | null>(null);
   const [snapshotFormat, setSnapshotFormat] = useState<'jpeg' | 'png'>('jpeg');
 
+  // Stream Recording States
+  const [isRecording, setIsRecording] = useState(false);
+  const [recordingSeconds, setRecordingSeconds] = useState(0);
+  const recordingTimerRef = useRef<number | null>(null);
+
   // Stream status & Failure log states
   const [streamStatus, setStreamStatus] = useState<'Connecting' | 'Live 30FPS' | 'Snapshot Fallback' | 'Offline'>('Connecting');
   const [packetsReceived, setPacketsReceived] = useState<number>(0);
@@ -64,6 +70,22 @@ export const FocusModal: React.FC<FocusModalProps> = ({ device, onClose }) => {
     }, 3000);
     return () => clearTimeout(timer);
   }, [device?.id]);
+
+  // Clean up recording timer on unmount or device switch
+  useEffect(() => {
+    return () => {
+      if (recordingTimerRef.current !== null) {
+        clearInterval(recordingTimerRef.current);
+        recordingTimerRef.current = null;
+      }
+    };
+  }, [device?.id]);
+
+  const formatDuration = (secs: number) => {
+    const m = Math.floor(secs / 60).toString().padStart(2, '0');
+    const s = (secs % 60).toString().padStart(2, '0');
+    return `${m}:${s}`;
+  };
 
   if (!device) return null;
 
@@ -137,7 +159,8 @@ export const FocusModal: React.FC<FocusModalProps> = ({ device, onClose }) => {
     const timestamp = new Date().toISOString().replace(/[:.]/g, '-');
     const isJpeg = snapshotFormat === 'jpeg';
     const ext = isJpeg ? 'jpg' : 'png';
-    const filename = `GridSight_${device.seatNo || device.hostname}_${timestamp}.${ext}`;
+    const seatPrefix = device.seatNo ? `Seat${device.seatNo}_` : '';
+    const filename = `GridSight_${seatPrefix}${device.hostname}_${timestamp}.${ext}`;
     const mimeType = isJpeg ? 'image/jpeg' : 'image/png';
     const quality = isJpeg ? 0.85 : undefined;
 
@@ -184,6 +207,55 @@ export const FocusModal: React.FC<FocusModalProps> = ({ device, onClose }) => {
       console.warn('[FocusModal] Snapshot download failed:', err);
       setToastMessage('❌ 高解析截圖失敗，請檢查 Agent 擷取狀態');
       setTimeout(() => setToastMessage(null), 3000);
+    }
+  };
+
+  const handleToggleRecording = async () => {
+    if (!playerRef.current) return;
+
+    if (!isRecording) {
+      const started = playerRef.current.startRecording();
+      if (started) {
+        setIsRecording(true);
+        setRecordingSeconds(0);
+        recordingTimerRef.current = window.setInterval(() => {
+          setRecordingSeconds((prev) => prev + 1);
+        }, 1000);
+        setToastMessage('🔴 開始錄影學生端串流畫面');
+        setTimeout(() => setToastMessage(null), 3000);
+      } else {
+        setToastMessage('❌ 無法啟動錄影（請確認學生端串流畫面已正常播放）');
+        setTimeout(() => setToastMessage(null), 3000);
+      }
+    } else {
+      if (recordingTimerRef.current !== null) {
+        clearInterval(recordingTimerRef.current);
+        recordingTimerRef.current = null;
+      }
+      setIsRecording(false);
+      const result = await playerRef.current.stopRecording();
+      if (result && result.blob && result.blob.size > 0) {
+        const timestamp = new Date().toISOString().replace(/[:.]/g, '-');
+        const seatPrefix = device.seatNo ? `Seat${device.seatNo}_` : '';
+        const ext = result.mimeType.includes('mp4') ? 'mp4' : 'webm';
+        const filename = `GridSight_Record_${seatPrefix}${device.hostname}_${timestamp}.${ext}`;
+
+        const url = URL.createObjectURL(result.blob);
+        const link = document.createElement('a');
+        link.href = url;
+        link.download = filename;
+        document.body.appendChild(link);
+        link.click();
+        document.body.removeChild(link);
+        URL.revokeObjectURL(url);
+
+        const sizeMB = (result.blob.size / (1024 * 1024)).toFixed(1);
+        setToastMessage(`🎥 錄影已儲存：${filename} (${sizeMB} MB)`);
+        setTimeout(() => setToastMessage(null), 3000);
+      } else {
+        setToastMessage('⚠️ 錄影失敗或錄影內容空白');
+        setTimeout(() => setToastMessage(null), 3000);
+      }
     }
   };
 
@@ -280,6 +352,19 @@ export const FocusModal: React.FC<FocusModalProps> = ({ device, onClose }) => {
             >
               <Camera className="w-4 h-4" />
             </button>
+            {/* Toggle Stream Recording Button */}
+            <button
+              onClick={handleToggleRecording}
+              className={`p-1.5 rounded-lg border transition-all flex items-center space-x-1 text-xs font-semibold px-2.5 ${
+                isRecording
+                  ? 'bg-rose-600/30 border-rose-500 text-rose-300 animate-pulse ring-2 ring-rose-500/50'
+                  : 'bg-slate-800 border-slate-700 text-slate-300 hover:text-white hover:bg-slate-700'
+              }`}
+              title={isRecording ? '停止串流錄影並儲存' : '開始側錄學生端畫面 (網頁 WebM 影片檔)'}
+            >
+              <Video className={`w-4 h-4 ${isRecording ? 'text-rose-400 animate-bounce' : 'text-rose-400'}`} />
+              <span>{isRecording ? `錄影中 (${formatDuration(recordingSeconds)})` : '串流錄影'}</span>
+            </button>
             <button
               onClick={handleToggleFullscreen}
               className="p-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-300 hover:text-white transition-colors"
@@ -337,9 +422,17 @@ export const FocusModal: React.FC<FocusModalProps> = ({ device, onClose }) => {
             </div>
           )}
 
+          {/* Active Recording OSD Overlay Badge */}
+          {isRecording && (
+            <div className="absolute top-3 right-3 z-40 bg-rose-950/90 border border-rose-500/80 rounded-lg px-3 py-1.5 shadow-2xl backdrop-blur flex items-center space-x-2 text-rose-200 text-xs font-mono font-bold animate-pulse pointer-events-none">
+              <span className="w-2.5 h-2.5 rounded-full bg-rose-500" />
+              <span>REC {formatDuration(recordingSeconds)}</span>
+            </div>
+          )}
+
           {/* OSD Hardware Status Floating Overlay */}
           {showSpecsHud && specs && (
-            <div className="absolute top-3 right-3 bg-slate-950/85 backdrop-blur-md border border-slate-800/90 rounded-lg p-3 text-xs space-y-2 shadow-xl pointer-events-none max-w-xs animate-in fade-in duration-150">
+            <div className={`absolute ${isRecording ? 'top-12' : 'top-3'} right-3 bg-slate-950/85 backdrop-blur-md border border-slate-800/90 rounded-lg p-3 text-xs space-y-2 shadow-xl pointer-events-none max-w-xs animate-in fade-in duration-150`}>
               <div className="flex items-center justify-between text-slate-300 border-b border-slate-800 pb-1 font-semibold">
                 <span className="text-sky-400">學生端硬體即時監控</span>
                 <div className="flex items-center space-x-2">

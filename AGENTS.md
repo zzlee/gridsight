@@ -31,7 +31,7 @@ GridSight 專為 70 台具備還原卡之 Windows 電腦教室打造，兼顧極
 | :--- | :--- | :--- |
 | **教師端 Web & API** | **`TCP 3000`** | 託管 Web UI、REST API（`/api/...`）、WebSocket 中繼（`/ws/...`）與腳本下載 |
 | **學生端多播探索 (Beacon)** | **`UDP 239.255.42.99:8888`** | 學生端啟動時發送心跳，教師端監聽此多播以動態發現學生機 |
-| **教師畫面全班廣播 (RTP)** | **`UDP 239.255.42.100:9000`** | 教師螢幕 1080p 30FPS H.264 廣播（交換器 IGMP Snooping 硬體複製） |
+| **教師畫面全班廣播 (RTP)** | **`UDP 239.255.42.100:9000`** | 教師螢幕 H.264 廣播，支援三檔品質（高 1080p30/8M、中 720p30/4M、低 480p15/1.5M；交換器 IGMP Snooping 硬體複製） |
 | **學生端本地 Snapshot** | **不開埠 (僅出站推送)** | 學生端主動向教師端 `POST /api/agent/snapshot` 推送縮圖 |
 
 ---
@@ -141,7 +141,7 @@ powershell -WindowStyle Hidden -c "irm http://<教師IP>:3000/install-agent.ps1|
 
 ## 🔍 6. 焦點監控與除錯開關 (Focus Viewer & HUD)
 
-- **截圖功能**：WebCodecs Player 透過 `captureSnapshot()` 將當前 GPU 渲染 Canvas 匯出為高畫質 PNG（`GridSight_[seatNo]_[timestamp].png`）。
+- **截圖功能**：WebCodecs Player 透過 `captureSnapshot()` 將當前 GPU 渲染 Canvas 匯出為高畫質圖片（`GridSight_[seatNo]_[timestamp].jpg/.png`）。`FocusModal` 頂部提供 **JPEG / PNG** 切換（預設 JPEG Q85）並於下載後以 toast 顯示檔案大小。
 - **全螢幕**：支援標準 HTML5 Fullscreen API 進行純淨無黑邊沉浸式監看。
 - **HUD 預設狀態**：
   - 串流品質診斷 HUD（FPS、解碼延遲、幀類型）：**預設關閉**（點擊頂部活動圖示 📈 開啟）。
@@ -170,11 +170,15 @@ powershell -WindowStyle Hidden -c "irm http://<教師IP>:3000/install-agent.ps1|
 ## 🤖 8. CI/CD 發布流程 (GitHub Actions)
 
 ### 發布新版本步驟
-1. 更新版本號於 `package.json`、`console/package.json`、`scripts/build-windows-console.js`。
+1. 同步更新版本號至以下全部位置（`console/package.json` 是**唯一版本來源**，其餘為一致性同步或 fallback）：
+   - `package.json`（根）、`console/package.json` + `console/package-lock.json`
+   - `console/server/package.json` + `package-lock.json`、`console/server/server.ts`（fallback 常數）
+   - `console/server/installerScript.test.ts`、`beacon/Makefile`（fallback）、`docs/protocol_spec.md`、`tools/mock_agents.py`（fallback）
+   - （`scripts/build-windows-console.js` 動態讀取 `console/package.json`，無需手動改）
 2. 建立 Git Tag 並推送：
    ```bash
-   git tag -a v5.4.6 -m "Release v5.4.6: HMAC-signed TOKEN_GRANT, RTP access-unit assembly, MF stride fix, GridCanvas aisle visibility fix"
-   git push origin v5.4.6
+   git tag -a v5.8.3 -m "Release v5.8.3: ..."
+   git push origin v5.8.3
    ```
 3. GitHub Actions (`.github/workflows/release.yml`) 會自動執行：
    - 交叉編譯產出 `gs-agent.exe`

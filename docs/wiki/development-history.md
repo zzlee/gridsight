@@ -43,7 +43,7 @@ timeline
 2. **三大傳輸模式架構設計**：
    - **全班常態監控**：低頻寬 1 FPS 縮圖，HTTP Pull 輪詢（附 800ms 熔斷機制），70 台僅佔約 1.7% 頻寬。
    - **焦點單機調閱**：點擊個別學生時，按需開啟 WebSocket H.264 30 FPS 推流，延遲低於 50ms。
-   - **教師全體廣播**：教師畫面透過 FFmpeg 進行 1080p 30 FPS RTP UDP 組播（`239.255.42.100:9000`），透過交換器 IGMP Snooping 實現硬體複製，總頻寬恆定 4~6 Mbps。
+   - **教師全體廣播**：教師畫面透過 FFmpeg 進行 RTP UDP 組播（`239.255.42.100:9000`），透過交換器 IGMP Snooping 實現硬體複製，支援三檔品質（高 1080p30/8M、中 720p30/4M、低 480p15/1.5M），總頻寬依選定品質約 1.5~8 Mbps。
 
 ---
 
@@ -122,6 +122,21 @@ timeline
 
 ---
 
+## 📡 第六階段：廣播品質可選化與出站中繼 (v5.8.0 ~ v5.8.3)
+
+### 6.1 教師全體廣播三檔品質 (v5.8.3)
+- **痛點**：早期教師全體廣播固定為 1080p 30 FPS / 4~6 Mbps，於窄頻交換器或學生機軟體解碼負擔高的環境缺乏彈性。
+- **解決方案**：教師端頂部導航列「廣播畫面」按鈕旁提供 **高 / 中 / 低** 三檔品質下拉：
+  - **高**：1080p · 30 FPS · 8 Mbps
+  - **中（預設）**：720p · 30 FPS · 4 Mbps
+  - **低**：480p · 15 FPS · 1.5 Mbps
+- **實作**：`broadcastStreamer.ts` 依品質覆寫 FFmpeg 的 `-b:v` 碼率與 `-vf scale=-2:<h>` 解析度（螢幕擷取路徑亦支援縮放，非僅測試路徑）；`/api/broadcast/status` 回報目前檔位；`BroadcastTestModal` 亦加入高/中/低/自訂品質選擇。
+
+### 6.2 學生端去入站埠、全面改出站中繼 (v5.8.0)
+- **實作**：移除學生端傳統入站埠 `8080 / 8081`，全通訊改以學生端出站反向 WebSocket (`/ws/agent`) 與 HTTP 推送，達成真正的學生端零入站開埠部署。
+
+---
+
 ## 📊 重大版本功能與技術演進對照表
 
 | 版本號 | 發布日期 | 核心模組變更 | 重大技術亮點 |
@@ -137,6 +152,15 @@ timeline
 | **v5.4.1** | 2026-08 | `server.ts`, `StudentConnectModal` | 伺服器啟動自動開啟瀏覽器、學生連線網址 LAN IP 校正 |
 | **v5.4.2** | 2026-08 | `build-windows-portable.js` | 批次檔 CRLF 編碼修復（徹底消除 Windows CMD 截斷亂碼） |
 | **v5.4.3** | 2026-08 | `start-console.bat`, `stop-console.bat` | 移除 `pause` 按鍵等待，停止服務時啟動視窗無痕秒級關閉 |
+| **v5.5.0** | 2026-08 | `tokenAuthority.ts`, `logger.ts` | 資安強化（`crypto.randomBytes` 安全 Token 產生）、元件健康狀態與單元測試 |
+| **v5.6.0** | 2026-08 | `rtp_receiver.cpp`, `ws_server.cpp` | RTP 廣播與焦點串流可靠性強化 |
+| **v5.6.1** | 2026-08 | `installerScript.ts` | 串流可靠性修正 |
+| **v5.7.0** | 2026-08 | `logger.ts`, `ShareFileModal.tsx` | 大小 + 時間（1 小時）雙維度日誌輪轉、分享資料夾功能 |
+| **v5.7.1** | 2026-08 | `beacon/*` | MinGW 強制 UTF-8/UTF-16 字元集，中文寬字元正確渲染 |
+| **v5.7.2** | 2026-08 | `rtp_receiver.cpp` | 修復尾端 RTP 封包競態導致廣播停止後 overlay 重開；主動視窗標題單字元截斷修復 |
+| **v5.8.0** | 2026-08 | `FocusModal.tsx`, `beacon/*` | 焦點監看截圖 JPEG/PNG 切換（含檔案大小顯示）；移除學生端入站埠 8080/8081（改為出站中繼） |
+| **v5.8.1** | 2026-08 | `server.ts` 等 | 統一版本號單一來源，消除 `5.8.0` 殘留 drift |
+| **v5.8.3** | 2026-08 | `broadcastStreamer.ts`, `TopNav.tsx`, `BroadcastTestModal.tsx` | 教師全體廣播三檔品質（高/中/低）選擇、螢幕擷取解析度縮放、`/api/broadcast/status` 回報品質 |
 
 ---
 

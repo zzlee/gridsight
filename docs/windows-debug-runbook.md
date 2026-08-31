@@ -18,7 +18,7 @@
 **關鍵注意事項：**
 - 學生端以 `WinMain` 編譯（無主控台輸出），`gs-agent.log` 是**唯一**日誌管道。CWD 取決於啟動方式：經 `/join` 一鍵安裝時為 `%TEMP%`；請用 Process Explorer 或 `Get-Process gs-agent | select Path` 確認實際路徑。
 - 架構為「Watchdog 主程序 + Worker 子程序」：worker 崩潰會被靜默重啟，**任務管理員看到程序存在 ≠ 功能正常**，必須看日誌。
-- Windows 單檔版 `gs-console.exe` **未內建 FFmpeg**：廣播功能需另行安裝（見 §2.4）。
+- Windows 單檔版 `gs-console.exe` **未內建 FFmpeg**：廣播功能需另行安裝（見 §2.4）。但官方綠色便攜包 `gridsight-console-portable.zip` 已內嵌官方靜態 `ffmpeg.exe`（`bin/ffmpeg.exe`），開箱即支援廣播。
 
 ---
 
@@ -59,9 +59,9 @@ make -C beacon CXX=x86_64-w64-mingw32-g++ LDFLAGS="-mconsole"
 | 2.4 | 等待 ≤ 5 秒 | server.log 出現該機 BEACON 註冊；Web UI 設備池出現本機 | TTL=2 與網卡選擇（虛擬網卡優先問題，§5.4） |
 | 2.5 | 點擊座位開啟焦點監看 | 30 FPS 畫面出現 | 看 HUD 幀型；agent.log 的 START_STREAM 行 |
 | 2.6 | 測試分享網址/檔案至本機 | 瀏覽器開啟 / Downloads 出現檔案並開啟資料夾 | WS 送達？（server.log `[WS Relay] Sent ...`） |
-| 2.7 | 安裝 FFmpeg 後啟動廣播 | 本機彈出全螢幕廣播視窗* | §2.4 FFmpeg PATH；RTPReceiver 目前 RenderFrame 為 stub（見 §6 已知限制） |
+| 2.7 | 安裝 FFmpeg 後啟動廣播 | 本機彈出全螢幕廣播視窗*（Media Foundation MFT H.264 解碼渲染） | §2.4 FFmpeg PATH / 便攜包內建；畫面黑屏時檢查 agent.log 的 `[RTP]` 與 `rtp-decode` 心跳 |
 
-*\*注意：`RTPReceiver::RenderFrame()` 尚未完成解碼繪製（protocol_spec §4 TODO），學生端「收得到封包但畫不出來」屬預期，驗證基準為 IGMP 加入與 RTP 封包到達。*
+*\*注意：`RTPReceiver::RenderFrame()` 已實作 Media Foundation MFT H.264 解碼並將 BGRA 幀渲染至全螢幕 overlay；若學生端「收得到封包但畫不出來」，請檢查 `rtp-decode` 心跳與 H.264 decoder 初始化（見 §5 已知限制）。*
 
 ---
 
@@ -138,7 +138,7 @@ python scripts/test-network-multicast.py   # 於學生機執行（或單發一�
 | 設備出現但縮圖黑灰 | Agent DXGI 擷取失敗（Session 0 / RDP 登入） | agent.log 搜尋 `Capture`；確認實體登入 Session 1（`query session`） |
 | 縮圖有、焦點串流黑畫面 | H.264 編碼器初始化失敗 | agent.log 搜尋 `START_STREAM` 後的 ERROR；HUD 是否有幀送達 |
 | OPEN_URL/分享檔沒反應 | 反向 WS 未連上 | 兩端 log 各查 `[WS Relay]` 與 reverse connect 行；`Test-NetConnection 教師IP -Port 3000` |
-| 廣播按鈕亮起但學生端無反應 | ①FFmpeg 未安裝 ②RenderFrame stub ③交換器 IGMP | ①API 回傳之錯誤訊息（新版會回 500+原因）②§2.7 注意事項 ③Querier/Snooping |
+| 廣播按鈕亮起但學生端無反應 | ①FFmpeg 未安裝 ②H.264 decoder 初始化失敗/未加入多播群組 ③交換器 IGMP | ①API 回傳之錯誤訊息（新版會回 500+原因）②agent.log 搜尋 `[RTP]` 與 `rtp-decode` 心跳、`netsh int ipv4 show joins` ③Querier/Snooping |
 | Agent 程序一直重生 | Worker 死循環 | agent.log 搜尋 `Worker process exited`；附帶 exit code 判讀 |
 | 學生機 CPU 高 | 30FPS 編碼持續運轉 | 確認焦點視窗是否忘記關閉（viewer close 才送 STOP_STREAM） |
 
@@ -165,4 +165,4 @@ python scripts/test-network-multicast.py   # 於學生機執行（或單發一�
 - [ ] FFmpeg 已安裝且 `ffmpeg -version` 可執行（教師機）
 - [ ] 交換器 Snooping + Querier 已啟用並驗證
 - [ ] 雙機測試五路徑全綠（§3.2 矩陣）
-- [ ] 已知限制已向授課教師說明：RTP 廣播接收端渲染尚未完成、macOS 不支援
+- [ ] 已知限制已向授課教師說明：macOS 不支援（RTP 廣播接收端渲染已完整實作 MFT 解碼）

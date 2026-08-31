@@ -15,7 +15,7 @@
 | **Reverse WebSocket Relay** | `TCP 3000` (`/ws/agent?mac=...&ip=...&token=...`) | 學生端 (Agent) | 教師端 (Console) | 學生 ➔ 教師 (Outbound WS) | 學生端主動向教師端建立反向持久 WS 連線，接收控制指令與傳輸 H.264 串流 | 學生端出站 TCP 3000，可穿越一般客戶端防火牆 |
 | **Teacher Viewer WS** | `TCP 3000` (`/ws/stream/:target`) | 前端瀏覽器 | 教師端 (Console) | 瀏覽器 ➔ 教師 (WS GET) | 前端 30 FPS 焦點調閱播放器連接教師端中繼以接收 H.264 串流 | 教師端 TCP 3000 入站允許 |
 | **Reverse WebSocket Relay** | `TCP 3000` (`/ws/agent`) | 學生端 (Agent) | 教師端 (Server) | 學生 ➔ 教師 (Outbound WS) | 學生端向教師端建立長連線，用於 30 FPS 焦點畫面與指令中繼 | 無需開啟學生端入站防火牆 |
-| **RTP Multicast Broadcast** | `239.255.42.100:9000` | 教師端 (FFmpeg/Console) | 學生端 (Agent) | 教師 ➔ 學生 (UDP Multicast) | 教師畫面 1080p 30FPS H.264 廣播串流 | 交換器需開啟 IGMP Snooping 轉發多播封包 |
+| **RTP Multicast Broadcast** | `239.255.42.100:9000` | 教師端 (FFmpeg/Console) | 學生端 (Agent) | 教師 ➔ 學生 (UDP Multicast) | 教師畫面 H.264 廣播串流，支援三檔品質（高 1080p30/8M、中 720p30/4M、低 480p15/1.5M） | 交換器需開啟 IGMP Snooping 轉發多播封包 |
 
 ---
 
@@ -207,11 +207,25 @@ sequenceDiagram
 - **`GET /ping`**：
   - 回傳 `{"status":"ok","service":"GridSight Beacon"}` 用於探針檢測。
 
+### 3.7 教師端廣播控制 API (Broadcast Control)
+- **`POST /api/broadcast/start`**（教師 session token）：啟動教師畫面全體廣播。Body（可選 `quality` 三檔預設，或直接指定）：
+```json
+{ "quality": "medium" }
+```
+  - `quality`：`"high" | "medium" | "low"`。對應預設：
+    - `high`: 1080p (縮放關閉) · 30 FPS · 8 Mbps
+    - `medium`（預設）: 720p · 30 FPS · 4 Mbps
+    - `low`: 480p · 15 FPS · 1.5 Mbps
+  - 亦可改以 `{ "fps": ..., "bitrateKbps": ..., "scale": ... }` 細部覆寫（`scale` 為輸出最大高度，0=不縮放）。
+- **`POST /api/broadcast/stop`**：停止廣播。
+- **`GET /api/broadcast/status`**：回傳 `{ active, mode, quality }`，`quality` 為目前廣播所套用之檔位。
+- **`POST /api/broadcast/test/start`**（媒體測試）與 **`/api/broadcast/test/stop`**：以本機檔案或網址透過同一 RTP 多播群組推流測試。`test/start` 亦支援 `quality` 或 `fps`/`bitrateKbps`/`scale`。
+
 ---
 
-## ⚠️ 4. 現有實作限制與 TODOs (Implementation Limitations)
+## ⚠️ 4. 實作狀態與注意事項 (Implementation Notes & Caveats)
 
-1. **RTP 廣播渲染管線 (RTPReceiver Frame Rendering)**：
+**RTP 廣播渲染管線 (RTPReceiver Frame Rendering)**：
    - 已完整實作 **UDP Socket 監聽**、**IGMP 權限加入 (`IP_ADD_MEMBERSHIP)`、**RTP Header 解析**、**RFC 6184 FU-A / STAP-A 重組**（以 marker 位元組裝 Access Unit 後整幀解碼）、**SSRC 鎖定與逾時重新鎖定**（串流更換 SSRC 時執行完整狀態 reset）及 **Win32 滿版 overlay 彈窗 + Media Foundation MFT H.264 解碼渲染**。
    - 序號中斷或 FU-A 不完整時丟棄該幀，等待下一個 IDR 自動恢復。
 

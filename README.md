@@ -19,7 +19,7 @@
 - ⚡ **三大影像傳輸模式 (Three Transmission Modes)**
   1. **全班常態監控**：480×270 @ 1 FPS，WebP/JPEG + HTTP Pull (附 800ms 熔斷)，全班僅佔 1.7% 頻寬 (~17 Mbps)
   2. **焦點單機調閱**：720p/1080p @ 30 FPS，按需 OpenH264 + WebSocket，WebCodecs GPU 硬體解碼 (<50ms 延遲)
-  3. **教師全體廣播**：1080p @ 30 FPS，H.264 + UDP Multicast (RTP)，交換器 IGMP Snooping 硬體複製 (固定 4~6 Mbps 總頻寬)
+  3. **教師全體廣播**：H.264 + UDP Multicast (RTP)，交換器 IGMP Snooping 硬體複製，支援三檔品質快速切換（高 1080p30/8M、中 720p30/4M、低 480p15/1.5M）
 - 🔒 **輕量無感部署與安全鑑權 (Zero-Maintenance & Security)**
   - **雲端熱拉取**：PowerShell 單行指令下載至 `%TEMP%` 於 Session 1 執行，避開 Session 0 隔離，還原卡零殘留
   - **RAM Dynamic Token**：啟動發送 UDP Multicast 主動宣告 (Beacon)，動態 Token 僅存放於記憶體，防範同儕偷窺
@@ -33,7 +33,7 @@
 | :--- | :--- | :--- | :--- |
 | **全班 70 台常態監控** | 480×270 @ 1 FPS | WebP/JPEG + HTTP Pull | 約 17 Mbps (佔 1GbE 頻寬 1.7%)，教師 CPU 解碼 < 15% |
 | **單機/焦點實時監看** | 720p/1080p @ 30 FPS | H.264 (OpenH264) + WebSocket | 單機 2~4 Mbps，WebCodecs GPU 硬解延遲 < 50ms |
-| **教師畫面全體廣播** | 1080p @ 30 FPS | H.264 + UDP Multicast (RTP) | 固定 4~6 Mbps (IGMP Snooping 硬體複製零延遲) |
+| **教師畫面全體廣播** | 高 1080p30 / 中 720p30 / 低 480p15 | H.264 + UDP Multicast (RTP) | 三檔品質細選（8/4/1.5 Mbps），IGMP Snooping 硬體複製零延遲 |
 
 ---
 
@@ -49,7 +49,7 @@
 +------------------------------------------------------------------------------------------│───│---+  |
                                                                                            │   │      |
     ┌──────────────────────────────────────────────────────────────────────────────────────┘   │      |
-    ▼ (交換器 IGMP Snooping 硬體複製轉發，全班總頻寬固定 4~6 Mbps)                               │      |
+    ▼ (交換器 IGMP Snooping 硬體複製轉發，全班總頻寬依所選品質 1.5 / 4 / 8 Mbps)                               │      |
 +──────────────────────────────────────────────+  +────────────────────────────────────────────│─+    |
 |        GridSight Beacon 01 (學生端)           |  |        GridSight Beacon 70 (學生端)        │ |    |
 | [學生 Session 1 執行 gs-agent.exe (無UI背景)]|  | [學生 Session 1 執行 gs-agent.exe (無UI背景)]│ |    |
@@ -78,8 +78,8 @@ gridsight/
 ├── console/                  # 教師端管理介面 (React + Vite + TailwindCSS + Node.js)
 │   ├── src/
 │   │   ├── components/Canvas/   # 網格畫布、學生卡片、走道/講台標記、MiniMap
+│   │   ├── components/Toolbar/  # 頂部導航列（廣播品質、離題警示、分享）與跳出視窗
 │   │   ├── components/Viewer/   # WebCodecs GPU 硬體解碼 30FPS 焦點播放器
-│   │   ├── components/Broadcast/# 教師 UDP 組播廣播控制器
 │   │   ├── services/            # 1 FPS 縮圖輪詢 (800ms 熔斷)、座位表儲存
 │   │   └── types/               # TypeScript 資料型別定義
 │   └── server/                  # 教師端探索監聽、Token 發放與 FFmpeg RTP 串流服務

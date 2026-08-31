@@ -7,7 +7,7 @@ const script = buildInstallAgentScript({
   teacherHost: '192.168.50.10',
   teacherPort: 3000,
   hmacSecret: secret,
-  version: '5.8.0',
+  version: '5.8.1',
 });
 
 assert.match(script, /\$envPath = "\$destDir\\\.env"/);
@@ -25,7 +25,7 @@ assert.throws(
     teacherHost: 'teacher',
     teacherPort: 3000,
     hmacSecret: secret,
-    version: '5.8.0',
+    version: '5.8.1',
   }),
   /Unsafe serverHost/
 );

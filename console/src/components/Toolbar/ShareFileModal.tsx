@@ -26,6 +26,7 @@ export const ShareFileModal: React.FC<ShareFileModalProps> = ({
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   const [uploadProgress, setUploadProgress] = useState(0);
+  const [stats, setStats] = useState<{ total: number; success: number; failed: number } | null>(null);
 
   useEffect(() => {
     if (isOpen) {
@@ -33,6 +34,7 @@ export const ShareFileModal: React.FC<ShareFileModalProps> = ({
       setErrorMsg('');
       setSuccessMsg('');
       setUploadProgress(0);
+      setStats(null);
       setSendToAll(selectedCount === 0);
     }
   }, [isOpen, selectedCount]);
@@ -44,6 +46,7 @@ export const ShareFileModal: React.FC<ShareFileModalProps> = ({
       setSelectedFile(e.target.files[0]);
       setErrorMsg('');
       setUploadProgress(0);
+      setStats(null);
     }
   };
 
@@ -54,6 +57,7 @@ export const ShareFileModal: React.FC<ShareFileModalProps> = ({
       setSelectedFile(e.dataTransfer.files[0]);
       setErrorMsg('');
       setUploadProgress(0);
+      setStats(null);
     }
   };
 
@@ -83,6 +87,7 @@ export const ShareFileModal: React.FC<ShareFileModalProps> = ({
     setErrorMsg('');
     setSuccessMsg('');
     setUploadProgress(0);
+    setStats(null);
 
     const targets = sendToAll || selectedCount === 0 ? [] : selectedTargets;
     const xhr = new XMLHttpRequest();
@@ -90,6 +95,7 @@ export const ShareFileModal: React.FC<ShareFileModalProps> = ({
     xhr.setRequestHeader('Content-Type', 'application/octet-stream');
     xhr.setRequestHeader('x-filename', encodeURIComponent(selectedFile.name));
     xhr.setRequestHeader('x-targets', JSON.stringify(targets));
+    xhr.timeout = 15000;
 
     const token = AuthService.getToken();
     if (token) {
@@ -108,20 +114,39 @@ export const ShareFileModal: React.FC<ShareFileModalProps> = ({
         const data = JSON.parse(xhr.responseText);
         if (xhr.status >= 200 && xhr.status < 300 && data.success) {
           setUploadProgress(100);
+          const total = data.totalTargets ?? (targets.length || totalOnlineCount);
+          const succ = data.successCount ?? data.count ?? 0;
+          const fail = data.failedCount ?? Math.max(0, total - succ);
+          setStats({ total, success: succ, failed: fail });
+
           setSuccessMsg(data.message || `檔案已成功發送！學生機下載後將自動開啟檔案總管`);
           setTimeout(() => {
             onClose();
-          }, 1800);
+          }, fail > 0 ? 3000 : 1800);
         } else {
+          setUploadProgress(0);
           setErrorMsg(data.error || `檔案分享失敗 (HTTP ${xhr.status})`);
         }
       } catch {
+        setUploadProgress(0);
         setErrorMsg(`伺服器回應異常 (HTTP ${xhr.status})`);
       }
       setIsLoading(false);
     };
 
+    xhr.ontimeout = () => {
+      setUploadProgress(0);
+      setErrorMsg('傳送連線逾時 (超過 15 秒)，請檢查網路或學生機狀態');
+      setStats({
+        total: sendToAll || selectedCount === 0 ? totalOnlineCount : selectedTargets.length,
+        success: 0,
+        failed: sendToAll || selectedCount === 0 ? totalOnlineCount : selectedTargets.length,
+      });
+      setIsLoading(false);
+    };
+
     xhr.onerror = () => {
+      setUploadProgress(0);
       setErrorMsg('傳送失敗，請檢查網路連線或伺服器狀態');
       setIsLoading(false);
     };
@@ -240,7 +265,9 @@ export const ShareFileModal: React.FC<ShareFileModalProps> = ({
           {isLoading && (
             <div className="space-y-1.5 p-3 rounded-xl bg-slate-950/80 border border-slate-800 animate-in fade-in">
               <div className="flex justify-between text-xs font-medium">
-                <span className="text-amber-400">正在傳送檔案至伺服器...</span>
+                <span className="text-amber-400">
+                  {uploadProgress < 100 ? '正在傳送檔案至伺服器...' : '檔案傳送完成，廣播通知學生機下載...'}
+                </span>
                 <span className="text-slate-300 font-mono">{uploadProgress}%</span>
               </div>
               <div className="w-full h-2 bg-slate-800 rounded-full overflow-hidden">
@@ -248,6 +275,24 @@ export const ShareFileModal: React.FC<ShareFileModalProps> = ({
                   className="h-full bg-gradient-to-r from-amber-500 to-amber-400 transition-all duration-150 rounded-full"
                   style={{ width: `${uploadProgress}%` }}
                 />
+              </div>
+            </div>
+          )}
+
+          {/* Stats Summary */}
+          {stats && (
+            <div className="grid grid-cols-3 gap-2 p-3 rounded-xl bg-slate-950/80 border border-slate-800 text-xs">
+              <div className="text-center">
+                <p className="text-slate-400 text-[11px]">總目標數</p>
+                <p className="font-bold text-slate-200 text-sm font-mono">{stats.total}</p>
+              </div>
+              <div className="text-center">
+                <p className="text-emerald-400 text-[11px]">成功連線</p>
+                <p className="font-bold text-emerald-400 text-sm font-mono">{stats.success}</p>
+              </div>
+              <div className="text-center">
+                <p className="text-rose-400 text-[11px]">連線錯誤/逾時</p>
+                <p className="font-bold text-rose-400 text-sm font-mono">{stats.failed}</p>
               </div>
             </div>
           )}

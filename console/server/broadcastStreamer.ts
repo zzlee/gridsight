@@ -3,6 +3,7 @@ import os from 'os';
 import fs from 'fs';
 import path from 'path';
 import { logger } from './logger.js';
+import { MouseHighlightOverlay } from './mouseHighlight.js';
 
 const findFfmpegBinary = (): string => {
   if (os.platform() === 'win32') {
@@ -88,6 +89,7 @@ export class TeacherBroadcastStreamer {
   private killTimers = new Set<NodeJS.Timeout>();
   private currentSourceType: string = 'screen';
   private currentQuality: BroadcastQuality | null = null;
+  private mouseOverlay = new MouseHighlightOverlay();
 
   getMode(): string | null {
     return this.isStreaming ? this.currentSourceType : null;
@@ -164,7 +166,9 @@ export class TeacherBroadcastStreamer {
       appendScale();
     } else if (platform === 'win32') {
       // macOS is not a supported platform (see docs/roadmap.md)
-      inputArgs = ['-f', 'gdigrab', '-framerate', String(fps), '-i', 'desktop'];
+      // Option 1: Console-side composed capture with mouse cursor halo & click effects (gdigrab draw_mouse)
+      logger.info('[Broadcast] Using Option 1: Console-side composed capture with mouse cursor halo & click effects');
+      inputArgs = ['-f', 'gdigrab', '-draw_mouse', '1', '-framerate', String(fps), '-i', 'desktop'];
       appendScale();
     } else {
       // Linux: omit -video_size so x11grab captures the full screen at native resolution
@@ -265,6 +269,10 @@ export class TeacherBroadcastStreamer {
       }
       return { ok: false, error: reason };
     } 
+
+    if (sourceType === 'screen') {
+      this.mouseOverlay.start();
+    }
     logger.info('[Broadcast] FFmpeg startup verified, streaming is live');
     return { ok: true };
   }
@@ -298,6 +306,7 @@ export class TeacherBroadcastStreamer {
       });
     }
 
+    this.mouseOverlay.stop();
     logger.info('[Broadcast] Broadcast stream terminated.');
   }
 

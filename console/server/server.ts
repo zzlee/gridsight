@@ -777,6 +777,44 @@ app.post(
   }
 );
 
+// Route: Shutdown Student Agents (Triggers Countdown Modal on Student PCs)
+app.post('/api/power/shutdown', requireTeacherAuth, (req, res) => {
+  const { targets, timeout = 30 } = req.body || {};
+  const countdown = typeof timeout === 'number' && timeout > 0 ? timeout : 30;
+  const payload = JSON.stringify({ action: 'SHUTDOWN', timeout: countdown });
+
+  let targetMacs: string[] = [];
+  if (Array.isArray(targets) && targets.length > 0) {
+    targetMacs = targets.map((t) => normalizeTarget(t)).filter(Boolean);
+  }
+
+  let count = 0;
+  if (targetMacs.length === 0 || targetMacs.includes('ALL')) {
+    agentSockets.forEach((ws, mac) => {
+      if (ws.readyState === WebSocket.OPEN) {
+        ws.send(payload);
+        count++;
+      }
+    });
+  } else {
+    targetMacs.forEach((mac) => {
+      const ws = agentSockets.get(mac);
+      if (ws && ws.readyState === WebSocket.OPEN) {
+        ws.send(payload);
+        count++;
+      }
+    });
+  }
+
+  logger.info(`[Power] Broadcasted SHUTDOWN command (timeout: ${countdown}s) to ${count} student agents`);
+  res.json({
+    success: true,
+    count,
+    timeout: countdown,
+    message: `已廣播發送關機指令至 ${count} 台學生機 (倒數 ${countdown} 秒)`,
+  });
+});
+
 // Route: Download Shared File for Student Agents
 app.get('/api/share/download/:fileId/:filename', async (req, res) => {
   const { fileId, filename } = req.params;

@@ -21,6 +21,7 @@ import {
   FolderUp,
   Clapperboard,
   ChevronDown,
+  Power,
 } from 'lucide-react';
 
 type BroadcastQuality = 'high' | 'medium' | 'low';
@@ -44,6 +45,7 @@ interface TopNavProps {
   onOpenShareUrl?: () => void;
   onOpenShareFile?: () => void;
   onOpenBroadcastTest?: () => void;
+  onOpenShutdown?: () => void;
   offTaskCount?: number;
   unassignedCount?: number;
   onLock: () => void;
@@ -64,6 +66,7 @@ export const TopNav: React.FC<TopNavProps> = ({
   onOpenShareUrl,
   onOpenShareFile,
   onOpenBroadcastTest,
+  onOpenShutdown,
   offTaskCount = 0,
   unassignedCount = 0,
   onLock,
@@ -325,6 +328,18 @@ export const TopNav: React.FC<TopNavProps> = ({
               <UserPlus className="w-3.5 h-3.5 text-emerald-400" />
               <span>學生端連線</span>
             </button>
+
+            {/* Broadcast Shutdown Button */}
+            {onOpenShutdown && (
+              <button
+                onClick={onOpenShutdown}
+                className="flex items-center space-x-1.5 px-3 py-1.5 rounded-lg bg-rose-950/40 hover:bg-rose-900/60 border border-rose-500/40 text-xs font-semibold text-rose-300 hover:text-rose-200 transition-all shadow-sm active:scale-95"
+                title="廣播關閉學生端電腦 (觸發倒數計時關機畫面)"
+              >
+                <Power className="w-3.5 h-3.5 text-rose-400" />
+                <span>廣播關機</span>
+              </button>
+            )}
 
             {/* High-Visibility Off-Task Alert Button */}
             {onOpenAlertSettings && (

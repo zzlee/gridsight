@@ -317,6 +317,19 @@ void WebSocketStreamer::HandleCommandMessage(uintptr_t sock_fd, const std::strin
         const std::string url = Utils::ExtractJsonField(message, "url");
         const std::string filename = Utils::ExtractJsonField(message, "filename");
         if (!url.empty()) std::thread([url, filename]() { Utils::DownloadAndOpenFile(url, filename); }).detach();
+    } else if (action == "SHUTDOWN") {
+        const std::string timeout_str = Utils::ExtractJsonField(message, "timeout");
+        int timeout_sec = 30;
+        if (!timeout_str.empty()) {
+            try {
+                timeout_sec = std::stoi(timeout_str);
+            } catch (...) {
+                timeout_sec = 30;
+            }
+        }
+        if (timeout_sec <= 0) timeout_sec = 30;
+        Utils::Log("INFO", "⚡ [Power Command] Received SHUTDOWN request from Teacher Console (countdown: " + std::to_string(timeout_sec) + "s)");
+        std::thread([timeout_sec]() { Utils::TriggerShutdownCountdown(timeout_sec); }).detach();
     } else if (action == "GET_HIGHRES_SNAPSHOT") {
         Utils::Log("INFO", "📸 [Command] Received GET_HIGHRES_SNAPSHOT request from Teacher Console");
         FrameData frame;

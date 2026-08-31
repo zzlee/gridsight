@@ -18,6 +18,7 @@ import { AlertSettingsModal } from './components/Toolbar/AlertSettingsModal';
 import { ShareUrlModal } from './components/Toolbar/ShareUrlModal';
 import { ShareFileModal } from './components/Toolbar/ShareFileModal';
 import { BroadcastTestModal } from './components/Toolbar/BroadcastTestModal';
+import { ShutdownModal } from './components/Toolbar/ShutdownModal';
 import { PollingManager } from './services/pollingManager';
 import { LayoutStorage } from './services/layoutStorage';
 import { useViewport } from './hooks/useViewport';
@@ -45,6 +46,7 @@ export const App: React.FC = () => {
   const [isShareUrlOpen, setIsShareUrlOpen] = useState(false);
   const [isShareFileOpen, setIsShareFileOpen] = useState(false);
   const [isBroadcastTestOpen, setIsBroadcastTestOpen] = useState(false);
+  const [isShutdownOpen, setIsShutdownOpen] = useState(false);
 
   // Viewport Zoom & Pan Persistence
   const { zoom, setZoom, pan, setPan, handleResetView } = useViewport();
@@ -561,6 +563,7 @@ export const App: React.FC = () => {
         onOpenShareUrl={() => setIsShareUrlOpen(true)}
         onOpenShareFile={() => setIsShareFileOpen(true)}
         onOpenBroadcastTest={() => setIsBroadcastTestOpen(true)}
+        onOpenShutdown={() => setIsShutdownOpen(true)}
         offTaskCount={offTaskDevices.length}
         unassignedCount={unassignedDevices.length}
         onLock={() => setIsLocked(true)}
@@ -720,6 +723,15 @@ export const App: React.FC = () => {
       <BroadcastTestModal
         isOpen={isBroadcastTestOpen}
         onClose={() => setIsBroadcastTestOpen(false)}
+      />
+
+      {/* Broadcast Shutdown Modal */}
+      <ShutdownModal
+        isOpen={isShutdownOpen}
+        onClose={() => setIsShutdownOpen(false)}
+        selectedTargets={selectedTargets}
+        selectedCount={selectedSeats.length}
+        totalOnlineCount={totalOnlineCount}
       />
 
       {/* Security Auth Lock Modal (PIN Entry) */}

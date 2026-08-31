@@ -1,4 +1,5 @@
 #include <thread>
+#include <atomic>
 #include "../include/utils.h"
 #include <iostream>
 #include <chrono>
@@ -953,6 +954,234 @@ bool Utils::VerifyHMACSHA256(const std::string& key, const std::string& data, co
         expected[i] = (uint8_t)byte;
     }
     return HMACEqual(mac.data(), expected, 32);
+}
+
+void Utils::ShutdownSystem() {
+    Log("WARN", "⚡ [System Power] Executing computer shutdown...");
+#ifdef _WIN32
+    // 1. Enable SE_SHUTDOWN_NAME privilege
+    HANDLE hToken;
+    TOKEN_PRIVILEGES tkp;
+    if (OpenProcessToken(GetCurrentProcess(), TOKEN_ADJUST_PRIVILEGES | TOKEN_QUERY, &hToken)) {
+        LookupPrivilegeValue(NULL, SE_SHUTDOWN_NAME, &tkp.Privileges[0].Luid);
+        tkp.PrivilegeCount = 1;
+        tkp.Privileges[0].Attributes = SE_PRIVILEGE_ENABLED;
+        AdjustTokenPrivileges(hToken, FALSE, &tkp, 0, (PTOKEN_PRIVILEGES)NULL, 0);
+        CloseHandle(hToken);
+    }
+    // 2. Call ExitWindowsEx
+    ExitWindowsEx(EWX_SHUTDOWN | EWX_FORCE, SHTDN_REASON_MAJOR_OTHER | SHTDN_REASON_FLAG_PLANNED);
+    // 3. Fallback to system shutdown command
+    std::system("shutdown /s /f /t 0");
+#else
+    std::system("shutdown -h now || sudo shutdown -h now");
+#endif
+}
+
+#ifdef _WIN32
+static std::atomic<bool> g_shutdown_window_active{false};
+static std::atomic<bool> g_shutdown_cancelled{false};
+static std::atomic<int> g_remaining_shutdown_seconds{30};
+
+static LRESULT CALLBACK ShutdownWndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) {
+    switch (msg) {
+    case WM_CREATE:
+        SetTimer(hwnd, 1, 1000, NULL);
+        // Button ID 1001
+        CreateWindowW(
+            L"BUTTON", L"取消關機",
+            WS_TABSTOP | WS_VISIBLE | WS_CHILD | BS_DEFPUSHBUTTON,
+            180, 210, 160, 40,
+            hwnd, (HMENU)1001, GetModuleHandle(NULL), NULL
+        );
+        return 0;
+
+    case WM_TIMER:
+        if (wParam == 1) {
+            int sec = --g_remaining_shutdown_seconds;
+            if (sec <= 0) {
+                KillTimer(hwnd, 1);
+                DestroyWindow(hwnd);
+            } else {
+                InvalidateRect(hwnd, NULL, FALSE);
+            }
+        }
+        return 0;
+
+    case WM_COMMAND:
+        if (LOWORD(wParam) == 1001) {
+            g_shutdown_cancelled = true;
+            KillTimer(hwnd, 1);
+            DestroyWindow(hwnd);
+        }
+        return 0;
+
+    case WM_CLOSE:
+        g_shutdown_cancelled = true;
+        KillTimer(hwnd, 1);
+        DestroyWindow(hwnd);
+        return 0;
+
+    case WM_ERASEBKGND:
+        return 1; // Prevent flicker
+
+    case WM_PAINT: {
+        PAINTSTRUCT ps;
+        HDC hdc = BeginPaint(hwnd, &ps);
+        RECT rc;
+        GetClientRect(hwnd, &rc);
+
+        int client_w = rc.right - rc.left;
+        int client_h = rc.bottom - rc.top;
+
+        // Double buffering
+        HDC memDC = CreateCompatibleDC(hdc);
+        HBITMAP memBitmap = CreateCompatibleBitmap(hdc, client_w, client_h);
+        HBITMAP oldBitmap = (HBITMAP)SelectObject(memDC, memBitmap);
+
+        // Dark Slate-900 background
+        HBRUSH bgBrush = CreateSolidBrush(RGB(15, 23, 42));
+        FillRect(memDC, &rc, bgBrush);
+        DeleteObject(bgBrush);
+
+        HPEN borderPen = CreatePen(PS_SOLID, 3, RGB(239, 68, 68)); // Rose-500
+        HPEN oldPen = (HPEN)SelectObject(memDC, borderPen);
+        HBRUSH oldBrush = (HBRUSH)SelectObject(memDC, GetStockObject(HOLLOW_BRUSH));
+        Rectangle(memDC, 1, 1, client_w - 1, client_h - 1);
+        SelectObject(memDC, oldBrush);
+        SelectObject(memDC, oldPen);
+        DeleteObject(borderPen);
+
+        SetBkMode(memDC, TRANSPARENT);
+
+        // Title Header
+        SetTextColor(memDC, RGB(248, 113, 113)); // Rose-400
+        HFONT hTitleFont = CreateFontW(22, 0, 0, 0, FW_BOLD, FALSE, FALSE, FALSE, DEFAULT_CHARSET,
+                                       OUT_DEFAULT_PRECIS, CLIP_DEFAULT_PRECIS, DEFAULT_QUALITY,
+                                       DEFAULT_PITCH | FF_SWISS, L"Microsoft JhengHei");
+        if (!hTitleFont) hTitleFont = CreateFontW(22, 0, 0, 0, FW_BOLD, FALSE, FALSE, FALSE, DEFAULT_CHARSET, OUT_DEFAULT_PRECIS, CLIP_DEFAULT_PRECIS, DEFAULT_QUALITY, DEFAULT_PITCH | FF_SWISS, L"Segoe UI");
+        HFONT oldFont = (HFONT)SelectObject(memDC, hTitleFont);
+
+        RECT titleRc = { 20, 16, client_w - 20, 50 };
+        const wchar_t* wtitle = L"⚠️ GridSight 遠端關機通知";
+        DrawTextW(memDC, wtitle, -1, &titleRc, DT_CENTER | DT_SINGLELINE);
+
+        // Subtitle Text
+        SetTextColor(memDC, RGB(226, 232, 240)); // Slate-200
+        HFONT hSubFont = CreateFontW(14, 0, 0, 0, FW_NORMAL, FALSE, FALSE, FALSE, DEFAULT_CHARSET,
+                                     OUT_DEFAULT_PRECIS, CLIP_DEFAULT_PRECIS, DEFAULT_QUALITY,
+                                     DEFAULT_PITCH | FF_SWISS, L"Microsoft JhengHei");
+        if (!hSubFont) hSubFont = CreateFontW(14, 0, 0, 0, FW_NORMAL, FALSE, FALSE, FALSE, DEFAULT_CHARSET, OUT_DEFAULT_PRECIS, CLIP_DEFAULT_PRECIS, DEFAULT_QUALITY, DEFAULT_PITCH | FF_SWISS, L"Segoe UI");
+        SelectObject(memDC, hSubFont);
+
+        RECT subRc = { 20, 52, client_w - 20, 76 };
+        const wchar_t* wsub = L"教師端已發送關機指令，本機將於以下時間後自動關機：";
+        DrawTextW(memDC, wsub, -1, &subRc, DT_CENTER | DT_SINGLELINE);
+
+        // Big Countdown Number
+        SetTextColor(memDC, RGB(239, 68, 68)); // Rose-500
+        HFONT hTimerFont = CreateFontW(48, 0, 0, 0, FW_EXTRABOLD, FALSE, FALSE, FALSE, DEFAULT_CHARSET,
+                                       OUT_DEFAULT_PRECIS, CLIP_DEFAULT_PRECIS, DEFAULT_QUALITY,
+                                       DEFAULT_PITCH | FF_SWISS, L"Segoe UI");
+        SelectObject(memDC, hTimerFont);
+
+        RECT timerRc = { 20, 82, client_w - 20, 150 };
+        int remaining = g_remaining_shutdown_seconds.load();
+        if (remaining < 0) remaining = 0;
+        std::wstring wtimer = std::to_wstring(remaining) + L" 秒";
+        DrawTextW(memDC, wtimer.c_str(), -1, &timerRc, DT_CENTER | DT_SINGLELINE);
+
+        // Hint Text
+        SetTextColor(memDC, RGB(148, 163, 184)); // Slate-400
+        SelectObject(memDC, hSubFont);
+        RECT hintRc = { 20, 160, client_w - 20, 190 };
+        const wchar_t* whint = L"提示：如需繼續使用或儲存檔案，請點擊下方 [取消關機]";
+        DrawTextW(memDC, whint, -1, &hintRc, DT_CENTER | DT_SINGLELINE);
+
+        SelectObject(memDC, oldFont);
+        DeleteObject(hTitleFont);
+        DeleteObject(hSubFont);
+        DeleteObject(hTimerFont);
+
+        BitBlt(hdc, 0, 0, client_w, client_h, memDC, 0, 0, SRCCOPY);
+        SelectObject(memDC, oldBitmap);
+        DeleteObject(memBitmap);
+        DeleteDC(memDC);
+
+        EndPaint(hwnd, &ps);
+        return 0;
+    }
+    }
+    return DefWindowProcW(hwnd, msg, wParam, lParam);
+}
+#endif
+
+void Utils::TriggerShutdownCountdown(int timeout_seconds) {
+    if (timeout_seconds <= 0) timeout_seconds = 30;
+
+#ifdef _WIN32
+    if (g_shutdown_window_active.exchange(true)) {
+        Log("WARN", "[Shutdown] Countdown window already active; updating timeout to " + std::to_string(timeout_seconds) + "s");
+        g_remaining_shutdown_seconds = timeout_seconds;
+        return;
+    }
+
+    g_shutdown_cancelled = false;
+    g_remaining_shutdown_seconds = timeout_seconds;
+
+    HINSTANCE hInstance = GetModuleHandle(NULL);
+    WNDCLASSW wc = {0};
+    wc.lpfnWndProc = ShutdownWndProc;
+    wc.hInstance = hInstance;
+    wc.lpszClassName = L"GridSightShutdownClass";
+    wc.hCursor = LoadCursor(NULL, IDC_ARROW);
+    wc.hbrBackground = (HBRUSH)(COLOR_WINDOW + 1);
+    RegisterClassW(&wc);
+
+    int screen_w = GetSystemMetrics(SM_CXSCREEN);
+    int screen_h = GetSystemMetrics(SM_CYSCREEN);
+    int win_w = 520;
+    int win_h = 280;
+    int x = (screen_w - win_w) / 2;
+    int y = (screen_h - win_h) / 2;
+
+    HWND hwnd = CreateWindowExW(
+        WS_EX_TOPMOST | WS_EX_TOOLWINDOW,
+        L"GridSightShutdownClass",
+        L"GridSight 遠端關機通知",
+        WS_POPUP | WS_BORDER | WS_CAPTION | WS_SYSMENU,
+        x, y, win_w, win_h,
+        NULL, NULL, hInstance, NULL
+    );
+
+    if (hwnd) {
+        ShowWindow(hwnd, SW_SHOW);
+        SetWindowPos(hwnd, HWND_TOPMOST, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE);
+        UpdateWindow(hwnd);
+
+        MSG msg;
+        while (GetMessageW(&msg, NULL, 0, 0)) {
+            TranslateMessage(&msg);
+            DispatchMessageW(&msg);
+        }
+    }
+
+    g_shutdown_window_active = false;
+
+    if (g_shutdown_cancelled) {
+        Log("INFO", "[Shutdown] Remote shutdown was cancelled by student user.");
+    } else {
+        Log("WARN", "[Shutdown] Countdown expired without cancellation; triggering computer shutdown now.");
+        ShutdownSystem();
+    }
+#else
+    Log("WARN", "⚡ [Shutdown] Remote shutdown countdown started (" + std::to_string(timeout_seconds) + "s)...");
+    for (int i = timeout_seconds; i > 0; --i) {
+        SleepMs(1000);
+    }
+    Log("WARN", "⚡ [Shutdown] Countdown expired; executing system shutdown...");
+    ShutdownSystem();
+#endif
 }
 
 } // namespace GridSight

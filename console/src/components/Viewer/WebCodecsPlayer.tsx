@@ -3,7 +3,7 @@ import { StudentDevice } from '../../types';
 import { AuthService } from '../../services/authService';
 
 export interface WebCodecsPlayerHandle {
-  captureSnapshot: () => string | null;
+  captureSnapshot: (format?: 'image/jpeg' | 'image/png', quality?: number) => Promise<Blob | null>;
   getCanvas: () => HTMLCanvasElement | null;
 }
 
@@ -29,14 +29,21 @@ export const WebCodecsPlayer = forwardRef<WebCodecsPlayerHandle, WebCodecsPlayer
   });
 
   useImperativeHandle(ref, () => ({
-    captureSnapshot: () => {
-      if (!canvasRef.current || !renderedFrameRef.current) return null;
-      try {
-        return canvasRef.current.toDataURL('image/png');
-      } catch (err) {
-        console.warn('Canvas toDataURL failed:', err);
-        return null;
-      }
+    captureSnapshot: (format = 'image/jpeg', quality = 0.85) => {
+      return new Promise<Blob | null>((resolve) => {
+        if (!canvasRef.current || !renderedFrameRef.current) {
+          resolve(null);
+          return;
+        }
+        try {
+          canvasRef.current.toBlob((blob) => {
+            resolve(blob);
+          }, format, quality);
+        } catch (err) {
+          console.warn('Canvas toBlob failed:', err);
+          resolve(null);
+        }
+      });
     },
     getCanvas: () => canvasRef.current,
   }));

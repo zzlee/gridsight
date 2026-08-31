@@ -35,6 +35,7 @@ export const FocusModal: React.FC<FocusModalProps> = ({ device, onClose }) => {
   const [showDebugHud, setShowDebugHud] = useState(false); // Default OFF
   const [isFullscreen, setIsFullscreen] = useState(false);
   const [toastMessage, setToastMessage] = useState<string | null>(null);
+  const [snapshotFormat, setSnapshotFormat] = useState<'jpeg' | 'png'>('jpeg');
 
   // Stream status & Failure log states
   const [streamStatus, setStreamStatus] = useState<'Connecting' | 'Live 30FPS' | 'Snapshot Fallback' | 'Offline'>('Connecting');
@@ -134,23 +135,30 @@ export const FocusModal: React.FC<FocusModalProps> = ({ device, onClose }) => {
 
   const handleTakeSnapshot = async () => {
     const timestamp = new Date().toISOString().replace(/[:.]/g, '-');
-    const filename = `GridSight_${device.seatNo || device.hostname}_${timestamp}.png`;
+    const isJpeg = snapshotFormat === 'jpeg';
+    const ext = isJpeg ? 'jpg' : 'png';
+    const filename = `GridSight_${device.seatNo || device.hostname}_${timestamp}.${ext}`;
+    const mimeType = isJpeg ? 'image/jpeg' : 'image/png';
+    const quality = isJpeg ? 0.85 : undefined;
 
     // A live rendered frame can be exported directly. During Connecting or
-    // Snapshot Fallback, bypass the low-resolution canvas and request a fresh
-    // authenticated full-resolution capture from the agent.
-    const dataUrl = streamStatus === 'Live 30FPS'
-      ? playerRef.current?.captureSnapshot() || null
+    // Snapshot Fallback, bypass the canvas and request a fresh authenticated
+    // full-resolution JPEG capture from the agent.
+    const blob = streamStatus === 'Live 30FPS'
+      ? await playerRef.current?.captureSnapshot(mimeType, quality) ?? null
       : null;
 
-    if (dataUrl) {
+    if (blob) {
+      const url = URL.createObjectURL(blob);
       const link = document.createElement('a');
-      link.href = dataUrl;
+      link.href = url;
       link.download = filename;
       document.body.appendChild(link);
       link.click();
       document.body.removeChild(link);
-      setToastMessage(`📸 截圖已儲存：${filename}`);
+      URL.revokeObjectURL(url);
+      const sizeKB = (blob.size / 1024).toFixed(0);
+      setToastMessage(`📸 截圖已儲存：${filename} (${sizeKB} KB)`);
       setTimeout(() => setToastMessage(null), 3000);
       return;
     }
@@ -160,7 +168,8 @@ export const FocusModal: React.FC<FocusModalProps> = ({ device, onClose }) => {
         `/api/snapshot/${encodeURIComponent(device.mac || device.ip)}?full=1&t=${Date.now()}`
       );
       if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
-      const blobUrl = URL.createObjectURL(await resp.blob());
+      const respBlob = await resp.blob();
+      const blobUrl = URL.createObjectURL(respBlob);
       const link = document.createElement('a');
       link.href = blobUrl;
       link.download = filename;
@@ -168,7 +177,8 @@ export const FocusModal: React.FC<FocusModalProps> = ({ device, onClose }) => {
       link.click();
       document.body.removeChild(link);
       URL.revokeObjectURL(blobUrl);
-      setToastMessage(`📸 截圖已儲存：${filename}`);
+      const sizeKB = (respBlob.size / 1024).toFixed(0);
+      setToastMessage(`📸 截圖已儲存：${filename} (${sizeKB} KB)`);
       setTimeout(() => setToastMessage(null), 3000);
     } catch (err) {
       console.warn('[FocusModal] Snapshot download failed:', err);
@@ -253,9 +263,20 @@ export const FocusModal: React.FC<FocusModalProps> = ({ device, onClose }) => {
               <Info className="w-4 h-4" />
             </button>
             <button
+              onClick={() => setSnapshotFormat((f) => (f === 'jpeg' ? 'png' : 'jpeg'))}
+              className={`p-1.5 rounded-lg border text-xs font-mono transition-colors ${
+                snapshotFormat === 'jpeg'
+                  ? 'bg-amber-600/20 border-amber-500/50 text-amber-300'
+                  : 'bg-sky-600/20 border-sky-500/50 text-sky-300'
+              }`}
+              title={`截圖格式：${snapshotFormat.toUpperCase()}（點擊切換）`}
+            >
+              {snapshotFormat.toUpperCase()}
+            </button>
+            <button
               onClick={handleTakeSnapshot}
               className="p-1.5 rounded-lg bg-slate-800 hover:bg-sky-600 text-slate-300 hover:text-white transition-colors"
-              title="畫面截圖存檔 (下載 PNG)"
+              title={`畫面截圖存檔 (下載 ${snapshotFormat.toUpperCase()})`}
             >
               <Camera className="w-4 h-4" />
             </button>

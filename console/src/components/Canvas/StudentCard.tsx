@@ -19,7 +19,7 @@ interface StudentCardProps {
   isDragOver?: boolean;
 }
 
-export const StudentCard: React.FC<StudentCardProps> = ({
+const StudentCardComponent: React.FC<StudentCardProps> = ({
   device,
   isEditMode,
   onSelect,
@@ -59,7 +59,7 @@ export const StudentCard: React.FC<StudentCardProps> = ({
       onDrop={(e) => isEditMode && onDrop?.(e, device.id)}
       onClick={(e) => onSelect(device.id, e.ctrlKey || e.metaKey)}
       onDoubleClick={() => (isEditMode ? onEditSeat?.(device) : onDoubleClick(device))}
-      className={`group relative flex flex-col rounded-lg border bg-slate-900/90 backdrop-blur transition-all duration-150 overflow-hidden select-none ${
+      className={`group relative flex flex-col rounded-lg border bg-slate-900/90 backdrop-blur transition-all duration-150 overflow-hidden select-none card-containment ${
         isDragging
           ? 'opacity-40 scale-95 border-dashed border-sky-400'
           : isDragOver
@@ -242,3 +242,46 @@ export const StudentCard: React.FC<StudentCardProps> = ({
     </div>
   );
 };
+
+export const StudentCard = React.memo(StudentCardComponent, (prevProps, nextProps) => {
+  if (
+    prevProps.isEditMode !== nextProps.isEditMode ||
+    prevProps.isDragging !== nextProps.isDragging ||
+    prevProps.isDragOver !== nextProps.isDragOver
+  ) {
+    return false;
+  }
+
+  const prev = prevProps.device;
+  const next = nextProps.device;
+
+  if (
+    prev.id !== next.id ||
+    prev.seatNo !== next.seatNo ||
+    prev.hostname !== next.hostname ||
+    prev.ip !== next.ip ||
+    prev.status !== next.status ||
+    prev.latencyMs !== next.latencyMs ||
+    prev.activeWindow !== next.activeWindow ||
+    prev.isOffTask !== next.isOffTask ||
+    prev.selected !== next.selected ||
+    prev.thumbnailUrl !== next.thumbnailUrl ||
+    prev.username !== next.username
+  ) {
+    return false;
+  }
+
+  if (prev.specs !== next.specs) {
+    if (!prev.specs || !next.specs) return false;
+    if (
+      prev.specs.cpu.usage_percent !== next.specs.cpu.usage_percent ||
+      prev.specs.ram.usage_percent !== next.specs.ram.usage_percent ||
+      prev.specs.disk.free_gb !== next.specs.disk.free_gb ||
+      prev.specs.agent_version !== next.specs.agent_version
+    ) {
+      return false;
+    }
+  }
+
+  return true;
+});

@@ -124,7 +124,7 @@ sequenceDiagram
 ```json
 {
   "type": "BEACON",
-  "version": "5.7.2",
+  "version": "5.8.0",
   "hostname": "PC-01",
   "ip": "192.168.1.101",
   "mac": "00:1A:2B:3C:4D:01",

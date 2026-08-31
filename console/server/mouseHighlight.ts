@@ -5,36 +5,23 @@ import fs from 'fs';
 import { logger } from './logger.js';
 
 /*
- * C# source for the transparent WinForms overlay process with Low-Level Mouse Hook (WH_MOUSE_LL).
- * Renders Option A effects:
- * - Yellow halo around cursor
- * - Cyan ripple on Left click
- * - Amber double-ripple on Right click
- * - Up/Down scroll indicator bubbles near cursor
- * Window flags: WS_EX_TRANSPARENT | WS_EX_LAYERED | WS_EX_TOPMOST | WS_EX_NOACTIVATE
- * Click-through enabled (does not block user inputs).
+ * Pointer Encoder:
+ * C# application using Low-Level Mouse Hook (WH_MOUSE_LL) to capture mouse coordinates,
+ * cursor shapes, click events, and scroll wheel actions. It normalizes coordinates to 0-65535,
+ * includes UTC timestamps in milliseconds, formats metadata as JSON, and broadcasts via UDP Multicast.
  */
 const CSHARP_EFFECT_SOURCE = `
 using System;
-using System.Collections.Generic;
-using System.Drawing;
-using System.Drawing.Drawing2D;
+using System.Net;
+using System.Net.Sockets;
+using System.Text;
 using System.Runtime.InteropServices;
 using System.Windows.Forms;
 
-namespace GridSightOverlay
+namespace GridSightPointerEncoder
 {
     static class Program
     {
-        [DllImport("user32.dll", SetLastError = true)]
-        static extern int GetWindowLong(IntPtr hWnd, int nIndex);
-
-        [DllImport("user32.dll")]
-        static extern int SetWindowLong(IntPtr hWnd, int nIndex, int dwNewLong);
-
-        [DllImport("user32.dll")]
-        static extern bool SetLayeredWindowAttributes(IntPtr hwnd, uint crKey, byte bAlpha, uint dwFlags);
-
         [DllImport("user32.dll", CharSet = CharSet.Auto, SetLastError = true)]
         private static extern IntPtr SetWindowsHookEx(int idHook, LowLevelMouseProc lpfn, IntPtr hMod, uint dwThreadId);
 
@@ -48,19 +35,8 @@ namespace GridSightOverlay
         [DllImport("kernel32.dll", CharSet = CharSet.Auto, SetLastError = true)]
         private static extern IntPtr GetModuleHandle(string lpModuleName);
 
-        private const int GWL_EXSTYLE = -20;
-        private const int WS_EX_TRANSPARENT = 0x00000020;
-        private const int WS_EX_LAYERED = 0x00080000;
-        private const int WS_EX_TOPMOST = 0x00000008;
-        private const int WS_EX_NOACTIVATE = 0x08000000;
-        private const uint LWA_COLORKEY = 0x00000001;
-
-        private const int WH_MOUSE_LL = 14;
-        private const int WM_LBUTTONDOWN = 0x0201;
-        private const int WM_RBUTTONDOWN = 0x0204;
-        private const int WM_MOUSEWHEEL = 0x020A;
-
-        private delegate IntPtr LowLevelMouseProc(int nCode, IntPtr wParam, IntPtr lParam);
+        [DllImport("user32.dll")]
+        private static extern bool GetCursorInfo(out CURSORINFO pci);
 
         [StructLayout(LayoutKind.Sequential)]
         private struct POINT { public int x; public int y; }
@@ -74,19 +50,50 @@ namespace GridSightOverlay
             public IntPtr dwExtraInfo;
         }
 
+        [StructLayout(LayoutKind.Sequential)]
+        private struct CURSORINFO {
+            public Int32 cbSize;
+            public Int32 flags;
+            public IntPtr hCursor;
+            public POINT ptScreenPos;
+        }
+
+        private const int WH_MOUSE_LL = 14;
+        private const int WM_LBUTTONDOWN = 0x0201;
+        private const int WM_RBUTTONDOWN = 0x0204;
+        private const int WM_MOUSEWHEEL = 0x020A;
+
+        private delegate IntPtr LowLevelMouseProc(int nCode, IntPtr wParam, IntPtr lParam);
+
         private static LowLevelMouseProc _proc = HookCallback;
         private static IntPtr _hookID = IntPtr.Zero;
-        private static OverlayForm _form;
+        private static UdpClient _udpClient;
+        private static IPEndPoint _endPoint;
+        private static Timer _timer;
+        private static string _lastClick = "none";
+        private static string _lastScroll = "none";
 
         [STAThread]
-        static void Main()
+        static void Main(string[] args)
         {
-            Application.EnableVisualStyles();
-            Application.SetCompatibleTextRenderingDefault(false);
+            string mcastIp = args.Length > 0 ? args[0] : "239.255.42.100";
+            int port = args.Length > 1 ? int.Parse(args[1]) : 9001;
+
+            _udpClient = new UdpClient();
+            _endPoint = new IPEndPoint(IPAddress.Parse(mcastIp), port);
+
             _hookID = SetHook(_proc);
-            _form = new OverlayForm();
-            Application.Run(_form);
+
+            _timer = new Timer();
+            _timer.Interval = 16; // ~60 FPS update rate
+            _timer.Tick += (s, e) => SendPointerState();
+            _timer.Start();
+
+            Application.Run();
+
+            _timer.Stop();
             UnhookWindowsHookEx(_hookID);
+            _udpClient.Close();
         }
 
         private static IntPtr SetHook(LowLevelMouseProc proc)
@@ -100,223 +107,63 @@ namespace GridSightOverlay
 
         private static IntPtr HookCallback(int nCode, IntPtr wParam, IntPtr lParam)
         {
-            if (nCode >= 0 && _form != null && !_form.IsDisposed)
+            if (nCode >= 0)
             {
                 MSLLHOOKSTRUCT hookStruct = (MSLLHOOKSTRUCT)Marshal.PtrToStructure(lParam, typeof(MSLLHOOKSTRUCT));
                 int msg = wParam.ToInt32();
 
                 if (msg == WM_LBUTTONDOWN)
                 {
-                    _form.AddClickEffect(hookStruct.pt.x, hookStruct.pt.y, true);
+                    _lastClick = "left";
                 }
                 else if (msg == WM_RBUTTONDOWN)
                 {
-                    _form.AddClickEffect(hookStruct.pt.x, hookStruct.pt.y, false);
+                    _lastClick = "right";
                 }
                 else if (msg == WM_MOUSEWHEEL)
                 {
                     int delta = (short)((hookStruct.mouseData >> 16) & 0xffff);
-                    _form.AddScrollEffect(hookStruct.pt.x, hookStruct.pt.y, delta > 0);
+                    _lastScroll = delta > 0 ? "up" : "down";
                 }
             }
             return CallNextHookEx(_hookID, nCode, wParam, lParam);
         }
-    }
 
-    public class OverlayForm : Form
-    {
-        private class ClickEffect
+        private static void SendPointerState()
         {
-            public int X;
-            public int Y;
-            public bool IsLeft;
-            public float Radius;
-            public float MaxRadius;
-            public float Alpha;
-        }
-
-        private class ScrollEffect
-        {
-            public int X;
-            public int Y;
-            public bool IsUp;
-            public float Alpha;
-            public float OffsetY;
-        }
-
-        private readonly List<ClickEffect> _clickEffects = new List<ClickEffect>();
-        private readonly List<ScrollEffect> _scrollEffects = new List<ScrollEffect>();
-        private readonly Timer _timer;
-
-        [DllImport("user32.dll")]
-        static extern int GetWindowLong(IntPtr hWnd, int nIndex);
-        [DllImport("user32.dll")]
-        static extern int SetWindowLong(IntPtr hWnd, int nIndex, int dwNewLong);
-        [DllImport("user32.dll")]
-        static extern bool SetLayeredWindowAttributes(IntPtr hwnd, uint crKey, byte bAlpha, uint dwFlags);
-
-        public OverlayForm()
-        {
-            this.FormBorderStyle = FormBorderStyle.None;
-            this.StartPosition = FormStartPosition.Manual;
-            this.ShowInTaskbar = false;
-            this.TopMost = true;
-
-            int left = SystemInformation.VirtualScreen.Left;
-            int top = SystemInformation.VirtualScreen.Top;
-            int width = SystemInformation.VirtualScreen.Width;
-            int height = SystemInformation.VirtualScreen.Height;
-
-            this.Bounds = new Rectangle(left, top, width, height);
-            this.BackColor = Color.Magenta;
-            this.TransparencyKey = Color.Magenta;
-            this.DoubleBuffered = true;
-
-            _timer = new Timer();
-            _timer.Interval = 16; // ~60 FPS
-            _timer.Tick += (s, e) => UpdateEffects();
-            _timer.Start();
-        }
-
-        protected override void OnHandleCreated(EventArgs e)
-        {
-            base.OnHandleCreated(e);
-            int initialStyle = GetWindowLong(this.Handle, -20);
-            SetWindowLong(this.Handle, -20, initialStyle | 0x00080000 | 0x00000020 | 0x00000008 | 0x08000000);
-            SetLayeredWindowAttributes(this.Handle, (uint)ColorToRGB(Color.Magenta), 0, 1);
-        }
-
-        private int ColorToRGB(Color c)
-        {
-            return c.R | (c.G << 8) | (c.B << 16);
-        }
-
-        public void AddClickEffect(int x, int y, bool isLeft)
-        {
-            lock (_clickEffects)
+            try
             {
-                _clickEffects.Add(new ClickEffect {
-                    X = x,
-                    Y = y,
-                    IsLeft = isLeft,
-                    Radius = 10,
-                    MaxRadius = isLeft ? 45 : 55,
-                    Alpha = 255
-                });
-            }
-        }
+                int left = SystemInformation.VirtualScreen.Left;
+                int top = SystemInformation.VirtualScreen.Top;
+                int width = SystemInformation.VirtualScreen.Width;
+                int height = SystemInformation.VirtualScreen.Height;
 
-        public void AddScrollEffect(int x, int y, bool isUp)
-        {
-            lock (_scrollEffects)
-            {
-                _scrollEffects.Add(new ScrollEffect {
-                    X = x,
-                    Y = y,
-                    IsUp = isUp,
-                    Alpha = 255,
-                    OffsetY = 0
-                });
-            }
-        }
+                System.Drawing.Point pt = Cursor.Position;
+                int normX = (int)Math.Max(0, Math.Min(65535, ((double)(pt.X - left) / Math.Max(1, width)) * 65535.0));
+                int normY = (int)Math.Max(0, Math.Min(65535, ((double)(pt.Y - top) / Math.Max(1, height)) * 65535.0));
 
-        private void UpdateEffects()
-        {
-            bool needRedraw = false;
-            lock (_clickEffects)
-            {
-                for (int i = _clickEffects.Count - 1; i >= 0; i--)
+                long timestamp = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
+
+                string cursorType = "IDC_ARROW";
+                CURSORINFO ci = new CURSORINFO();
+                ci.cbSize = Marshal.SizeOf(typeof(CURSORINFO));
+                if (GetCursorInfo(out ci) && ci.flags == 1)
                 {
-                    var eff = _clickEffects[i];
-                    eff.Radius += 2.5f;
-                    eff.Alpha -= 12f;
-                    if (eff.Alpha <= 0 || eff.Radius >= eff.MaxRadius)
-                    {
-                        _clickEffects.RemoveAt(i);
-                    }
-                    needRedraw = true;
+                    cursorType = ci.hCursor.ToString();
                 }
+
+                string json = string.Format(
+                    "{{\\"x\\":{0},\\"y\\":{1},\\"timestamp\\":{2},\\"cursor\\":\\"{3}\\",\\"click\\":\\"{4}\\",\\"scroll\\":\\"{5}\\"}}",
+                    normX, normY, timestamp, cursorType, _lastClick, _lastScroll
+                );
+
+                byte[] data = Encoding.UTF8.GetBytes(json);
+                _udpClient.Send(data, data.Length, _endPoint);
+
+                _lastClick = "none";
+                _lastScroll = "none";
             }
-
-            lock (_scrollEffects)
-            {
-                for (int i = _scrollEffects.Count - 1; i >= 0; i--)
-                {
-                    var eff = _scrollEffects[i];
-                    eff.OffsetY += eff.IsUp ? -1.5f : 1.5f;
-                    eff.Alpha -= 10f;
-                    if (eff.Alpha <= 0)
-                    {
-                        _scrollEffects.RemoveAt(i);
-                    }
-                    needRedraw = true;
-                }
-            }
-
-            // Always redraw to move yellow halo with mouse cursor
-            this.Invalidate();
-        }
-
-        protected override void OnPaint(PaintEventArgs e)
-        {
-            base.OnPaint(e);
-            Graphics g = e.Graphics;
-            g.SmoothingMode = SmoothingMode.AntiAlias;
-
-            Point cursorPt = Cursor.Position;
-            int cx = cursorPt.X - this.Left;
-            int cy = cursorPt.Y - this.Top;
-
-            // Option A: Yellow semi-transparent halo around mouse cursor
-            using (SolidBrush haloBrush = new SolidBrush(Color.FromArgb(70, 255, 235, 59)))
-            using (Pen haloPen = new Pen(Color.FromArgb(160, 255, 215, 0), 2))
-            {
-                int r = 24;
-                g.FillEllipse(haloBrush, cx - r, cy - r, r * 2, r * 2);
-                g.DrawEllipse(haloPen, cx - r, cy - r, r * 2, r * 2);
-            }
-
-            // Render click ripples (Left = Cyan, Right = Amber)
-            lock (_clickEffects)
-            {
-                foreach (var eff in _clickEffects)
-                {
-                    int x = eff.X - this.Left;
-                    int y = eff.Y - this.Top;
-                    int a = (int)Math.Max(0, Math.Min(255, eff.Alpha));
-                    Color color = eff.IsLeft ? Color.FromArgb(a, 0, 229, 255) : Color.FromArgb(a, 255, 152, 0);
-
-                    using (Pen pen = new Pen(color, eff.IsLeft ? 3.5f : 4.5f))
-                    {
-                        g.DrawEllipse(pen, x - eff.Radius, y - eff.Radius, eff.Radius * 2, eff.Radius * 2);
-                        if (!eff.IsLeft)
-                        {
-                            float innerR = Math.Max(2, eff.Radius - 12);
-                            g.DrawEllipse(pen, x - innerR, y - innerR, innerR * 2, innerR * 2);
-                        }
-                    }
-                }
-            }
-
-            // Render scroll wheel indicators (Cyan ▲ / ▼)
-            lock (_scrollEffects)
-            {
-                foreach (var eff in _scrollEffects)
-                {
-                    int x = eff.X - this.Left + 28;
-                    int y = (int)(eff.Y - this.Top + eff.OffsetY);
-                    int a = (int)Math.Max(0, Math.Min(255, eff.Alpha));
-
-                    using (SolidBrush bubbleBrush = new SolidBrush(Color.FromArgb(a, 15, 23, 42)))
-                    using (SolidBrush textBrush = new SolidBrush(Color.FromArgb(a, 56, 189, 248)))
-                    using (Font font = new Font("Segoe UI", 12, FontStyle.Bold))
-                    {
-                        g.FillEllipse(bubbleBrush, x - 12, y - 12, 24, 24);
-                        string text = eff.IsUp ? "▲" : "▼";
-                        g.DrawString(text, font, textBrush, x - 8, y - 11);
-                    }
-                }
-            }
+            catch {}
         }
     }
 }
@@ -325,7 +172,7 @@ namespace GridSightOverlay
 export class MouseHighlightOverlay {
   private process: ChildProcess | null = null;
 
-  start(): boolean {
+  start(multicastIp: string = '239.255.42.100', port: number = 9001): boolean {
     if (os.platform() !== 'win32') {
       logger.info('[MouseHighlight] Non-Windows platform; skipping mouse effect overlay.');
       return false;
@@ -355,19 +202,19 @@ export class MouseHighlightOverlay {
       }
 
       if (fs.existsSync(exePath)) {
-        logger.info('[MouseHighlight] Launching precompiled mouse effect overlay.');
-        this.process = spawn(exePath, [], { detached: true, stdio: 'ignore' });
+        logger.info('[MouseHighlight] Launching precompiled mouse pointer encoder.');
+        this.process = spawn(exePath, [multicastIp, String(port)], { detached: true, stdio: 'ignore' });
         return true;
       }
 
       // PowerShell fallback compile & run script
-      logger.info('[MouseHighlight] Launching mouse effect overlay via PowerShell fallback.');
+      logger.info('[MouseHighlight] Launching mouse pointer encoder via PowerShell fallback.');
       const psScript = `
 $code = @"
 ${CSHARP_EFFECT_SOURCE}
 "@
 Add-Type -TypeDefinition $code -ReferencedAssemblies "System.Windows.Forms","System.Drawing","System.Core"
-[GridSightOverlay.Program]::Main()
+[GridSightPointerEncoder.Program]::Main(@('${multicastIp}', '${port}'))
 `;
       const encodedScript = Buffer.from(psScript, 'utf16le').toString('base64');
       this.process = spawn('powershell.exe', ['-NoProfile', '-NonInteractive', '-EncodedCommand', encodedScript], {

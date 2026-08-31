@@ -6,15 +6,14 @@ import { logger } from './logger.js';
 
 /*
  * C# source for the transparent WinForms overlay process with Low-Level Mouse Hook (WH_MOUSE_LL).
- * Renders Option A effects:
- * - Yellow halo around cursor
- * - Cyan ripple on Left click
- * - Amber double-ripple on Right click
- * - Up/Down scroll indicator bubbles near cursor
- * Window flags: WS_EX_TRANSPARENT | WS_EX_LAYERED | WS_EX_TOPMOST | WS_EX_NOACTIVATE
- * Click-through enabled (does not block user inputs).
+ * Optimized V2 Performance Architecture:
+ * - Event-driven rendering: Animation timer only runs during active ripple/scroll effects (0 FPS idle).
+ * - Dirty-region invalidation: Only repaints invalid bounding boxes rather than the entire virtual desktop.
+ * - Cached GDI resources: Reuses Brushes, Pens, and Fonts to eliminate per-frame allocations.
+ * - Queue capping: Limits concurrent click and scroll effects (MAX = 8) to prevent backlog spikes.
+ * - Topmost, layered, click-through overlay (WS_EX_TRANSPARENT | WS_EX_LAYERED | WS_EX_TOPMOST | WS_EX_NOACTIVATE).
  */
-const CSHARP_EFFECT_SOURCE = `
+export const CSHARP_EFFECT_SOURCE = `
 using System;
 using System.Collections.Generic;
 using System.Drawing;
@@ -56,6 +55,7 @@ namespace GridSightOverlay
         private const uint LWA_COLORKEY = 0x00000001;
 
         private const int WH_MOUSE_LL = 14;
+        private const int WM_MOUSEMOVE = 0x0200;
         private const int WM_LBUTTONDOWN = 0x0201;
         private const int WM_RBUTTONDOWN = 0x0204;
         private const int WM_MOUSEWHEEL = 0x020A;
@@ -105,7 +105,11 @@ namespace GridSightOverlay
                 MSLLHOOKSTRUCT hookStruct = (MSLLHOOKSTRUCT)Marshal.PtrToStructure(lParam, typeof(MSLLHOOKSTRUCT));
                 int msg = wParam.ToInt32();
 
-                if (msg == WM_LBUTTONDOWN)
+                if (msg == WM_MOUSEMOVE)
+                {
+                    _form.UpdateCursorPosition(hookStruct.pt.x, hookStruct.pt.y);
+                }
+                else if (msg == WM_LBUTTONDOWN)
                 {
                     _form.AddClickEffect(hookStruct.pt.x, hookStruct.pt.y, true);
                 }
@@ -144,9 +148,31 @@ namespace GridSightOverlay
             public float OffsetY;
         }
 
+        private const int MAX_CLICK_EFFECTS = 8;
+        private const int MAX_SCROLL_EFFECTS = 8;
+
         private readonly List<ClickEffect> _clickEffects = new List<ClickEffect>();
         private readonly List<ScrollEffect> _scrollEffects = new List<ScrollEffect>();
         private readonly Timer _timer;
+        private readonly Timer _statsTimer;
+
+        // Cached GDI Objects
+        private readonly SolidBrush _haloBrush;
+        private readonly Pen _haloPen;
+        private readonly Pen _clickPen;
+        private readonly SolidBrush _scrollBubbleBrush;
+        private readonly SolidBrush _scrollTextBrush;
+        private readonly Font _scrollFont;
+
+        private Point _lastCursorPos = new Point(-9999, -9999);
+        private Rectangle _lastHaloRect = Rectangle.Empty;
+
+        // Telemetry
+        private int _paintCount = 0;
+        private int _mouseMoveCount = 0;
+        private int _clickCount = 0;
+        private int _scrollCount = 0;
+        private int _animFrameCount = 0;
 
         [DllImport("user32.dll")]
         static extern int GetWindowLong(IntPtr hWnd, int nIndex);
@@ -172,10 +198,24 @@ namespace GridSightOverlay
             this.TransparencyKey = Color.Magenta;
             this.DoubleBuffered = true;
 
+            // Initialize GDI resource cache
+            _haloBrush = new SolidBrush(Color.FromArgb(70, 255, 235, 59));
+            _haloPen = new Pen(Color.FromArgb(160, 255, 215, 0), 2);
+            _clickPen = new Pen(Color.Cyan, 3.5f);
+            _scrollBubbleBrush = new SolidBrush(Color.Black);
+            _scrollTextBrush = new SolidBrush(Color.White);
+            _scrollFont = new Font("Segoe UI", 12, FontStyle.Bold);
+
+            // Animation Timer (Event-driven: default stopped)
             _timer = new Timer();
             _timer.Interval = 16; // ~60 FPS
             _timer.Tick += (s, e) => UpdateEffects();
-            _timer.Start();
+
+            // Stats Telemetry Timer (5s interval)
+            _statsTimer = new Timer();
+            _statsTimer.Interval = 5000;
+            _statsTimer.Tick += (s, e) => LogStats();
+            _statsTimer.Start();
         }
 
         protected override void OnHandleCreated(EventArgs e)
@@ -191,50 +231,123 @@ namespace GridSightOverlay
             return c.R | (c.G << 8) | (c.B << 16);
         }
 
+        public void UpdateCursorPosition(int screenX, int screenY)
+        {
+            int cx = screenX - this.Left;
+            int cy = screenY - this.Top;
+            if (cx == _lastCursorPos.X && cy == _lastCursorPos.Y) return;
+
+            _mouseMoveCount++;
+            Rectangle oldRect = _lastHaloRect;
+            int r = 26; // halo radius 24 + 2 padding
+            Rectangle newRect = new Rectangle(cx - r, cy - r, r * 2, r * 2);
+
+            _lastCursorPos = new Point(cx, cy);
+            _lastHaloRect = newRect;
+
+            if (!oldRect.IsEmpty)
+            {
+                this.Invalidate(oldRect);
+            }
+            this.Invalidate(newRect);
+        }
+
         public void AddClickEffect(int x, int y, bool isLeft)
         {
+            _clickCount++;
+            int cx = x - this.Left;
+            int cy = y - this.Top;
             lock (_clickEffects)
             {
-                _clickEffects.Add(new ClickEffect {
-                    X = x,
-                    Y = y,
+                if (_clickEffects.Count >= MAX_CLICK_EFFECTS)
+                {
+                    var oldest = _clickEffects[0];
+                    int oldR = (int)Math.Ceiling(oldest.Radius) + 4;
+                    this.Invalidate(new Rectangle(oldest.X - oldR, oldest.Y - oldR, oldR * 2, oldR * 2));
+                    _clickEffects.RemoveAt(0);
+                }
+
+                var eff = new ClickEffect {
+                    X = cx,
+                    Y = cy,
                     IsLeft = isLeft,
                     Radius = 10,
                     MaxRadius = isLeft ? 45 : 55,
                     Alpha = 255
-                });
+                };
+                _clickEffects.Add(eff);
+                int r = (int)Math.Ceiling(eff.Radius) + 4;
+                this.Invalidate(new Rectangle(cx - r, cy - r, r * 2, r * 2));
             }
+
+            EnsureTimerRunning();
         }
 
         public void AddScrollEffect(int x, int y, bool isUp)
         {
+            _scrollCount++;
+            int cx = x - this.Left + 28;
+            int cy = y - this.Top;
             lock (_scrollEffects)
             {
-                _scrollEffects.Add(new ScrollEffect {
-                    X = x,
-                    Y = y,
+                if (_scrollEffects.Count >= MAX_SCROLL_EFFECTS)
+                {
+                    var oldest = _scrollEffects[0];
+                    int oldY = (int)(oldest.Y + oldest.OffsetY);
+                    this.Invalidate(new Rectangle(oldest.X - 16, oldY - 16, 32, 32));
+                    _scrollEffects.RemoveAt(0);
+                }
+
+                var eff = new ScrollEffect {
+                    X = cx,
+                    Y = cy,
                     IsUp = isUp,
                     Alpha = 255,
                     OffsetY = 0
-                });
+                };
+                _scrollEffects.Add(eff);
+                this.Invalidate(new Rectangle(cx - 16, cy - 16, 32, 32));
+            }
+
+            EnsureTimerRunning();
+        }
+
+        private void EnsureTimerRunning()
+        {
+            if (!_timer.Enabled)
+            {
+                _timer.Start();
             }
         }
 
         private void UpdateEffects()
         {
-            bool needRedraw = false;
+            _animFrameCount++;
+            bool hasActiveEffects = false;
+
             lock (_clickEffects)
             {
                 for (int i = _clickEffects.Count - 1; i >= 0; i--)
                 {
                     var eff = _clickEffects[i];
+                    int prevR = (int)Math.Ceiling(eff.Radius) + 4;
+                    Rectangle prevRect = new Rectangle(eff.X - prevR, eff.Y - prevR, prevR * 2, prevR * 2);
+
                     eff.Radius += 2.5f;
                     eff.Alpha -= 12f;
+
                     if (eff.Alpha <= 0 || eff.Radius >= eff.MaxRadius)
                     {
                         _clickEffects.RemoveAt(i);
+                        this.Invalidate(prevRect);
                     }
-                    needRedraw = true;
+                    else
+                    {
+                        int nextR = (int)Math.Ceiling(eff.Radius) + 4;
+                        Rectangle nextRect = new Rectangle(eff.X - nextR, eff.Y - nextR, nextR * 2, nextR * 2);
+                        this.Invalidate(Rectangle.Union(prevRect, nextRect));
+                        hasActiveEffects = true;
+                    }
                 }
             }
 
@@ -243,22 +356,42 @@ namespace GridSightOverlay
                 for (int i = _scrollEffects.Count - 1; i >= 0; i--)
                 {
                     var eff = _scrollEffects[i];
+                    int prevY = (int)(eff.Y + eff.OffsetY);
+                    Rectangle prevRect = new Rectangle(eff.X - 16, prevY - 16, 32, 32);
+
                     eff.OffsetY += eff.IsUp ? -1.5f : 1.5f;
                     eff.Alpha -= 10f;
+
                     if (eff.Alpha <= 0)
                     {
                         _scrollEffects.RemoveAt(i);
+                        this.Invalidate(prevRect);
                     }
-                    needRedraw = true;
+                    else
+                    {
+                        int nextY = (int)(eff.Y + eff.OffsetY);
+                        Rectangle nextRect = new Rectangle(eff.X - 16, nextY - 16, 32, 32);
+                        this.Invalidate(Rectangle.Union(prevRect, nextRect));
+                        hasActiveEffects = true;
+                    }
                 }
             }
 
-            // Always redraw to move yellow halo with mouse cursor
-            this.Invalidate();
+            if (!hasActiveEffects)
+            {
+                _timer.Stop();
+            }
+        }
+
+        private void LogStats()
+        {
+            Console.WriteLine(string.Format("[MouseHighlight Stats] paint={0} mouseMove={1} click={2} scroll={3} animFrames={4} activeClick={5} activeScroll={6}",
+                _paintCount, _mouseMoveCount, _clickCount, _scrollCount, _animFrameCount, _clickEffects.Count, _scrollEffects.Count));
         }
 
         protected override void OnPaint(PaintEventArgs e)
         {
+            _paintCount++;
             base.OnPaint(e);
             Graphics g = e.Graphics;
             g.SmoothingMode = SmoothingMode.AntiAlias;
@@ -267,33 +400,26 @@ namespace GridSightOverlay
             int cx = cursorPt.X - this.Left;
             int cy = cursorPt.Y - this.Top;
 
-            // Option A: Yellow semi-transparent halo around mouse cursor
-            using (SolidBrush haloBrush = new SolidBrush(Color.FromArgb(70, 255, 235, 59)))
-            using (Pen haloPen = new Pen(Color.FromArgb(160, 255, 215, 0), 2))
-            {
-                int r = 24;
-                g.FillEllipse(haloBrush, cx - r, cy - r, r * 2, r * 2);
-                g.DrawEllipse(haloPen, cx - r, cy - r, r * 2, r * 2);
-            }
+            // Yellow semi-transparent halo around mouse cursor
+            int r = 24;
+            g.FillEllipse(_haloBrush, cx - r, cy - r, r * 2, r * 2);
+            g.DrawEllipse(_haloPen, cx - r, cy - r, r * 2, r * 2);
 
             // Render click ripples (Left = Cyan, Right = Amber)
             lock (_clickEffects)
             {
                 foreach (var eff in _clickEffects)
                 {
-                    int x = eff.X - this.Left;
-                    int y = eff.Y - this.Top;
                     int a = (int)Math.Max(0, Math.Min(255, eff.Alpha));
                     Color color = eff.IsLeft ? Color.FromArgb(a, 0, 229, 255) : Color.FromArgb(a, 255, 152, 0);
+                    _clickPen.Color = color;
+                    _clickPen.Width = eff.IsLeft ? 3.5f : 4.5f;
 
-                    using (Pen pen = new Pen(color, eff.IsLeft ? 3.5f : 4.5f))
+                    g.DrawEllipse(_clickPen, eff.X - eff.Radius, eff.Y - eff.Radius, eff.Radius * 2, eff.Radius * 2);
+                    if (!eff.IsLeft)
                     {
-                        g.DrawEllipse(pen, x - eff.Radius, y - eff.Radius, eff.Radius * 2, eff.Radius * 2);
-                        if (!eff.IsLeft)
-                        {
-                            float innerR = Math.Max(2, eff.Radius - 12);
-                            g.DrawEllipse(pen, x - innerR, y - innerR, innerR * 2, innerR * 2);
-                        }
+                        float innerR = Math.Max(2, eff.Radius - 12);
+                        g.DrawEllipse(_clickPen, eff.X - innerR, eff.Y - innerR, innerR * 2, innerR * 2);
                     }
                 }
             }
@@ -303,20 +429,34 @@ namespace GridSightOverlay
             {
                 foreach (var eff in _scrollEffects)
                 {
-                    int x = eff.X - this.Left + 28;
-                    int y = (int)(eff.Y - this.Top + eff.OffsetY);
+                    int x = eff.X;
+                    int y = (int)(eff.Y + eff.OffsetY);
                     int a = (int)Math.Max(0, Math.Min(255, eff.Alpha));
 
-                    using (SolidBrush bubbleBrush = new SolidBrush(Color.FromArgb(a, 15, 23, 42)))
-                    using (SolidBrush textBrush = new SolidBrush(Color.FromArgb(a, 56, 189, 248)))
-                    using (Font font = new Font("Segoe UI", 12, FontStyle.Bold))
-                    {
-                        g.FillEllipse(bubbleBrush, x - 12, y - 12, 24, 24);
-                        string text = eff.IsUp ? "▲" : "▼";
-                        g.DrawString(text, font, textBrush, x - 8, y - 11);
-                    }
+                    _scrollBubbleBrush.Color = Color.FromArgb(a, 15, 23, 42);
+                    _scrollTextBrush.Color = Color.FromArgb(a, 56, 189, 248);
+
+                    g.FillEllipse(_scrollBubbleBrush, x - 12, y - 12, 24, 24);
+                    string text = eff.IsUp ? "▲" : "▼";
+                    g.DrawString(text, _scrollFont, _scrollTextBrush, x - 8, y - 11);
                 }
             }
+        }
+
+        protected override void Dispose(bool disposing)
+        {
+            if (disposing)
+            {
+                _timer?.Dispose();
+                _statsTimer?.Dispose();
+                _haloBrush?.Dispose();
+                _haloPen?.Dispose();
+                _clickPen?.Dispose();
+                _scrollBubbleBrush?.Dispose();
+                _scrollTextBrush?.Dispose();
+                _scrollFont?.Dispose();
+            }
+            base.Dispose(disposing);
         }
     }
 }

@@ -716,7 +716,7 @@ bool Utils::DownloadAndOpenFile(const std::string& url, const std::string& raw_f
     setsockopt(s, SOL_SOCKET, SO_SNDTIMEO, &timeout, sizeof(timeout));
 #endif
 
-    sockaddr_in addr = {0};
+    sockaddr_in addr{};
     addr.sin_family = AF_INET;
     addr.sin_port = htons(port);
     inet_pton(AF_INET, host.c_str(), &addr.sin_addr);
@@ -972,15 +972,18 @@ void Utils::ShutdownSystem() {
     // 2. Call ExitWindowsEx
     ExitWindowsEx(EWX_SHUTDOWN | EWX_FORCE, SHTDN_REASON_MAJOR_OTHER | SHTDN_REASON_FLAG_PLANNED);
     // 3. Fallback to system shutdown command
-    std::system("shutdown /s /f /t 0");
+    int res = std::system("shutdown /s /f /t 0");
+    (void)res;
 #else
-    std::system("shutdown -h now || sudo shutdown -h now");
+    int res = std::system("shutdown -h now || sudo shutdown -h now");
+    (void)res;
 #endif
 }
 
+static std::atomic<bool> g_shutdown_cancelled{false};
+
 #ifdef _WIN32
 static std::atomic<bool> g_shutdown_window_active{false};
-static std::atomic<bool> g_shutdown_cancelled{false};
 static std::atomic<int> g_remaining_shutdown_seconds{30};
 static HWND g_shutdown_hwnd = NULL;
 

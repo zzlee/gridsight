@@ -146,9 +146,10 @@ export class MulticastDiscoveryService {
             lastSeen: Date.now(),
           };
 
+          const isNew = !this.activeDevices.has(mac);
           this.activeDevices.set(mac, agent);
 
-          if (this.onDeviceDiscovered) {
+          if (isNew && this.onDeviceDiscovered) {
             this.onDeviceDiscovered(agent);
           }
         }

@@ -13,13 +13,19 @@
 
 using namespace Gdiplus;
 
+enum ClickType {
+    CLICK_LEFT,
+    CLICK_RIGHT,
+    CLICK_MIDDLE
+};
+
 struct ClickEffect {
     int x;
     int y;
     float radius;
     float max_radius;
     float alpha;
-    bool is_left;
+    ClickType type;
 };
 
 struct ScrollEffect {
@@ -40,20 +46,20 @@ static const int MAX_EFFECTS = 8;
 
 static void EnsureTimer() {
     if (g_anim_timer == 0 && g_hwnd) {
-        g_anim_timer = SetTimer(g_hwnd, 1, 16, NULL); // ~60 FPS
+        g_anim_timer = SetTimer(g_hwnd, 1, 16, NULL); // ~60 FPS animation
     }
 }
 
 static void InvalidateHalo(int x, int y) {
     if (!g_hwnd) return;
-    int r = 36;
+    int r = 24; // Compact halo bounds
     RECT rc = { x - r, y - r, x + r, y + r };
     InvalidateRect(g_hwnd, &rc, FALSE);
 }
 
 static void InvalidateArea(int x, int y, int radius) {
     if (!g_hwnd) return;
-    int r = radius + 10;
+    int r = radius + 6;
     RECT rc = { x - r, y - r, x + r, y + r };
     InvalidateRect(g_hwnd, &rc, FALSE);
 }
@@ -67,18 +73,20 @@ LRESULT CALLBACK MouseHookProc(int nCode, WPARAM wParam, LPARAM lParam) {
             g_last_cursor_pos = hook->pt;
             InvalidateHalo(old_x, old_y);
             InvalidateHalo(hook->pt.x, hook->pt.y);
-        } else if (wParam == WM_LBUTTONDOWN || wParam == WM_RBUTTONDOWN) {
-            bool is_left = (wParam == WM_LBUTTONDOWN);
+        } else if (wParam == WM_LBUTTONDOWN || wParam == WM_RBUTTONDOWN || wParam == 0x0207 /* WM_MBUTTONDOWN */) {
+            ClickType type = (wParam == WM_LBUTTONDOWN) ? CLICK_LEFT : 
+                             (wParam == WM_RBUTTONDOWN) ? CLICK_RIGHT : CLICK_MIDDLE;
+            
             if (g_click_effects.size() >= MAX_EFFECTS) {
                 g_click_effects.erase(g_click_effects.begin());
             }
             ClickEffect eff;
             eff.x = hook->pt.x;
             eff.y = hook->pt.y;
-            eff.radius = 12.0f;
-            eff.max_radius = is_left ? 46.0f : 54.0f;
+            eff.radius = (type == CLICK_RIGHT) ? 8.0f : 6.0f;
+            eff.max_radius = (type == CLICK_LEFT) ? 32.0f : (type == CLICK_RIGHT) ? 38.0f : 28.0f;
             eff.alpha = 240.0f;
-            eff.is_left = is_left;
+            eff.type = type;
             g_click_effects.push_back(eff);
             EnsureTimer();
             InvalidateArea(hook->pt.x, hook->pt.y, (int)eff.max_radius);
@@ -92,11 +100,11 @@ LRESULT CALLBACK MouseHookProc(int nCode, WPARAM wParam, LPARAM lParam) {
             eff.x = hook->pt.x;
             eff.y = hook->pt.y;
             eff.offset_y = 0.0f;
-            eff.alpha = 240.0f;
+            eff.alpha = 230.0f;
             eff.is_up = is_up;
             g_scroll_effects.push_back(eff);
             EnsureTimer();
-            InvalidateArea(hook->pt.x, hook->pt.y, 40);
+            InvalidateArea(hook->pt.x, hook->pt.y, 25);
         }
     }
     return CallNextHookEx(g_hook, nCode, wParam, lParam);
@@ -110,11 +118,11 @@ LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) {
     case WM_TIMER:
         if (wParam == 1) {
             bool has_active = false;
-            // Update click effects
+            // Update click ripple animations
             for (size_t i = 0; i < g_click_effects.size(); ) {
                 auto& eff = g_click_effects[i];
-                eff.radius += (eff.max_radius - eff.radius) * 0.28f + 0.8f;
-                eff.alpha -= 16.0f;
+                eff.radius += (eff.max_radius - eff.radius) * 0.32f + 0.6f;
+                eff.alpha -= 18.0f;
                 InvalidateArea(eff.x, eff.y, (int)eff.max_radius);
                 if (eff.alpha <= 0.0f || eff.radius >= eff.max_radius) {
                     g_click_effects.erase(g_click_effects.begin() + i);
@@ -124,12 +132,12 @@ LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) {
                 }
             }
 
-            // Update scroll effects
+            // Update scroll wheel floating indicator animations
             for (size_t i = 0; i < g_scroll_effects.size(); ) {
                 auto& eff = g_scroll_effects[i];
-                eff.offset_y += eff.is_up ? -2.2f : 2.2f;
-                eff.alpha -= 14.0f;
-                InvalidateArea(eff.x, eff.y + (int)eff.offset_y, 30);
+                eff.offset_y += eff.is_up ? -1.8f : 1.8f;
+                eff.alpha -= 16.0f;
+                InvalidateArea(eff.x, eff.y + (int)eff.offset_y, 25);
                 if (eff.alpha <= 0.0f) {
                     g_scroll_effects.erase(g_scroll_effects.begin() + i);
                 } else {
@@ -174,38 +182,77 @@ LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) {
             int cx = pt.x;
             int cy = pt.y;
 
-            // Halo (Yellow, radius 24)
-            SolidBrush haloBrush(Color(100, 255, 235, 59));
-            Pen haloPen(Color(180, 255, 193, 7), 1.8f);
-            int r = 24;
-            g.FillEllipse(&haloBrush, cx - r, cy - r, r * 2, r * 2);
-            g.DrawEllipse(&haloPen, cx - r, cy - r, r * 2, r * 2);
+            // 1. Compact, subtle, non-obstructive Idle Halo (Radius 13, hollow center with faint glow)
+            int r = 13;
+            SolidBrush faintGlow(Color(25, 255, 235, 59));   // 10% opacity center
+            Pen ringPen(Color(140, 255, 193, 7), 1.5f);        // Subtle yellow outline
+            g.FillEllipse(&faintGlow, cx - r, cy - r, r * 2, r * 2);
+            g.DrawEllipse(&ringPen, cx - r, cy - r, r * 2, r * 2);
 
-            // Click Ripples
+            // 2. Click Ripple Animations
             for (const auto& eff : g_click_effects) {
                 int a = (int)std::max(0.0f, std::min(255.0f, eff.alpha));
-                Color color = eff.is_left ? Color(a, 0, 229, 255) : Color(a, 255, 152, 0);
-                Pen clickPen(color, eff.is_left ? 3.5f : 4.5f);
-                g.DrawEllipse(&clickPen, eff.x - eff.radius, eff.y - eff.radius, eff.radius * 2, eff.radius * 2);
-                if (!eff.is_left) {
-                    float inner_r = std::max(2.0f, eff.radius - 12.0f);
-                    g.DrawEllipse(&clickPen, eff.x - inner_r, eff.y - inner_r, inner_r * 2, inner_r * 2);
+                
+                if (eff.type == CLICK_LEFT) {
+                    // Left Click: Bright Cyan Expanding Wave + Center Click Dot
+                    Pen leftPen(Color(a, 0, 229, 255), 2.2f);
+                    g.DrawEllipse(&leftPen, eff.x - eff.radius, eff.y - eff.radius, eff.radius * 2, eff.radius * 2);
+                    
+                    if (eff.radius < 16.0f) {
+                        SolidBrush dotBrush(Color(a, 0, 229, 255));
+                        g.FillEllipse(&dotBrush, eff.x - 3, eff.y - 3, 6, 6);
+                    }
+                } else if (eff.type == CLICK_RIGHT) {
+                    // Right Click: Double Concentric Amber/Orange Rings
+                    Pen rightPen1(Color(a, 255, 152, 0), 2.4f);
+                    Pen rightPen2(Color((int)(a * 0.7f), 255, 87, 34), 1.4f);
+                    g.DrawEllipse(&rightPen1, eff.x - eff.radius, eff.y - eff.radius, eff.radius * 2, eff.radius * 2);
+                    float inner_r = std::max(2.0f, eff.radius - 9.0f);
+                    g.DrawEllipse(&rightPen2, eff.x - inner_r, eff.y - inner_r, inner_r * 2, inner_r * 2);
+                } else {
+                    // Middle Click: Violet/Purple Ring Pulse
+                    Pen midPen(Color(a, 168, 85, 247), 2.2f);
+                    g.DrawEllipse(&midPen, eff.x - eff.radius, eff.y - eff.radius, eff.radius * 2, eff.radius * 2);
                 }
             }
 
-            // Scroll arrows
+            // 3. Scroll Wheel Floating Indicators (Micro-Bubble with ▲ / ▼)
             FontFamily fontFamily(L"Segoe UI");
-            Font font(&fontFamily, 11, FontStyleBold, UnitPixel);
+            Font font(&fontFamily, 9, FontStyleBold, UnitPixel);
             for (const auto& eff : g_scroll_effects) {
                 int a = (int)std::max(0.0f, std::min(255.0f, eff.alpha));
-                SolidBrush bubbleBrush(Color(a, 15, 23, 42));
+                SolidBrush bubbleBrush(Color((int)(a * 0.75f), 15, 23, 42));
                 SolidBrush textBrush(Color(a, 56, 189, 248));
-                int x = eff.x;
-                int y = (int)(eff.y + eff.offset_y);
-                g.FillEllipse(&bubbleBrush, x - 12, y - 12, 24, 24);
+                Pen bubblePen(Color((int)(a * 0.5f), 56, 189, 248), 1.0f);
+                
+                int x = eff.x + 12; // Offset to bottom-right of cursor
+                int y = (int)(eff.y + eff.offset_y + 6);
+                int bw = 16;
+                int bh = 16;
+                
+                g.FillEllipse(&bubbleBrush, x - bw/2, y - bh/2, bw, bh);
+                g.DrawEllipse(&bubblePen, x - bw/2, y - bh/2, bw, bh);
+                
                 const wchar_t* arrow = eff.is_up ? L"▲" : L"▼";
-                PointF origin((REAL)(x - 7), (REAL)(y - 7));
+                PointF origin((REAL)(x - 5), (REAL)(y - 6));
                 g.DrawString(arrow, -1, &font, origin, &textBrush);
+            }
+
+            // 4. Render exact Real-Time Windows Cursor Icon on top of halo/animations
+            CURSORINFO ci = { sizeof(CURSORINFO) };
+            if (GetCursorInfo(&ci) && (ci.flags & CURSOR_SHOWING) && ci.hCursor) {
+                ICONINFO ii = { 0 };
+                if (GetIconInfo(ci.hCursor, &ii)) {
+                    DrawIconEx(memDC, 
+                               cx - ii.xHotspot, 
+                               cy - ii.yHotspot, 
+                               ci.hCursor, 
+                               0, 0, 0, NULL, DI_NORMAL);
+                    if (ii.hbmColor) DeleteObject(ii.hbmColor);
+                    if (ii.hbmMask) DeleteObject(ii.hbmMask);
+                } else {
+                    DrawIconEx(memDC, cx, cy, ci.hCursor, 0, 0, 0, NULL, DI_NORMAL);
+                }
             }
         }
 

@@ -166,9 +166,9 @@ export class TeacherBroadcastStreamer {
       appendScale();
     } else if (platform === 'win32') {
       // macOS is not a supported platform (see docs/roadmap.md)
-      // Option 1: Console-side composed capture with mouse cursor halo & click effects (gdigrab draw_mouse)
-      logger.info('[Broadcast] Using Option 1: Console-side composed capture with mouse cursor halo & click effects');
-      inputArgs = ['-f', 'gdigrab', '-draw_mouse', '1', '-framerate', String(fps), '-i', 'desktop'];
+      // Option 1: Console-side composed capture with authentic mouse cursor icon, halo & click effects
+      logger.info('[Broadcast] Using Option 1: Console-side composed capture with authentic mouse cursor icon, halo & click effects');
+      inputArgs = ['-f', 'gdigrab', '-draw_mouse', '0', '-framerate', String(fps), '-i', 'desktop'];
       appendScale();
     } else {
       // Linux: omit -video_size so x11grab captures the full screen at native resolution

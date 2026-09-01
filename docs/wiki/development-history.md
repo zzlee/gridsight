@@ -161,6 +161,7 @@ timeline
 | **v5.8.0** | 2026-08 | `FocusModal.tsx`, `beacon/*` | 焦點監看截圖 JPEG/PNG 切換（含檔案大小顯示）；移除學生端入站埠 8080/8081（改為出站中繼） |
 | **v5.8.1** | 2026-08 | `server.ts` 等 | 統一版本號單一來源，消除 `5.8.0` 殘留 drift |
 | **v5.8.3** | 2026-08 | `broadcastStreamer.ts`, `TopNav.tsx`, `BroadcastTestModal.tsx` | 教師全體廣播三檔品質（高/中/低）選擇、螢幕擷取解析度縮放、`/api/broadcast/status` 回報品質 |
+| **v5.8.4** | 2026-09 | `mouse_overlay.cpp`, `TopNav.tsx`, `broadcastStreamer.ts` | 預編譯原生獨立滑鼠特效（True Alpha 32-bit ARGB、微型透光光圈、GDI+ 真實 Windows 游標圖示）、廣播流量即時整合 HUD、遠端撤銷關機 (`CANCEL_SHUTDOWN`)、分發失敗重試與 Ubuntu 即時除錯 Agent |
 
 ---
 

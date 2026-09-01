@@ -141,7 +141,7 @@ class UbuntuAgentDebugger:
             try:
                 payload = json.dumps({
                     "type": "BEACON",
-                    "version": "5.8.3",
+                    "version": "5.8.4",
                     "hostname": self.hostname,
                     "ip": self.local_ip,
                     "mac": self.mac,
@@ -149,7 +149,7 @@ class UbuntuAgentDebugger:
                     "active_window": "GridSight Debugger Console",
                     "timestamp": int(time.time() * 1000),
                     "specs": {
-                        "agent_version": "5.8.3",
+                        "agent_version": "5.8.4",
                         "os": "Ubuntu Linux (x64)",
                         "uptime": 3600,
                         "cpu": {"model": "Intel Core", "cores": 8, "usage_percent": 12.5},

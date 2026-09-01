@@ -132,19 +132,36 @@ static void RenderAndCommit() {
 
         // 4. Authentic Real-Time Windows Cursor Icon on top
         CURSORINFO ci = { sizeof(CURSORINFO) };
+        bool drew_cursor = false;
         if (GetCursorInfo(&ci) && (ci.flags & CURSOR_SHOWING) && ci.hCursor) {
             ICONINFO ii = { 0 };
             if (GetIconInfo(ci.hCursor, &ii)) {
-                DrawIconEx(g_memDC,
-                           cx - ii.xHotspot,
-                           cy - ii.yHotspot,
-                           ci.hCursor,
-                           0, 0, 0, NULL, DI_NORMAL);
+                Bitmap* pBmp = Bitmap::FromHICON(ci.hCursor);
+                if (pBmp && pBmp->GetLastStatus() == Ok && pBmp->GetWidth() > 0) {
+                    g.DrawImage(pBmp, cx - (int)ii.xHotspot, cy - (int)ii.yHotspot);
+                    drew_cursor = true;
+                    delete pBmp;
+                }
                 if (ii.hbmColor) DeleteObject(ii.hbmColor);
                 if (ii.hbmMask) DeleteObject(ii.hbmMask);
-            } else {
-                DrawIconEx(g_memDC, cx, cy, ci.hCursor, 0, 0, 0, NULL, DI_NORMAL);
             }
+        }
+
+        if (!drew_cursor) {
+            // High-precision standard Windows Arrow Pointer (Hotspot at cx, cy)
+            Point arrowPts[7] = {
+                Point(cx, cy),
+                Point(cx, cy + 18),
+                Point(cx + 4, cy + 14),
+                Point(cx + 8, cy + 22),
+                Point(cx + 11, cy + 21),
+                Point(cx + 7, cy + 13),
+                Point(cx + 13, cy + 13)
+            };
+            SolidBrush arrowFill(Color(255, 255, 255, 255));
+            Pen arrowBorder(Color(255, 0, 0, 0), 1.6f);
+            g.FillPolygon(&arrowFill, arrowPts, 7);
+            g.DrawPolygon(&arrowBorder, arrowPts, 7);
         }
     }
 

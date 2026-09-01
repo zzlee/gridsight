@@ -89,6 +89,7 @@ export class TeacherBroadcastStreamer {
   private killTimers = new Set<NodeJS.Timeout>();
   private currentSourceType: string = 'screen';
   private currentQuality: BroadcastQuality | null = null;
+  private currentBitrateKbps: number = 0;
   private mouseOverlay = new MouseHighlightOverlay();
 
   getMode(): string | null {
@@ -97,6 +98,10 @@ export class TeacherBroadcastStreamer {
 
   getQuality(): BroadcastQuality | null {
     return this.isStreaming ? this.currentQuality : null;
+  }
+
+  getBitrateKbps(): number {
+    return this.isStreaming ? this.currentBitrateKbps : 0;
   }
 
   async startStream(options: StreamerOptions = {}): Promise<StreamStartResult> {
@@ -236,6 +241,7 @@ export class TeacherBroadcastStreamer {
     this.process = child;
     this.isStreaming = true;
     this.currentSourceType = sourceType;
+    this.currentBitrateKbps = bitrate;
     this.currentQuality =
       options.quality && options.quality in QUALITY_PRESETS ? options.quality : null;
 
@@ -283,6 +289,7 @@ export class TeacherBroadcastStreamer {
     this.isStreaming = false;
     this.currentSourceType = 'screen';
     this.currentQuality = null;
+    this.currentBitrateKbps = 0;
 
     if (child && child.exitCode === null) {
       try {

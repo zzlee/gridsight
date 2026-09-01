@@ -83,6 +83,7 @@ export const TopNav: React.FC<TopNavProps> = ({
   const [isBroadcasting, setIsBroadcasting] = useState(false);
   const [broadcastLoading, setBroadcastLoading] = useState(false);
   const [broadcastQuality, setBroadcastQuality] = useState<BroadcastQuality>('medium');
+  const [broadcastBitrateKbps, setBroadcastBitrateKbps] = useState<number>(0);
   const [qualityMenuOpen, setQualityMenuOpen] = useState(false);
   const qualityMenuRef = useRef<HTMLDivElement>(null);
 
@@ -93,16 +94,18 @@ export const TopNav: React.FC<TopNavProps> = ({
         const resp = await AuthService.fetchWithAuth('/api/broadcast/status');
         if (resp.ok) {
           const data = await resp.json();
-          setIsBroadcasting(!!data.active);
+          const active = !!data.active;
+          setIsBroadcasting(active);
           if (data.quality && data.quality in QUALITY_PRESETS) {
             setBroadcastQuality(data.quality);
           }
+          setBroadcastBitrateKbps(active ? (data.bitrateKbps || QUALITY_PRESETS[(data.quality || 'medium') as BroadcastQuality]?.bitrateKbps || 4000) : 0);
         }
       } catch {}
     };
 
     checkBroadcastStatus();
-    const interval = setInterval(checkBroadcastStatus, 3000);
+    const interval = setInterval(checkBroadcastStatus, 2000);
     return () => clearInterval(interval);
   }, []);
 
@@ -199,27 +202,45 @@ export const TopNav: React.FC<TopNavProps> = ({
         {mode === 'MONITOR' && (
           <div className="flex items-center space-x-2.5 animate-in fade-in duration-200">
             {/* Real-time Network Traffic HUD */}
-            {trafficStats && (
-              <div className="flex items-center space-x-2.5 px-2.5 py-1 bg-slate-900/90 border border-slate-800 rounded-lg text-xs font-mono shadow-inner">
-                <div className="flex items-center space-x-1.5">
-                  <span
-                    className={`w-2 h-2 rounded-full ${
-                      trafficStats.bytesPerSec > 0 ? 'bg-emerald-400 animate-pulse' : 'bg-slate-600'
-                    }`}
-                  />
-                  <span className="text-slate-400 text-[11px]">流量:</span>
-                  <span className="text-emerald-400 font-bold">
-                    {trafficStats.bytesPerSec >= 1048576
-                      ? `${(trafficStats.bytesPerSec / 1048576).toFixed(2)} MB/s`
-                      : `${Math.round(trafficStats.bytesPerSec / 1024)} KB/s`}
-                  </span>
+            {trafficStats && (() => {
+              const bcastBytesPerSec = isBroadcasting
+                ? ((broadcastBitrateKbps || QUALITY_PRESETS[broadcastQuality]?.bitrateKbps || 4000) * 1000) / 8
+                : 0;
+              const totalBps = (trafficStats.bytesPerSec || 0) + bcastBytesPerSec;
+              return (
+                <div
+                  className="flex items-center space-x-2 px-2.5 py-1 bg-slate-900/90 border border-slate-800 rounded-lg text-xs font-mono shadow-inner"
+                  title={isBroadcasting
+                    ? `監看縮圖: ${Math.round((trafficStats.bytesPerSec || 0) / 1024)} KB/s + 全體廣播: ${Math.round(bcastBytesPerSec / 1024)} KB/s`
+                    : '常態縮圖監看流量'}
+                >
+                  <div className="flex items-center space-x-1.5">
+                    <span
+                      className={`w-2 h-2 rounded-full ${
+                        totalBps > 0
+                          ? isBroadcasting ? 'bg-purple-400 animate-pulse' : 'bg-emerald-400 animate-pulse'
+                          : 'bg-slate-600'
+                      }`}
+                    />
+                    <span className="text-slate-400 text-[11px]">流量:</span>
+                    <span className={`font-bold ${isBroadcasting ? 'text-purple-300' : 'text-emerald-400'}`}>
+                      {totalBps >= 1048576
+                        ? `${(totalBps / 1048576).toFixed(2)} MB/s`
+                        : `${Math.round(totalBps / 1024)} KB/s`}
+                    </span>
+                    {isBroadcasting && (
+                      <span className="text-[10px] text-purple-400 font-sans px-1 py-0.2 bg-purple-950/80 border border-purple-800/60 rounded">
+                        廣播
+                      </span>
+                    )}
+                  </div>
+                  <span className="text-slate-700">|</span>
+                  <div className="text-[11px] text-slate-400">
+                    視口: <b className="text-sky-400">{trafficStats.polledCount}</b>/{trafficStats.onlineCount}
+                  </div>
                 </div>
-                <span className="text-slate-700">|</span>
-                <div className="text-[11px] text-slate-400">
-                  視口: <b className="text-sky-400">{trafficStats.polledCount}</b>/{trafficStats.onlineCount}
-                </div>
-              </div>
-            )}
+              );
+            })()}
 
             {/* H.264 RTP Multicast Screen Broadcast Button + Quality Selector */}
             <div ref={qualityMenuRef} className="relative flex items-center">

@@ -556,7 +556,12 @@ app.post('/api/broadcast/stop', requireTeacherAuth, (req, res) => {
 });
 
 app.get('/api/broadcast/status', requireTeacherAuth, (req, res) => {
-  res.json({ active: broadcastStreamer.isActive(), mode: broadcastStreamer.getMode(), quality: broadcastStreamer.getQuality() });
+  res.json({
+    active: broadcastStreamer.isActive(),
+    mode: broadcastStreamer.getMode(),
+    quality: broadcastStreamer.getQuality(),
+    bitrateKbps: broadcastStreamer.getBitrateKbps(),
+  });
 });
 
 // Route: Broadcast Test - upload a media file for RTP multicast test streaming

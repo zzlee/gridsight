@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { AuthService } from '../../services/authService';
-import { FolderUp, X, Send, CheckCircle2, AlertCircle, Laptop, File, UploadCloud } from 'lucide-react';
+import { FolderUp, X, Send, CheckCircle2, AlertCircle, Laptop, File, UploadCloud, RotateCcw } from 'lucide-react';
 
 interface ShareFileModalProps {
   isOpen: boolean;
@@ -313,22 +313,35 @@ export const ShareFileModal: React.FC<ShareFileModalProps> = ({
           )}
 
           {/* Action Buttons */}
-          <div className="flex items-center justify-end space-x-3 pt-2">
-            <button
-              type="button"
-              onClick={onClose}
-              className="px-4 py-2 rounded-xl text-xs font-medium text-slate-400 hover:text-slate-200 hover:bg-slate-800 transition-colors"
-            >
-              取消
-            </button>
-            <button
-              type="submit"
-              disabled={isLoading || !selectedFile}
-              className="flex items-center space-x-2 px-5 py-2 rounded-xl bg-amber-600 hover:bg-amber-500 text-slate-950 font-bold text-xs transition-all shadow-lg shadow-amber-600/30 disabled:opacity-50 disabled:cursor-not-allowed active:scale-95"
-            >
-              <Send className="w-4 h-4" />
-              <span>{isLoading ? '傳送中...' : '發送檔案給學生'}</span>
-            </button>
+          <div className="flex items-center justify-between pt-2">
+            {stats && stats.failed > 0 ? (
+              <button
+                type="submit"
+                disabled={isLoading || !selectedFile}
+                className="flex items-center space-x-1.5 px-3.5 py-2 rounded-xl bg-amber-600/20 hover:bg-amber-600/30 text-amber-300 border border-amber-500/40 text-xs font-semibold transition-all disabled:opacity-50"
+              >
+                <RotateCcw className="w-3.5 h-3.5" />
+                <span>重試失敗機台</span>
+              </button>
+            ) : <div />}
+
+            <div className="flex items-center space-x-3">
+              <button
+                type="button"
+                onClick={onClose}
+                className="px-4 py-2 rounded-xl text-xs font-medium text-slate-400 hover:text-slate-200 hover:bg-slate-800 transition-colors"
+              >
+                取消
+              </button>
+              <button
+                type="submit"
+                disabled={isLoading || !selectedFile}
+                className="flex items-center space-x-2 px-5 py-2 rounded-xl bg-amber-600 hover:bg-amber-500 text-slate-950 font-bold text-xs transition-all shadow-lg shadow-amber-600/30 disabled:opacity-50 disabled:cursor-not-allowed active:scale-95"
+              >
+                <Send className="w-4 h-4" />
+                <span>{isLoading ? '傳送中...' : '發送檔案給學生'}</span>
+              </button>
+            </div>
           </div>
         </form>
       </div>

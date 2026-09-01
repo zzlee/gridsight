@@ -982,10 +982,12 @@ void Utils::ShutdownSystem() {
 static std::atomic<bool> g_shutdown_window_active{false};
 static std::atomic<bool> g_shutdown_cancelled{false};
 static std::atomic<int> g_remaining_shutdown_seconds{30};
+static HWND g_shutdown_hwnd = NULL;
 
 static LRESULT CALLBACK ShutdownWndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) {
     switch (msg) {
     case WM_CREATE:
+        g_shutdown_hwnd = hwnd;
         SetTimer(hwnd, 1, 1000, NULL);
         // Button ID 1001
         CreateWindowW(
@@ -1169,7 +1171,7 @@ void Utils::TriggerShutdownCountdown(int timeout_seconds) {
     g_shutdown_window_active = false;
 
     if (g_shutdown_cancelled) {
-        Log("INFO", "[Shutdown] Remote shutdown was cancelled by student user.");
+        Log("INFO", "[Shutdown] Remote shutdown was cancelled by student user or teacher command.");
     } else {
         Log("WARN", "[Shutdown] Countdown expired without cancellation; triggering computer shutdown now.");
         ShutdownSystem();
@@ -1177,10 +1179,25 @@ void Utils::TriggerShutdownCountdown(int timeout_seconds) {
 #else
     Log("WARN", "⚡ [Shutdown] Remote shutdown countdown started (" + std::to_string(timeout_seconds) + "s)...");
     for (int i = timeout_seconds; i > 0; --i) {
+        if (g_shutdown_cancelled) break;
         SleepMs(1000);
     }
-    Log("WARN", "⚡ [Shutdown] Countdown expired; executing system shutdown...");
-    ShutdownSystem();
+    if (g_shutdown_cancelled) {
+        Log("INFO", "[Shutdown] Remote shutdown cancelled.");
+    } else {
+        Log("WARN", "⚡ [Shutdown] Countdown expired; executing system shutdown...");
+        ShutdownSystem();
+    }
+#endif
+}
+
+void Utils::CancelShutdown() {
+    g_shutdown_cancelled = true;
+    Log("INFO", "🛑 [Shutdown] CancelShutdown executed; aborting active shutdown countdown.");
+#ifdef _WIN32
+    if (g_shutdown_hwnd && IsWindow(g_shutdown_hwnd)) {
+        PostMessageW(g_shutdown_hwnd, WM_CLOSE, 0, 0);
+    }
 #endif
 }
 

@@ -462,6 +462,33 @@ namespace GridSightOverlay
 }
 `;
 
+function findOverlayBinary(): string | null {
+  const candidates = [
+    path.join(process.cwd(), 'bin', 'GridSightMouseOverlay.exe'),
+    path.join(process.cwd(), 'bin', 'gs-mouse-overlay.exe'),
+    path.join(path.dirname(process.execPath), 'bin', 'GridSightMouseOverlay.exe'),
+    path.join(path.dirname(process.execPath), 'GridSightMouseOverlay.exe'),
+    path.join(os.tmpdir(), 'GridSightMouseOverlay.exe'),
+  ];
+  for (const p of candidates) {
+    if (fs.existsSync(p)) return p;
+  }
+  return null;
+}
+
+function findCscCompiler(): string | null {
+  const candidates = [
+    'C:\\Windows\\Microsoft.NET\\Framework64\\v4.0.30319\\csc.exe',
+    'C:\\Windows\\Microsoft.NET\\Framework\\v4.0.30319\\csc.exe',
+    'C:\\Windows\\Microsoft.NET\\Framework64\\v3.5\\csc.exe',
+    'C:\\Windows\\Microsoft.NET\\Framework\\v3.5\\csc.exe',
+  ];
+  for (const p of candidates) {
+    if (fs.existsSync(p)) return p;
+  }
+  return null;
+}
+
 export class MouseHighlightOverlay {
   private process: ChildProcess | null = null;
 
@@ -476,16 +503,24 @@ export class MouseHighlightOverlay {
     }
 
     try {
+      // 1. Check if precompiled standalone native binary exists (0ms startup delay)
+      const bundledExe = findOverlayBinary();
+      if (bundledExe && fs.existsSync(bundledExe)) {
+        logger.info(`[MouseHighlight] Launching precompiled native mouse overlay: ${bundledExe}`);
+        this.process = spawn(bundledExe, [], { detached: true, stdio: 'ignore' });
+        return true;
+      }
+
       const tempDir = os.tmpdir();
       const csPath = path.join(tempDir, 'GridSightMouseOverlay.cs');
       const exePath = path.join(tempDir, 'GridSightMouseOverlay.exe');
 
       fs.writeFileSync(csPath, CSHARP_EFFECT_SOURCE, 'utf-8');
 
-      // Synchronously compile C# overlay on-the-fly if needed using csc.exe
-      const cscPath = 'C:\\Windows\\Microsoft.NET\\Framework64\\v4.0.30319\\csc.exe';
-      if (fs.existsSync(cscPath) && !fs.existsSync(exePath)) {
-        logger.info('[MouseHighlight] Compiling C# mouse overlay executable...');
+      // 2. Synchronously compile C# overlay on-the-fly via detected csc.exe
+      const cscPath = findCscCompiler();
+      if (cscPath && fs.existsSync(cscPath) && !fs.existsSync(exePath)) {
+        logger.info(`[MouseHighlight] Compiling C# mouse overlay using ${cscPath}...`);
         const res = spawnSync(cscPath, ['/target:winexe', `/out:${exePath}`, csPath], { windowsHide: true });
         if (res.status === 0 && fs.existsSync(exePath)) {
           logger.info('[MouseHighlight] Mouse effect overlay compiled successfully.');
@@ -495,12 +530,12 @@ export class MouseHighlightOverlay {
       }
 
       if (fs.existsSync(exePath)) {
-        logger.info('[MouseHighlight] Launching precompiled mouse effect overlay.');
+        logger.info('[MouseHighlight] Launching compiled mouse effect overlay.');
         this.process = spawn(exePath, [], { detached: true, stdio: 'ignore' });
         return true;
       }
 
-      // PowerShell fallback compile & run script
+      // 3. PowerShell fallback compile & run script
       logger.info('[MouseHighlight] Launching mouse effect overlay via PowerShell fallback.');
       const psScript = `
 $code = @"

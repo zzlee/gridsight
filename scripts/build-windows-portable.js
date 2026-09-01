@@ -102,6 +102,13 @@ const setupFfmpegExe = async () => {
 
 await setupFfmpegExe();
 
+// Staging Standalone Native Mouse Overlay
+const overlaySrc = path.resolve(rootDir, 'bin/GridSightMouseOverlay.exe');
+if (fs.existsSync(overlaySrc)) {
+  fs.copyFileSync(overlaySrc, path.resolve(portableDir, 'bin/GridSightMouseOverlay.exe'));
+  console.log('      ✅ Standalone GridSightMouseOverlay.exe bundled into bin/.');
+}
+
 // 5. Copy Agent & Tools
 console.log('[4/5] 📂 Staging gs-agent.exe & tools...');
 const agentSrc = path.resolve(rootDir, 'beacon/gs-agent.exe');

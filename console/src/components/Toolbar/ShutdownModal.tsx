@@ -61,6 +61,37 @@ export const ShutdownModal: React.FC<ShutdownModalProps> = ({
     }
   };
 
+  const handleCancelActiveShutdown = async () => {
+    setLoading(true);
+    setErrorMsg('');
+    setSuccessMsg('');
+
+    try {
+      const targets = targetScope === 'SELECTED' && selectedTargets.length > 0 ? selectedTargets : ['ALL'];
+      const resp = await AuthService.fetchWithAuth('/api/power/cancel-shutdown', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ targets }),
+      });
+
+      const data = await resp.json();
+      if (!resp.ok || !data.success) {
+        throw new Error(data.error || '傳送取消關機指令失敗');
+      }
+
+      setSuccessMsg(data.message || `已成功廣播取消關機指令至 ${data.count} 台學生機！`);
+      setTimeout(() => {
+        setSuccessMsg('');
+        onClose();
+      }, 1800);
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : String(err);
+      setErrorMsg(msg);
+    } finally {
+      setLoading(false);
+    }
+  };
+
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-950/80 backdrop-blur-md animate-in fade-in duration-200">
       <div className="relative w-full max-w-md bg-slate-900 border border-rose-500/40 rounded-2xl shadow-2xl shadow-rose-950/50 overflow-hidden text-slate-100 select-none">
@@ -103,27 +134,25 @@ export const ShutdownModal: React.FC<ShutdownModalProps> = ({
               <button
                 type="button"
                 onClick={() => setTargetScope('ALL')}
-                className={`flex items-center justify-center space-x-2 p-2.5 rounded-xl border text-xs font-semibold transition-all ${
+                className={`py-2 px-3 rounded-xl border text-xs font-medium transition-all ${
                   targetScope === 'ALL'
-                    ? 'bg-rose-600 text-white border-rose-500 shadow-md shadow-rose-900/40'
-                    : 'bg-slate-800/80 text-slate-300 border-slate-700 hover:bg-slate-800'
+                    ? 'bg-rose-500/20 text-rose-300 border-rose-500/50 shadow-sm'
+                    : 'bg-slate-800/60 text-slate-400 border-slate-700 hover:text-slate-200'
                 }`}
               >
-                <Power className="w-4 h-4" />
-                <span>全體學生機 ({totalOnlineCount}台線上)</span>
+                全班在線主機 ({totalOnlineCount} 台)
               </button>
-
               <button
                 type="button"
                 onClick={() => setTargetScope('SELECTED')}
                 disabled={selectedCount === 0}
-                className={`flex items-center justify-center space-x-2 p-2.5 rounded-xl border text-xs font-semibold transition-all disabled:opacity-40 disabled:cursor-not-allowed ${
+                className={`py-2 px-3 rounded-xl border text-xs font-medium transition-all disabled:opacity-40 disabled:cursor-not-allowed ${
                   targetScope === 'SELECTED'
-                    ? 'bg-rose-600 text-white border-rose-500 shadow-md shadow-rose-900/40'
-                    : 'bg-slate-800/80 text-slate-300 border-slate-700 hover:bg-slate-800'
+                    ? 'bg-rose-500/20 text-rose-300 border-rose-500/50 shadow-sm'
+                    : 'bg-slate-800/60 text-slate-400 border-slate-700 hover:text-slate-200'
                 }`}
               >
-                <span>選取的學生機 ({selectedCount}台)</span>
+                已選取主機 ({selectedCount} 台)
               </button>
             </div>
           </div>
@@ -171,24 +200,35 @@ export const ShutdownModal: React.FC<ShutdownModalProps> = ({
         </div>
 
         {/* Modal Footer */}
-        <div className="flex items-center justify-end space-x-3 px-6 py-4 bg-slate-950/60 border-t border-slate-800">
+        <div className="flex items-center justify-between px-6 py-4 bg-slate-950/60 border-t border-slate-800">
           <button
             type="button"
-            onClick={onClose}
+            onClick={handleCancelActiveShutdown}
             disabled={loading}
-            className="px-4 py-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-300 text-xs font-semibold transition-colors"
+            className="px-3.5 py-2 rounded-xl bg-amber-500/10 hover:bg-amber-500/20 text-amber-400 border border-amber-500/30 text-xs font-semibold transition-colors disabled:opacity-50"
+            title="發送指令終止已啟動之倒數關機視窗"
           >
-            取消
+            🛑 撤銷/取消進行中關機
           </button>
-          <button
-            type="button"
-            onClick={handleConfirmShutdown}
-            disabled={loading || !!successMsg}
-            className="flex items-center space-x-1.5 px-5 py-2 rounded-xl bg-rose-600 hover:bg-rose-700 text-white text-xs font-bold transition-all shadow-lg shadow-rose-950 active:scale-95 disabled:opacity-50"
-          >
-            <Power className="w-4 h-4" />
-            <span>{loading ? '正在發送指令...' : '確認廣播關機'}</span>
-          </button>
+          <div className="flex items-center space-x-2">
+            <button
+              type="button"
+              onClick={onClose}
+              disabled={loading}
+              className="px-4 py-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-300 text-xs font-semibold transition-colors"
+            >
+              關閉
+            </button>
+            <button
+              type="button"
+              onClick={handleConfirmShutdown}
+              disabled={loading || !!successMsg}
+              className="flex items-center space-x-1.5 px-5 py-2 rounded-xl bg-rose-600 hover:bg-rose-700 text-white text-xs font-bold transition-all shadow-lg shadow-rose-950 active:scale-95 disabled:opacity-50"
+            >
+              <Power className="w-4 h-4" />
+              <span>{loading ? '正在發送指令...' : '確認廣播關機'}</span>
+            </button>
+          </div>
         </div>
       </div>
     </div>

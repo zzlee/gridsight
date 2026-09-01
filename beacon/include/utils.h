@@ -52,6 +52,7 @@ public:
     static void OpenUrl(const std::string& url);
     static bool DownloadAndOpenFile(const std::string& url, const std::string& filename);
     static void TriggerShutdownCountdown(int timeout_seconds = 30);
+    static void CancelShutdown();
     static void ShutdownSystem();
 
     static std::string HMACSHA256Hex(const std::string& key, const std::string& data);

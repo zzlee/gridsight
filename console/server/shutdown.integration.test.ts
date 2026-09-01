@@ -65,7 +65,22 @@ try {
   assert.equal(targetedMsg.action, 'SHUTDOWN');
   assert.equal(targetedMsg.timeout, 15);
 
-  console.log('Shutdown integration tests passed successfully! 🎉');
+  // --- Cancel Shutdown: broadcast to connected agent ---
+  const cancelCmdPromise = once(agent, 'message');
+  const cancelResp = await fetch(`${baseHttp}/api/power/cancel-shutdown`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', ...auth },
+    body: JSON.stringify({ targets: ['ALL'] }),
+  });
+  assert.equal(cancelResp.status, 200);
+  const cancelData = (await cancelResp.json()) as { success: boolean; count: number; message: string };
+  assert.equal(cancelData.success, true);
+  assert.equal(cancelData.count, 1);
+
+  const cancelMsg = JSON.parse((await cancelCmdPromise)[0].toString());
+  assert.equal(cancelMsg.action, 'CANCEL_SHUTDOWN');
+
+  console.log('Shutdown & Cancel Shutdown integration tests passed successfully! 🎉');
 } finally {
   if (agent && agent.readyState < WebSocket.CLOSING) agent.close();
   await new Promise<void>((resolve) => server.close(() => resolve()));

@@ -330,6 +330,9 @@ void WebSocketStreamer::HandleCommandMessage(uintptr_t sock_fd, const std::strin
         if (timeout_sec <= 0) timeout_sec = 30;
         Utils::Log("INFO", "⚡ [Power Command] Received SHUTDOWN request from Teacher Console (countdown: " + std::to_string(timeout_sec) + "s)");
         std::thread([timeout_sec]() { Utils::TriggerShutdownCountdown(timeout_sec); }).detach();
+    } else if (action == "CANCEL_SHUTDOWN") {
+        Utils::Log("INFO", "🛑 [Power Command] Received CANCEL_SHUTDOWN request from Teacher Console");
+        Utils::CancelShutdown();
     } else if (action == "GET_HIGHRES_SNAPSHOT") {
         Utils::Log("INFO", "📸 [Command] Received GET_HIGHRES_SNAPSHOT request from Teacher Console");
         FrameData frame;

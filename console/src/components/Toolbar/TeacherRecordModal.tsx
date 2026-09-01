@@ -88,9 +88,16 @@ export const TeacherRecordModal: React.FC<TeacherRecordModalProps> = ({ isOpen, 
     return 'video/webm';
   };
 
+  const isMediaSupported = typeof navigator !== 'undefined' && !!navigator.mediaDevices && typeof navigator.mediaDevices.getDisplayMedia === 'function';
+
   const handleStartRecording = async () => {
     setErrorMsg(null);
     recordedChunksRef.current = [];
+
+    if (!isMediaSupported) {
+      setErrorMsg('此瀏覽器或連線環境未開放螢幕錄影 API（非安全上下文）。請在教師本機使用 http://localhost:3000 或透過 HTTPS 存取控制台。');
+      return;
+    }
 
     try {
       // 1. Capture teacher screen
@@ -311,7 +318,8 @@ export const TeacherRecordModal: React.FC<TeacherRecordModalProps> = ({ isOpen, 
                 </button>
                 <button
                   onClick={handleStartRecording}
-                  className="px-4 py-2 rounded-lg bg-red-600 hover:bg-red-700 text-white text-xs font-bold transition-all shadow-md shadow-red-950 flex items-center space-x-1.5 active:scale-95"
+                  disabled={!isMediaSupported}
+                  className="px-4 py-2 rounded-lg bg-red-600 hover:bg-red-700 disabled:opacity-50 disabled:cursor-not-allowed text-white text-xs font-bold transition-all shadow-md shadow-red-950 flex items-center space-x-1.5 active:scale-95"
                 >
                   <Video className="w-4 h-4 fill-current" />
                   <span>選擇畫面並開始錄影</span>

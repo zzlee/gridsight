@@ -838,6 +838,42 @@ app.post('/api/power/shutdown', requireTeacherAuth, (req, res) => {
   });
 });
 
+// Route: Cancel Active Shutdown on Student Agents
+app.post('/api/power/cancel-shutdown', requireTeacherAuth, (req, res) => {
+  const { targets } = req.body || {};
+  const payload = JSON.stringify({ action: 'CANCEL_SHUTDOWN' });
+
+  let targetMacs: string[] = [];
+  if (Array.isArray(targets) && targets.length > 0) {
+    targetMacs = targets.map((t) => normalizeTarget(t)).filter(Boolean);
+  }
+
+  let count = 0;
+  if (targetMacs.length === 0 || targetMacs.includes('ALL')) {
+    agentSockets.forEach((ws) => {
+      if (ws.readyState === WebSocket.OPEN) {
+        ws.send(payload);
+        count++;
+      }
+    });
+  } else {
+    targetMacs.forEach((mac) => {
+      const ws = agentSockets.get(mac);
+      if (ws && ws.readyState === WebSocket.OPEN) {
+        ws.send(payload);
+        count++;
+      }
+    });
+  }
+
+  logger.info(`[Power] Broadcasted CANCEL_SHUTDOWN command to ${count} student agents`);
+  res.json({
+    success: true,
+    count,
+    message: `已廣播發送取消關機指令至 ${count} 台學生機`,
+  });
+});
+
 // Route: Download Shared File for Student Agents
 app.get('/api/share/download/:fileId/:filename', async (req, res) => {
   const { fileId, filename } = req.params;

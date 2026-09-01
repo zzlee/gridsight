@@ -4,6 +4,7 @@ import fs from 'fs';
 import path from 'path';
 import { logger } from './logger.js';
 import { MouseHighlightOverlay } from './mouseHighlight.js';
+import { TeacherInputRtpStreamer } from './inputRtpStreamer.js';
 
 const findFfmpegBinary = (): string => {
   if (os.platform() === 'win32') {
@@ -91,6 +92,11 @@ export class TeacherBroadcastStreamer {
   private currentQuality: BroadcastQuality | null = null;
   private currentBitrateKbps: number = 0;
   private mouseOverlay = new MouseHighlightOverlay();
+  private inputRtpStreamer = new TeacherInputRtpStreamer();
+
+  getInputRtpStreamer(): TeacherInputRtpStreamer {
+    return this.inputRtpStreamer;
+  }
 
   getMode(): string | null {
     return this.isStreaming ? this.currentSourceType : null;
@@ -279,6 +285,7 @@ export class TeacherBroadcastStreamer {
     if (sourceType === 'screen') {
       this.mouseOverlay.start();
     }
+    this.inputRtpStreamer.start();
     logger.info('[Broadcast] FFmpeg startup verified, streaming is live');
     return { ok: true };
   }
@@ -314,6 +321,7 @@ export class TeacherBroadcastStreamer {
     }
 
     this.mouseOverlay.stop();
+    this.inputRtpStreamer.stop();
     logger.info('[Broadcast] Broadcast stream terminated.');
   }
 

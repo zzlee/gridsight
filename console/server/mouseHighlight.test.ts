@@ -27,7 +27,7 @@ if (!CSHARP_EFFECT_SOURCE.includes('this.Invalidate(newRect)') && !CSHARP_EFFECT
 }
 console.log('✅ PASS: CSHARP_EFFECT_SOURCE contains dirty-region Invalidate calls');
 
-if (!CSHARP_EFFECT_SOURCE.includes('_haloBrush') || !CSHARP_EFFECT_SOURCE.includes('_haloPen') || !CSHARP_EFFECT_SOURCE.includes('_scrollFont')) {
+if (!CSHARP_EFFECT_SOURCE.includes('_moveBrush') || !CSHARP_EFFECT_SOURCE.includes('_movePen') || !CSHARP_EFFECT_SOURCE.includes('_scrollFont')) {
   console.error('❌ FAIL: CSHARP_EFFECT_SOURCE missing GDI object caching');
   process.exit(1);
 }

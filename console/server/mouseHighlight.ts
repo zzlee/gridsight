@@ -148,17 +148,26 @@ namespace GridSightOverlay
             public float OffsetY;
         }
 
+        private class MoveEffect
+        {
+            public float Radius;
+            public float MaxRadius;
+            public float Alpha;
+            public DateTime StartTime;
+        }
+
         private const int MAX_CLICK_EFFECTS = 8;
         private const int MAX_SCROLL_EFFECTS = 8;
 
         private readonly List<ClickEffect> _clickEffects = new List<ClickEffect>();
         private readonly List<ScrollEffect> _scrollEffects = new List<ScrollEffect>();
+        private readonly List<MoveEffect> _moveEffects = new List<MoveEffect>();
         private readonly Timer _timer;
         private readonly Timer _statsTimer;
 
         // Cached GDI Objects
-        private readonly SolidBrush _haloBrush;
-        private readonly Pen _haloPen;
+        private readonly Pen _movePen;
+        private readonly SolidBrush _moveBrush;
         private readonly Pen _clickPen;
         private readonly SolidBrush _scrollBubbleBrush;
         private readonly SolidBrush _scrollTextBrush;
@@ -166,6 +175,7 @@ namespace GridSightOverlay
 
         private Point _lastCursorPos = new Point(-9999, -9999);
         private Rectangle _lastHaloRect = Rectangle.Empty;
+        private DateTime _lastMoveTime = DateTime.Now;
 
         // Telemetry
         private int _paintCount = 0;
@@ -199,8 +209,8 @@ namespace GridSightOverlay
             this.DoubleBuffered = true;
 
             // Initialize GDI resource cache
-            _haloBrush = new SolidBrush(Color.FromArgb(70, 255, 235, 59));
-            _haloPen = new Pen(Color.FromArgb(160, 255, 215, 0), 2);
+            _movePen = new Pen(Color.FromArgb(255, 56, 189, 248), 2.0f);
+            _moveBrush = new SolidBrush(Color.FromArgb(60, 56, 189, 248));
             _clickPen = new Pen(Color.Cyan, 3.5f);
             _scrollBubbleBrush = new SolidBrush(Color.Black);
             _scrollTextBrush = new SolidBrush(Color.White);
@@ -237,9 +247,26 @@ namespace GridSightOverlay
             int cy = screenY - this.Top;
             if (cx == _lastCursorPos.X && cy == _lastCursorPos.Y) return;
 
+            DateTime now = DateTime.Now;
+            if ((now - _lastMoveTime).TotalMilliseconds >= 1000)
+            {
+                lock (_moveEffects)
+                {
+                    _moveEffects.Clear();
+                    _moveEffects.Add(new MoveEffect {
+                        Radius = 4f,
+                        MaxRadius = 20f,
+                        Alpha = 255f,
+                        StartTime = now
+                    });
+                }
+                EnsureTimerRunning();
+            }
+            _lastMoveTime = now;
+
             _mouseMoveCount++;
             Rectangle oldRect = _lastHaloRect;
-            int r = 26; // halo radius 24 + 2 padding
+            int r = 24; // effect radius 20 + 4 padding
             Rectangle newRect = new Rectangle(cx - r, cy - r, r * 2, r * 2);
 
             _lastCursorPos = new Point(cx, cy);
@@ -377,6 +404,27 @@ namespace GridSightOverlay
                 }
             }
 
+            lock (_moveEffects)
+            {
+                DateTime now = DateTime.Now;
+                for (int i = _moveEffects.Count - 1; i >= 0; i--)
+                {
+                    var eff = _moveEffects[i];
+                    double elapsed = (now - eff.StartTime).TotalMilliseconds;
+                    float progress = (float)(elapsed / 500.0);
+                    if (progress >= 1.0f)
+                    {
+                        _moveEffects.RemoveAt(i);
+                    }
+                    else
+                    {
+                        eff.Radius = 4f + (eff.MaxRadius - 4f) * progress;
+                        eff.Alpha = 255f * (1f - progress);
+                        hasActiveEffects = true;
+                    }
+                }
+            }
+
             if (!hasActiveEffects)
             {
                 _timer.Stop();
@@ -400,10 +448,18 @@ namespace GridSightOverlay
             int cx = cursorPt.X - this.Left;
             int cy = cursorPt.Y - this.Top;
 
-            // Yellow semi-transparent halo around mouse cursor
-            int r = 24;
-            g.FillEllipse(_haloBrush, cx - r, cy - r, r * 2, r * 2);
-            g.DrawEllipse(_haloPen, cx - r, cy - r, r * 2, r * 2);
+            // Render move ripple effect (Sky Blue #38bdf8 following cursor on motion after >=1s idle)
+            lock (_moveEffects)
+            {
+                foreach (var eff in _moveEffects)
+                {
+                    int a = (int)Math.Max(0, Math.Min(255, eff.Alpha));
+                    _movePen.Color = Color.FromArgb(a, 56, 189, 248);
+                    _moveBrush.Color = Color.FromArgb((int)(a * 0.25f), 56, 189, 248);
+                    g.FillEllipse(_moveBrush, cx - eff.Radius, cy - eff.Radius, eff.Radius * 2, eff.Radius * 2);
+                    g.DrawEllipse(_movePen, cx - eff.Radius, cy - eff.Radius, eff.Radius * 2, eff.Radius * 2);
+                }
+            }
 
             // Render click ripples (Left = Cyan, Right = Amber)
             lock (_clickEffects)
@@ -449,8 +505,8 @@ namespace GridSightOverlay
             {
                 _timer?.Dispose();
                 _statsTimer?.Dispose();
-                _haloBrush?.Dispose();
-                _haloPen?.Dispose();
+                _movePen?.Dispose();
+                _moveBrush?.Dispose();
                 _clickPen?.Dispose();
                 _scrollBubbleBrush?.Dispose();
                 _scrollTextBrush?.Dispose();

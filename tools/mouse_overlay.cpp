@@ -34,12 +34,21 @@ struct ScrollEffect {
     bool is_up;
 };
 
+struct MoveEffect {
+    float radius;
+    float max_radius;
+    float alpha;
+    DWORD start_time;
+};
+
 static HWND g_hwnd = NULL;
 static HHOOK g_hook = NULL;
 static std::vector<ClickEffect> g_click_effects;
 static std::vector<ScrollEffect> g_scroll_effects;
+static std::vector<MoveEffect> g_move_effects;
 static UINT_PTR g_anim_timer = 0;
 static POINT g_last_cursor_pos = {0, 0};
+static DWORD g_last_move_time = 0;
 static const int MAX_EFFECTS = 8;
 
 static int g_screen_x = 0;
@@ -75,10 +84,14 @@ static void RenderAndCommit() {
         int cx = pt.x - g_screen_x;
         int cy = pt.y - g_screen_y;
 
-        // 1. Subtle, Elegant Hollow Halo (Radius 14, thin yellow ring, center completely transparent)
-        int r = 14;
-        Pen ringPen(Color(130, 255, 215, 0), 1.6f); // Soft warm amber outline
-        g.DrawEllipse(&ringPen, cx - r, cy - r, r * 2, r * 2);
+        // 1. Render Move Ripple Effect (Sky Blue #38bdf8 following live cursor on motion after >=1s idle)
+        for (const auto& eff : g_move_effects) {
+            int a = (int)std::max(0.0f, std::min(255.0f, eff.alpha));
+            Pen movePen(Color(a, 56, 189, 248), 2.0f);
+            SolidBrush moveBrush(Color((int)(a * 0.25f), 56, 189, 248));
+            g.FillEllipse(&moveBrush, cx - eff.radius, cy - eff.radius, eff.radius * 2.0f, eff.radius * 2.0f);
+            g.DrawEllipse(&movePen, cx - eff.radius, cy - eff.radius, eff.radius * 2.0f, eff.radius * 2.0f);
+        }
 
         // 2. Click Ripple Animations
         for (const auto& eff : g_click_effects) {
@@ -179,7 +192,21 @@ LRESULT CALLBACK MouseHookProc(int nCode, WPARAM wParam, LPARAM lParam) {
     if (nCode >= 0 && g_hwnd) {
         MSLLHOOKSTRUCT* hook = (MSLLHOOKSTRUCT*)lParam;
         if (wParam == WM_MOUSEMOVE) {
-            g_last_cursor_pos = hook->pt;
+            if (hook->pt.x != g_last_cursor_pos.x || hook->pt.y != g_last_cursor_pos.y) {
+                DWORD now = GetTickCount();
+                if (g_last_move_time != 0 && (now - g_last_move_time) >= 1000) {
+                    g_move_effects.clear();
+                    MoveEffect eff;
+                    eff.radius = 4.0f;
+                    eff.max_radius = 20.0f;
+                    eff.alpha = 255.0f;
+                    eff.start_time = now;
+                    g_move_effects.push_back(eff);
+                    EnsureTimer();
+                }
+                g_last_move_time = now;
+                g_last_cursor_pos = hook->pt;
+            }
             RenderAndCommit();
         } else if (wParam == WM_LBUTTONDOWN || wParam == WM_RBUTTONDOWN || wParam == 0x0207 /* WM_MBUTTONDOWN */) {
             ClickType type = (wParam == WM_LBUTTONDOWN) ? CLICK_LEFT : 
@@ -240,6 +267,20 @@ LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) {
                 if (eff.alpha <= 0.0f) {
                     g_scroll_effects.erase(g_scroll_effects.begin() + i);
                 } else {
+                    has_active = true;
+                    ++i;
+                }
+            }
+            DWORD now = GetTickCount();
+            for (size_t i = 0; i < g_move_effects.size(); ) {
+                auto& eff = g_move_effects[i];
+                DWORD elapsed = now - eff.start_time;
+                float progress = (float)elapsed / 500.0f;
+                if (progress >= 1.0f) {
+                    g_move_effects.erase(g_move_effects.begin() + i);
+                } else {
+                    eff.radius = 4.0f + (eff.max_radius - 4.0f) * progress;
+                    eff.alpha = 255.0f * (1.0f - progress);
                     has_active = true;
                     ++i;
                 }

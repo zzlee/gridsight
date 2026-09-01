@@ -3,9 +3,7 @@
 #include <windows.h>
 #include <gdiplus.h>
 #include <vector>
-#include <chrono>
 #include <algorithm>
-#include <string>
 
 #pragma comment(lib, "gdiplus.lib")
 #pragma comment(lib, "user32.lib")
@@ -44,39 +42,131 @@ static UINT_PTR g_anim_timer = 0;
 static POINT g_last_cursor_pos = {0, 0};
 static const int MAX_EFFECTS = 8;
 
+static int g_screen_x = 0;
+static int g_screen_y = 0;
+static int g_screen_w = 0;
+static int g_screen_h = 0;
+
+static HDC g_memDC = NULL;
+static HBITMAP g_memDIB = NULL;
+static void* g_pBits = NULL;
+
+static void RenderAndCommit();
+
 static void EnsureTimer() {
     if (g_anim_timer == 0 && g_hwnd) {
-        g_anim_timer = SetTimer(g_hwnd, 1, 16, NULL); // ~60 FPS animation
+        g_anim_timer = SetTimer(g_hwnd, 1, 16, NULL); // ~60 FPS
     }
 }
 
-static void InvalidateHalo(int x, int y) {
-    if (!g_hwnd) return;
-    int r = 24; // Compact halo bounds
-    RECT rc = { x - r, y - r, x + r, y + r };
-    InvalidateRect(g_hwnd, &rc, FALSE);
-}
+static void RenderAndCommit() {
+    if (!g_hwnd || !g_memDC || !g_pBits) return;
 
-static void InvalidateArea(int x, int y, int radius) {
-    if (!g_hwnd) return;
-    int r = radius + 6;
-    RECT rc = { x - r, y - r, x + r, y + r };
-    InvalidateRect(g_hwnd, &rc, FALSE);
+    // Fast zero-fill 32-bit ARGB buffer (100% transparent)
+    memset(g_pBits, 0, g_screen_w * g_screen_h * 4);
+
+    {
+        Graphics g(g_memDC);
+        g.SetSmoothingMode(SmoothingModeAntiAlias);
+        g.SetTextRenderingHint(TextRenderingHintAntiAliasGridFit);
+
+        POINT pt;
+        GetCursorPos(&pt);
+        int cx = pt.x - g_screen_x;
+        int cy = pt.y - g_screen_y;
+
+        // 1. Subtle, Elegant Hollow Halo (Radius 14, thin yellow ring, center completely transparent)
+        int r = 14;
+        Pen ringPen(Color(130, 255, 215, 0), 1.6f); // Soft warm amber outline
+        g.DrawEllipse(&ringPen, cx - r, cy - r, r * 2, r * 2);
+
+        // 2. Click Ripple Animations
+        for (const auto& eff : g_click_effects) {
+            int a = (int)std::max(0.0f, std::min(255.0f, eff.alpha));
+            int ex = eff.x - g_screen_x;
+            int ey = eff.y - g_screen_y;
+
+            if (eff.type == CLICK_LEFT) {
+                // Left Click: Bright Cyan Expanding Wave + Click Center Point
+                Pen leftPen(Color(a, 0, 229, 255), 2.2f);
+                g.DrawEllipse(&leftPen, ex - eff.radius, ey - eff.radius, eff.radius * 2, eff.radius * 2);
+                if (eff.radius < 16.0f) {
+                    SolidBrush dotBrush(Color(a, 0, 229, 255));
+                    g.FillEllipse(&dotBrush, ex - 3, ey - 3, 6, 6);
+                }
+            } else if (eff.type == CLICK_RIGHT) {
+                // Right Click: Double Concentric Amber/Orange Rings
+                Pen rightPen1(Color(a, 255, 152, 0), 2.4f);
+                Pen rightPen2(Color((int)(a * 0.7f), 255, 87, 34), 1.4f);
+                g.DrawEllipse(&rightPen1, ex - eff.radius, ey - eff.radius, eff.radius * 2, eff.radius * 2);
+                float inner_r = std::max(2.0f, eff.radius - 8.0f);
+                g.DrawEllipse(&rightPen2, ex - inner_r, ey - inner_r, inner_r * 2, inner_r * 2);
+            } else {
+                // Middle Click: Violet Pulse Ring
+                Pen midPen(Color(a, 168, 85, 247), 2.2f);
+                g.DrawEllipse(&midPen, ex - eff.radius, ey - eff.radius, eff.radius * 2, eff.radius * 2);
+            }
+        }
+
+        // 3. Scroll Wheel Floating Indicators (Micro Bubble with ▲ / ▼)
+        FontFamily fontFamily(L"Segoe UI");
+        Font font(&fontFamily, 9, FontStyleBold, UnitPixel);
+        for (const auto& eff : g_scroll_effects) {
+            int a = (int)std::max(0.0f, std::min(255.0f, eff.alpha));
+            int ex = eff.x - g_screen_x + 12;
+            int ey = (int)(eff.y - g_screen_y + eff.offset_y + 6);
+
+            SolidBrush bubbleBrush(Color((int)(a * 0.75f), 15, 23, 42));
+            SolidBrush textBrush(Color(a, 56, 189, 248));
+            Pen bubblePen(Color((int)(a * 0.5f), 56, 189, 248), 1.0f);
+
+            int bw = 16;
+            int bh = 16;
+            g.FillEllipse(&bubbleBrush, ex - bw/2, ey - bh/2, bw, bh);
+            g.DrawEllipse(&bubblePen, ex - bw/2, ey - bh/2, bw, bh);
+
+            const wchar_t* arrow = eff.is_up ? L"▲" : L"▼";
+            PointF origin((REAL)(ex - 5), (REAL)(ey - 6));
+            g.DrawString(arrow, -1, &font, origin, &textBrush);
+        }
+
+        // 4. Authentic Real-Time Windows Cursor Icon on top
+        CURSORINFO ci = { sizeof(CURSORINFO) };
+        if (GetCursorInfo(&ci) && (ci.flags & CURSOR_SHOWING) && ci.hCursor) {
+            ICONINFO ii = { 0 };
+            if (GetIconInfo(ci.hCursor, &ii)) {
+                DrawIconEx(g_memDC,
+                           cx - ii.xHotspot,
+                           cy - ii.yHotspot,
+                           ci.hCursor,
+                           0, 0, 0, NULL, DI_NORMAL);
+                if (ii.hbmColor) DeleteObject(ii.hbmColor);
+                if (ii.hbmMask) DeleteObject(ii.hbmMask);
+            } else {
+                DrawIconEx(g_memDC, cx, cy, ci.hCursor, 0, 0, 0, NULL, DI_NORMAL);
+            }
+        }
+    }
+
+    // Commit 32-bit ARGB surface with True Per-Pixel Alpha Blending to DWM
+    HDC screenDC = GetDC(NULL);
+    POINT ptDst = { g_screen_x, g_screen_y };
+    SIZE sz = { g_screen_w, g_screen_h };
+    POINT ptSrc = { 0, 0 };
+    BLENDFUNCTION blend = { AC_SRC_OVER, 0, 255, AC_SRC_ALPHA };
+    UpdateLayeredWindow(g_hwnd, screenDC, &ptDst, &sz, g_memDC, &ptSrc, 0, &blend, ULW_ALPHA);
+    ReleaseDC(NULL, screenDC);
 }
 
 LRESULT CALLBACK MouseHookProc(int nCode, WPARAM wParam, LPARAM lParam) {
     if (nCode >= 0 && g_hwnd) {
         MSLLHOOKSTRUCT* hook = (MSLLHOOKSTRUCT*)lParam;
         if (wParam == WM_MOUSEMOVE) {
-            int old_x = g_last_cursor_pos.x;
-            int old_y = g_last_cursor_pos.y;
             g_last_cursor_pos = hook->pt;
-            InvalidateHalo(old_x, old_y);
-            InvalidateHalo(hook->pt.x, hook->pt.y);
+            RenderAndCommit();
         } else if (wParam == WM_LBUTTONDOWN || wParam == WM_RBUTTONDOWN || wParam == 0x0207 /* WM_MBUTTONDOWN */) {
             ClickType type = (wParam == WM_LBUTTONDOWN) ? CLICK_LEFT : 
                              (wParam == WM_RBUTTONDOWN) ? CLICK_RIGHT : CLICK_MIDDLE;
-            
             if (g_click_effects.size() >= MAX_EFFECTS) {
                 g_click_effects.erase(g_click_effects.begin());
             }
@@ -89,7 +179,7 @@ LRESULT CALLBACK MouseHookProc(int nCode, WPARAM wParam, LPARAM lParam) {
             eff.type = type;
             g_click_effects.push_back(eff);
             EnsureTimer();
-            InvalidateArea(hook->pt.x, hook->pt.y, (int)eff.max_radius);
+            RenderAndCommit();
         } else if (wParam == WM_MOUSEWHEEL) {
             short delta = (short)HIWORD(hook->mouseData);
             bool is_up = (delta > 0);
@@ -104,7 +194,7 @@ LRESULT CALLBACK MouseHookProc(int nCode, WPARAM wParam, LPARAM lParam) {
             eff.is_up = is_up;
             g_scroll_effects.push_back(eff);
             EnsureTimer();
-            InvalidateArea(hook->pt.x, hook->pt.y, 25);
+            RenderAndCommit();
         }
     }
     return CallNextHookEx(g_hook, nCode, wParam, lParam);
@@ -112,18 +202,13 @@ LRESULT CALLBACK MouseHookProc(int nCode, WPARAM wParam, LPARAM lParam) {
 
 LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) {
     switch (msg) {
-    case WM_CREATE:
-        return 0;
-
     case WM_TIMER:
         if (wParam == 1) {
             bool has_active = false;
-            // Update click ripple animations
             for (size_t i = 0; i < g_click_effects.size(); ) {
                 auto& eff = g_click_effects[i];
                 eff.radius += (eff.max_radius - eff.radius) * 0.32f + 0.6f;
                 eff.alpha -= 18.0f;
-                InvalidateArea(eff.x, eff.y, (int)eff.max_radius);
                 if (eff.alpha <= 0.0f || eff.radius >= eff.max_radius) {
                     g_click_effects.erase(g_click_effects.begin() + i);
                 } else {
@@ -131,13 +216,10 @@ LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) {
                     ++i;
                 }
             }
-
-            // Update scroll wheel floating indicator animations
             for (size_t i = 0; i < g_scroll_effects.size(); ) {
                 auto& eff = g_scroll_effects[i];
                 eff.offset_y += eff.is_up ? -1.8f : 1.8f;
                 eff.alpha -= 16.0f;
-                InvalidateArea(eff.x, eff.y + (int)eff.offset_y, 25);
                 if (eff.alpha <= 0.0f) {
                     g_scroll_effects.erase(g_scroll_effects.begin() + i);
                 } else {
@@ -146,124 +228,14 @@ LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) {
                 }
             }
 
+            RenderAndCommit();
+
             if (!has_active) {
                 KillTimer(hwnd, 1);
                 g_anim_timer = 0;
             }
         }
         return 0;
-
-    case WM_ERASEBKGND:
-        return 1;
-
-    case WM_PAINT: {
-        PAINTSTRUCT ps;
-        HDC hdc = BeginPaint(hwnd, &ps);
-        RECT rc;
-        GetClientRect(hwnd, &rc);
-        int client_w = rc.right - rc.left;
-        int client_h = rc.bottom - rc.top;
-
-        HDC memDC = CreateCompatibleDC(hdc);
-        HBITMAP memBitmap = CreateCompatibleBitmap(hdc, client_w, client_h);
-        HBITMAP oldBitmap = (HBITMAP)SelectObject(memDC, memBitmap);
-
-        // Fill transparent color key (RGB 15, 23, 42)
-        HBRUSH bgBrush = CreateSolidBrush(RGB(15, 23, 42));
-        FillRect(memDC, &rc, bgBrush);
-        DeleteObject(bgBrush);
-
-        {
-            Graphics g(memDC);
-            g.SetSmoothingMode(SmoothingModeAntiAlias);
-
-            POINT pt;
-            GetCursorPos(&pt);
-            int cx = pt.x;
-            int cy = pt.y;
-
-            // 1. Compact, subtle, non-obstructive Idle Halo (Radius 13, hollow center with faint glow)
-            int r = 13;
-            SolidBrush faintGlow(Color(25, 255, 235, 59));   // 10% opacity center
-            Pen ringPen(Color(140, 255, 193, 7), 1.5f);        // Subtle yellow outline
-            g.FillEllipse(&faintGlow, cx - r, cy - r, r * 2, r * 2);
-            g.DrawEllipse(&ringPen, cx - r, cy - r, r * 2, r * 2);
-
-            // 2. Click Ripple Animations
-            for (const auto& eff : g_click_effects) {
-                int a = (int)std::max(0.0f, std::min(255.0f, eff.alpha));
-                
-                if (eff.type == CLICK_LEFT) {
-                    // Left Click: Bright Cyan Expanding Wave + Center Click Dot
-                    Pen leftPen(Color(a, 0, 229, 255), 2.2f);
-                    g.DrawEllipse(&leftPen, eff.x - eff.radius, eff.y - eff.radius, eff.radius * 2, eff.radius * 2);
-                    
-                    if (eff.radius < 16.0f) {
-                        SolidBrush dotBrush(Color(a, 0, 229, 255));
-                        g.FillEllipse(&dotBrush, eff.x - 3, eff.y - 3, 6, 6);
-                    }
-                } else if (eff.type == CLICK_RIGHT) {
-                    // Right Click: Double Concentric Amber/Orange Rings
-                    Pen rightPen1(Color(a, 255, 152, 0), 2.4f);
-                    Pen rightPen2(Color((int)(a * 0.7f), 255, 87, 34), 1.4f);
-                    g.DrawEllipse(&rightPen1, eff.x - eff.radius, eff.y - eff.radius, eff.radius * 2, eff.radius * 2);
-                    float inner_r = std::max(2.0f, eff.radius - 9.0f);
-                    g.DrawEllipse(&rightPen2, eff.x - inner_r, eff.y - inner_r, inner_r * 2, inner_r * 2);
-                } else {
-                    // Middle Click: Violet/Purple Ring Pulse
-                    Pen midPen(Color(a, 168, 85, 247), 2.2f);
-                    g.DrawEllipse(&midPen, eff.x - eff.radius, eff.y - eff.radius, eff.radius * 2, eff.radius * 2);
-                }
-            }
-
-            // 3. Scroll Wheel Floating Indicators (Micro-Bubble with ▲ / ▼)
-            FontFamily fontFamily(L"Segoe UI");
-            Font font(&fontFamily, 9, FontStyleBold, UnitPixel);
-            for (const auto& eff : g_scroll_effects) {
-                int a = (int)std::max(0.0f, std::min(255.0f, eff.alpha));
-                SolidBrush bubbleBrush(Color((int)(a * 0.75f), 15, 23, 42));
-                SolidBrush textBrush(Color(a, 56, 189, 248));
-                Pen bubblePen(Color((int)(a * 0.5f), 56, 189, 248), 1.0f);
-                
-                int x = eff.x + 12; // Offset to bottom-right of cursor
-                int y = (int)(eff.y + eff.offset_y + 6);
-                int bw = 16;
-                int bh = 16;
-                
-                g.FillEllipse(&bubbleBrush, x - bw/2, y - bh/2, bw, bh);
-                g.DrawEllipse(&bubblePen, x - bw/2, y - bh/2, bw, bh);
-                
-                const wchar_t* arrow = eff.is_up ? L"▲" : L"▼";
-                PointF origin((REAL)(x - 5), (REAL)(y - 6));
-                g.DrawString(arrow, -1, &font, origin, &textBrush);
-            }
-
-            // 4. Render exact Real-Time Windows Cursor Icon on top of halo/animations
-            CURSORINFO ci = { sizeof(CURSORINFO) };
-            if (GetCursorInfo(&ci) && (ci.flags & CURSOR_SHOWING) && ci.hCursor) {
-                ICONINFO ii = { 0 };
-                if (GetIconInfo(ci.hCursor, &ii)) {
-                    DrawIconEx(memDC, 
-                               cx - ii.xHotspot, 
-                               cy - ii.yHotspot, 
-                               ci.hCursor, 
-                               0, 0, 0, NULL, DI_NORMAL);
-                    if (ii.hbmColor) DeleteObject(ii.hbmColor);
-                    if (ii.hbmMask) DeleteObject(ii.hbmMask);
-                } else {
-                    DrawIconEx(memDC, cx, cy, ci.hCursor, 0, 0, 0, NULL, DI_NORMAL);
-                }
-            }
-        }
-
-        BitBlt(hdc, 0, 0, client_w, client_h, memDC, 0, 0, SRCCOPY);
-        SelectObject(memDC, oldBitmap);
-        DeleteObject(memBitmap);
-        DeleteDC(memDC);
-
-        EndPaint(hwnd, &ps);
-        return 0;
-    }
 
     case WM_DESTROY:
         PostQuitMessage(0);
@@ -282,29 +254,44 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE, LPSTR, int) {
     wc.lpfnWndProc = WndProc;
     wc.hInstance = hInstance;
     wc.lpszClassName = L"GridSightMouseOverlayClass";
-    wc.hCursor = LoadCursor(NULL, IDC_ARROW);
     RegisterClassEx(&wc);
 
-    int screen_x = GetSystemMetrics(SM_XVIRTUALSCREEN);
-    int screen_y = GetSystemMetrics(SM_YVIRTUALSCREEN);
-    int screen_w = GetSystemMetrics(SM_CXVIRTUALSCREEN);
-    int screen_h = GetSystemMetrics(SM_CYVIRTUALSCREEN);
+    g_screen_x = GetSystemMetrics(SM_XVIRTUALSCREEN);
+    g_screen_y = GetSystemMetrics(SM_YVIRTUALSCREEN);
+    g_screen_w = GetSystemMetrics(SM_CXVIRTUALSCREEN);
+    g_screen_h = GetSystemMetrics(SM_CYVIRTUALSCREEN);
+
+    // Create 32-bit ARGB DIB Section for True Per-Pixel Alpha Blending
+    HDC screenDC = GetDC(NULL);
+    g_memDC = CreateCompatibleDC(screenDC);
+
+    BITMAPINFO bmi = {0};
+    bmi.bmiHeader.biSize = sizeof(BITMAPINFOHEADER);
+    bmi.bmiHeader.biWidth = g_screen_w;
+    bmi.bmiHeader.biHeight = -g_screen_h; // Top-down DIB
+    bmi.bmiHeader.biPlanes = 1;
+    bmi.bmiHeader.biBitCount = 32;
+    bmi.bmiHeader.biCompression = BI_RGB;
+
+    g_memDIB = CreateDIBSection(screenDC, &bmi, DIB_RGB_COLORS, &g_pBits, NULL, 0);
+    SelectObject(g_memDC, g_memDIB);
+    ReleaseDC(NULL, screenDC);
 
     g_hwnd = CreateWindowEx(
         WS_EX_TOPMOST | WS_EX_LAYERED | WS_EX_TRANSPARENT | WS_EX_NOACTIVATE | WS_EX_TOOLWINDOW,
         L"GridSightMouseOverlayClass",
         L"GridSight Mouse Overlay",
         WS_POPUP,
-        screen_x, screen_y, screen_w, screen_h,
+        g_screen_x, g_screen_y, g_screen_w, g_screen_h,
         NULL, NULL, hInstance, NULL
     );
 
     if (!g_hwnd) return 1;
 
-    // Color key RGB(15, 23, 42) is 100% transparent
-    SetLayeredWindowAttributes(g_hwnd, RGB(15, 23, 42), 0, LWA_COLORKEY);
     ShowWindow(g_hwnd, SW_SHOW);
     SetWindowPos(g_hwnd, HWND_TOPMOST, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE);
+
+    RenderAndCommit();
 
     g_hook = SetWindowsHookEx(WH_MOUSE_LL, MouseHookProc, hInstance, 0);
 
@@ -315,6 +302,8 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE, LPSTR, int) {
     }
 
     if (g_hook) UnhookWindowsHookEx(g_hook);
+    if (g_memDIB) DeleteObject(g_memDIB);
+    if (g_memDC) DeleteDC(g_memDC);
     GdiplusShutdown(gdiplusToken);
     return 0;
 }

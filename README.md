@@ -3,7 +3,7 @@
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 [![Build Agent](https://github.com/your-username/gridsight/actions/workflows/build-agent.yml/badge.svg)](.github/workflows/build-agent.yml)
 [![Build Console](https://github.com/your-username/gridsight/actions/workflows/build-console.yml/badge.svg)](.github/workflows/build-console.yml)
-[![Architecture: v5.0](https://img.shields.io/badge/Spec-v5.0-emerald.svg)](docs/architecture.md)
+[![Architecture: v5.8.4](https://img.shields.io/badge/Spec-v5.8.4-emerald.svg)](docs/architecture.md)
 
 **GridSight** 專為 70 台具備還原卡之 Windows 電腦教室打造，兼顧「實體座位自由排版」、「全班畫面低負載輪詢」、「單機 30 FPS 焦點調閱」與「教師畫面全體廣播」四大核心功能。
 
@@ -17,13 +17,14 @@
   - 內建版型模板 (7×10 標準矩陣、左5×7+右5×7 雙分區、分組島嶼式)
   - 座位表一鍵 JSON 匯出/匯入與多班級切換
 - ⚡ **三大影像傳輸模式 (Three Transmission Modes)**
-  1. **全班常態監控**：480×270 @ 1 FPS，WebP/JPEG + HTTP Pull (附 800ms 熔斷)，全班僅佔 1.7% 頻寬 (~17 Mbps)
-  2. **焦點單機調閱**：720p/1080p @ 30 FPS，按需 OpenH264 + WebSocket，WebCodecs GPU 硬體解碼 (<50ms 延遲)
-  3. **教師全體廣播**：H.264 + UDP Multicast (RTP)，交換器 IGMP Snooping 硬體複製，支援三檔品質快速切換（高 1080p30/8M、中 720p30/4M、低 480p15/1.5M）
+  1. **全班常態監控**：480×270 @ 1 FPS，出站 Snapshot HTTP Push + 伺服器快取 (附熔斷器)，全班僅佔 1.7% 頻寬 (~17 Mbps)
+  2. **焦點單機調閱**：720p/1080p @ 30 FPS，按需 OpenH264 + 反向 WebSocket 中繼，WebCodecs GPU 硬體解碼 (<50ms 延遲)
+  3. **教師全體廣播**：H.264 + UDP Multicast (RTP)，內建 True Alpha 原生滑鼠光圈與點擊波紋特效，支援三檔品質快速切換（高 1080p30/8M、中 720p30/4M、低 480p15/1.5M）
 - 🔒 **輕量無感部署與安全鑑權 (Zero-Maintenance & Security)**
   - **雲端熱拉取**：PowerShell 單行指令下載至 `%TEMP%` 於 Session 1 執行，避開 Session 0 隔離，還原卡零殘留
   - **RAM Dynamic Token**：啟動發送 UDP Multicast 主動宣告 (Beacon)，動態 Token 僅存放於記憶體，防範同儕偷窺
   - **強健底層**：DXGI `ACCESS_LOST` 自動重連、Per-Monitor DPI 自適應原生擷取、-mwindows 無視窗無痕執行
+  - **課堂電源與派送控制**：支援遠端關機 30 秒倒數與一鍵撤銷關機 (`CANCEL_SHUTDOWN`)、網址/檔案分發與失敗重試
 
 ---
 

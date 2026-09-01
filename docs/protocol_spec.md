@@ -194,6 +194,8 @@ sequenceDiagram
     - `{"action": "STOP_STREAM"}`
     - `{"action": "OPEN_URL", "url": "https://example.com"}`
     - `{"action": "SHARE_FILE", "url": "http://<TEACHER_IP>:3000/api/share/download/<fileId>/<filename>", "filename": "lesson1.pdf", "fileSize": 1048576}`
+    - `{"action": "SHUTDOWN", "timeout": 30}`：通知學生端開啟 30 秒置頂倒數視窗並執行關機。
+    - `{"action": "CANCEL_SHUTDOWN"}`：通知學生端即刻銷毀倒數視窗並中止關機流程。
       - `url`：教師端檔案下載端點（學生端以此發起 HTTP GET 下載，無需鑑權）。
       - `filename`：伺服器端已消毒之檔名（`path.basename` + 非法字元取代為 `_`），學生端存檔時據此避免目錄攻擊。
       - `fileSize`：檔案大小（位元組），供學生端校驗下載完整性（目前學生端實作尚未消費此欄位，僅供保留/未來驗證用）。
@@ -218,8 +220,12 @@ sequenceDiagram
     - `low`: 480p · 15 FPS · 1.5 Mbps
   - 亦可改以 `{ "fps": ..., "bitrateKbps": ..., "scale": ... }` 細部覆寫（`scale` 為輸出最大高度，0=不縮放）。
 - **`POST /api/broadcast/stop`**：停止廣播。
-- **`GET /api/broadcast/status`**：回傳 `{ active, mode, quality }`，`quality` 為目前廣播所套用之檔位。
+- **`GET /api/broadcast/status`**：回傳 `{ active, mode, quality, bitrateKbps }`，`bitrateKbps` 為當前實際廣播推流碼率。
 - **`POST /api/broadcast/test/start`**（媒體測試）與 **`/api/broadcast/test/stop`**：以本機檔案或網址透過同一 RTP 多播群組推流測試。`test/start` 亦支援 `quality` 或 `fps`/`bitrateKbps`/`scale`。
+
+### 3.8 電源管理 API (Power Management)
+- **`POST /api/power/shutdown`**：發送關機指令給指定機台或全班。Body: `{"targets": ["ALL"], "timeout": 30}`。
+- **`POST /api/power/cancel-shutdown`**：發送撤銷關機指令給指定機台或全班。Body: `{"targets": ["ALL"]}`。
 
 ---
 

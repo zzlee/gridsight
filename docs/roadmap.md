@@ -71,3 +71,15 @@ graph TD
 ### 效能強化：雙層動態 JPEG 編碼加速管線
 - [x] **Perf 1**：在 `beacon/src/encoder.cpp` 整合 Windows WIC (`IWICImagingFactory` / `IWICBitmapEncoder`) 作為第一優先級硬體/系統 SIMD 編碼器（~0.4ms / 幀，0 KB 外部依賴）。
 - [x] **Perf 2**：實作執行期自動探測與熱降級機制，若 WIC 不可用或處於非 Windows 環境，無縫切換至 Turbo SIMD / Fast-DCT 定點數編碼引擎。
+
+### 階段 4：課堂管理、出站中繼與離題智慧監控 (v5.0 ~ v5.7)
+- [x] **Task 4.1 出站架構全面轉型**：學生端改為出站 Snapshot Push 與反向 WebSocket，學生端零入站開放埠。
+- [x] **Task 4.2 離題焦點視窗監控**：學生端即時擷取前景視窗標題，教師端持久化離題詞庫與紅色脈衝光暈警示。
+- [x] **Task 4.3 檔案/網址分發與失敗重試**：支援單播/全班無痕網址開啟與檔案下載，附帶失敗重試機制。
+- [x] **Task 4.4 遠端電源管理**：支援 30 秒倒數關機視窗與教師/學生雙向撤銷關機 (`CANCEL_SHUTDOWN`)。
+
+### 階段 5：廣播多檔位品質、True Alpha 滑鼠特效與即時除錯 (v5.8.0 ~ v5.8.4)
+- [x] **Task 5.1 廣播品質三檔選擇**：高 (1080p/8M)、中 (720p/4M)、低 (480p/1.5M) 一鍵即時切換。
+- [x] **Task 5.2 獨立原生滑鼠特效**：Win32 `UpdateLayeredWindow` True Alpha 32-bit ARGB 逐像素混合、GDI+ 真實 Windows 游標圖示與左右鍵/滾輪微光動態。
+- [x] **Task 5.3 流量統計整合 (Traffic HUD)**：頂部導航列即時聚合縮圖輪詢與多播廣播頻寬。
+- [x] **Task 5.4 Ubuntu 即時解碼除錯 Agent**：`tools/ubuntu_agent_debugger.py` 支援 Linux 環境下即時 `ffplay` 廣播播放與事件日誌除錯。

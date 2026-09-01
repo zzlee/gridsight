@@ -16,8 +16,10 @@ GridSight 專為 70 台具備還原卡之 Windows 電腦教室打造，兼顧極
   - 前端：React 18 + Vite + TailwindCSS（支援座位拖曳排版、走道/講台設定、WebCodecs GPU 硬體解碼播放器）。
   - 後端：Node.js Express + WebSocket Relay + UDP 多播探索服務（Port 3000）。
   - 獨立單檔版：`release/gs-console.exe`（內建 Node.js 執行期環境與 Web 靜態資源，雙擊即啟動）。
-- **`tools/`（測試與模擬工具）**：
+- **`tools/`（測試、特效與除錯工具）**：
   - `mock_agents.py`：支援一鍵模擬 70+ 台學生機心跳宣告與虛擬螢幕縮圖。
+  - `ubuntu_agent_debugger.py`：支援 Ubuntu Linux 環境下即時多播解碼播放視窗（`ffplay`）與全彩即時事件除錯。
+  - `mouse_overlay.cpp`（編譯為 `bin/GridSightMouseOverlay.exe`）：Windows 原生獨立滑鼠特效模組（32-bit ARGB True Alpha 逐像素透明混合、GDI+ 真實游標圖示、左右鍵與滾輪微光波紋動畫）。
 
 ---
 
@@ -139,8 +141,9 @@ powershell -WindowStyle Hidden -c "irm http://<教師IP>:3000/install-agent.ps1|
 
 ---
 
-## 🔍 6. 焦點監控與除錯開關 (Focus Viewer & HUD)
+## 🔍 6. 焦點監控、流量統計與除錯開關 (Focus Viewer & HUD)
 
+- **流量即時監測 (Traffic HUD)**：頂部導航列即時動態合併「常態 1 FPS 縮圖輪詢流量」與「全螢幕廣播 RTP 多播流量」（高 8M / 中 4M / 低 1.5M），廣播時切換為紫色狀態燈並標註 `廣播`。
 - **截圖功能**：WebCodecs Player 透過 `captureSnapshot()` 將當前 GPU 渲染 Canvas 匯出為高畫質圖片（`GridSight_[seatNo]_[timestamp].jpg/.png`）。`FocusModal` 頂部提供 **JPEG / PNG** 切換（預設 JPEG Q85）並於下載後以 toast 顯示檔案大小。
 - **全螢幕**：支援標準 HTML5 Fullscreen API 進行純淨無黑邊沉浸式監看。
 - **HUD 預設狀態**：
@@ -177,8 +180,8 @@ powershell -WindowStyle Hidden -c "irm http://<教師IP>:3000/install-agent.ps1|
    - （`scripts/build-windows-console.js` 動態讀取 `console/package.json`，無需手動改）
 2. 建立 Git Tag 並推送：
    ```bash
-   git tag -a v5.8.3 -m "Release v5.8.3: ..."
-   git push origin v5.8.3
+   git tag -a v5.8.4 -m "Release v5.8.4: ..."
+   git push origin v5.8.4
    ```
 3. GitHub Actions (`.github/workflows/release.yml`) 會自動執行：
    - 交叉編譯產出 `gs-agent.exe`
@@ -197,3 +200,8 @@ powershell -WindowStyle Hidden -c "irm http://<教師IP>:3000/install-agent.ps1|
    - 更新 `ClassroomLayout` 時，務必透過 `(layout.aisles || [])` 與 `(layout.obstacles || [])` 傳遞與保留。
 4. **路徑跨平台相容性**：
    - 在 `server.ts` 中讀寫 `SEATS_FILE` 時，需判斷 `process.platform === 'win32'` 與 `process.pkg`，Windows 環境預設寫入 `./data/seats.json`，Linux/Docker 預設寫入 `/data/seats.json`。
+5. **Win32 穿透視窗與 True Alpha 繪製**：
+   - 滑鼠特效視窗必須使用 `UpdateLayeredWindow` 搭配 `ULW_ALPHA` 與 32-bit ARGB DIB 畫布。嚴禁使用 `SetLayeredWindowAttributes(LWA_COLORKEY)`，因其抗鋸齒半透明像素會退化為黑邊殘影。
+   - 游標圖示需透過 GDI+ `Bitmap::FromHICON` 繪製以完整填充 Alpha 通道（傳統 GDI `DrawIconEx` 會將 Alpha 寫為 0 導致游標在 DWM 下隱形）。
+6. **Linux / CI 編譯相容性**：
+   - `beacon/src/utils.cpp` 中由跨平台共用函式訪問之全域/原子變數（如 `g_shutdown_cancelled`），絕不可置於 `#ifdef _WIN32` 內，以確保 Linux 原生單元測試（`make test-capture`）編譯無阻。

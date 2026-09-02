@@ -10,6 +10,7 @@ import { WebSocketServer, WebSocket } from 'ws';
 import { TokenAuthority } from './tokenAuthority.js';
 import { MulticastDiscoveryService } from './multicastDiscovery.js';
 import { TeacherBroadcastStreamer } from './broadcastStreamer.js';
+import { InputEventType } from './inputRtpStreamer.js';
 import { logger } from './logger.js';
 import { promptSelectNic } from './nicSelector.js';
 import { openBrowser } from './browserLauncher.js';
@@ -562,6 +563,22 @@ app.get('/api/broadcast/status', requireTeacherAuth, (req, res) => {
     quality: broadcastStreamer.getQuality(),
     bitrateKbps: broadcastStreamer.getBitrateKbps(),
   });
+});
+
+app.post('/api/broadcast/input-event', requireTeacherAuth, (req, res) => {
+  const { eventType, normX, normY, buttonFlags, scrollDelta, modifierFlags, keyCode } = req.body || {};
+  const streamer = broadcastStreamer.getInputRtpStreamer();
+  const ok = streamer.sendEvent({
+    eventType: eventType ?? InputEventType.MouseMove,
+    normX,
+    normY,
+    buttonFlags,
+    scrollDelta,
+    modifierFlags,
+    keyCode,
+    timestampMs: Date.now(),
+  });
+  res.json({ ok, active: streamer.isActive() });
 });
 
 // Route: Broadcast Test - upload a media file for RTP multicast test streaming

@@ -94,6 +94,18 @@ export class TeacherBroadcastStreamer {
   private mouseOverlay = new MouseHighlightOverlay();
   private inputRtpStreamer = new TeacherInputRtpStreamer();
 
+  constructor() {
+    this.mouseOverlay.onInputEvent((event) => {
+      if (this.isStreaming) {
+        this.inputRtpStreamer.sendEvent(event);
+      }
+    });
+  }
+
+  getMouseOverlay(): MouseHighlightOverlay {
+    return this.mouseOverlay;
+  }
+
   getInputRtpStreamer(): TeacherInputRtpStreamer {
     return this.inputRtpStreamer;
   }

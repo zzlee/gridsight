@@ -1,5 +1,7 @@
 import assert from 'node:assert';
+import dgram from 'node:dgram';
 import { TeacherInputRtpStreamer, InputEventType, type InputEventData } from './inputRtpStreamer.js';
+import { parseEventLine, MouseHighlightOverlay } from './mouseHighlight.js';
 
 console.log('Running Enhanced TeacherInputRtpStreamer tests...');
 
@@ -53,4 +55,57 @@ assert.strictEqual(streamer.isActive(), false, 'Should be inactive after stop');
 
 console.log('✅ Test 3 passed: Streamer lifecycle start and stop works.');
 
-console.log('All TeacherInputRtpStreamer unit tests passed successfully! 🎉');
+// Test 4: Live UDP Network Transmission and Reception Verification
+async function testLiveNetworkTransmission() {
+  const testPort = 19002;
+  const testStreamer = new TeacherInputRtpStreamer({
+    multicastIp: '127.0.0.1', // Use loopback for reliable unit testing without NIC multicast dependencies
+    port: testPort,
+    ssrc: 0x99887766,
+    redundantCount: 1,
+    heartbeatIntervalMs: 5000,
+  });
+
+  const receiver = dgram.createSocket({ type: 'udp4', reuseAddr: true });
+  await new Promise<void>((resolve) => receiver.bind(testPort, '127.0.0.1', () => resolve()));
+
+  const receivedPackets: Buffer[] = [];
+  receiver.on('message', (msg) => {
+    receivedPackets.push(msg);
+  });
+
+  testStreamer.start();
+
+  // Feed a real mouse event parsed from overlay stdout format
+  const evLine = 'EV 2 45000 30000 1 0 0 0 1700000005000';
+  const inputEvent = parseEventLine(evLine)!;
+  assert.ok(inputEvent, 'parseEventLine should succeed');
+
+  const sent = testStreamer.sendEvent(inputEvent);
+  assert.strictEqual(sent, true, 'sendEvent should return true');
+
+  // Wait for packet reception
+  await new Promise((r) => setTimeout(r, 100));
+
+  assert.ok(receivedPackets.length > 0, 'Receiver should have received at least 1 packet');
+  const rx = receivedPackets[0];
+  assert.strictEqual(rx.length, 33, 'Received packet must be exactly 33 bytes');
+  assert.strictEqual(rx.readUInt8(0), 0x80, 'RTP Version should be 2');
+  assert.strictEqual(rx.readUInt8(1), 0x62, 'RTP Payload Type should be 98');
+  assert.strictEqual(rx.readUInt32BE(8), 0x99887766, 'SSRC should match testStreamer');
+
+  // Verify payload fields
+  assert.strictEqual(rx.readUInt8(12), InputEventType.MouseDown, 'Event type should be MouseDown');
+  assert.strictEqual(rx.readUInt16BE(13), 45000, 'normX should match');
+  assert.strictEqual(rx.readUInt16BE(15), 30000, 'normY should match');
+  assert.strictEqual(rx.readUInt8(17), 1, 'buttonFlags should be 1 (Left click)');
+  assert.strictEqual(Number(rx.readBigUInt64BE(25)), 1700000005000, 'timestampMs should match');
+
+  testStreamer.stop();
+  await new Promise<void>((resolve) => receiver.close(() => resolve()));
+  console.log('✅ Test 4 passed: Live UDP transmission and RTP packet reception verified successfully.');
+}
+
+await testLiveNetworkTransmission();
+
+console.log('\nAll TeacherInputRtpStreamer unit tests passed successfully! 🎉');

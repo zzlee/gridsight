@@ -3,6 +3,7 @@ import os from 'os';
 import path from 'path';
 import fs from 'fs';
 import { logger } from './logger.js';
+import { type InputEventData, InputEventType } from './inputRtpStreamer.js';
 
 /*
  * GridSight Native Mouse Effect Overlay Launcher
@@ -13,8 +14,11 @@ import { logger } from './logger.js';
  * - True per-pixel alpha blending with 32-bit ARGB DIB + UpdateLayeredWindow(ULW_ALPHA).
  * - Real-time authentic Windows cursor rendering via GDI+ Bitmap::FromHICON.
  * - Non-intrusive motion ripple, click ripples (left/right/middle), and scroll indicators.
- * - Zero startup delay (0ms) and zero external runtime dependencies (.NET/PowerShell).
+ * - Live real mouse events piped via stdout to feed TeacherInputRtpStreamer.
+ * - Zero startup delay (0ms) and zero external runtime dependencies.
  */
+
+export type MouseInputEventListener = (event: InputEventData) => void;
 
 export function findOverlayBinary(): string | null {
   const candidates = [
@@ -30,8 +34,44 @@ export function findOverlayBinary(): string | null {
   return null;
 }
 
+export function parseEventLine(line: string): InputEventData | null {
+  const trimmed = line.trim();
+  if (!trimmed.startsWith('EV ')) return null;
+  const parts = trimmed.split(' ');
+  if (parts.length < 9) return null;
+
+  const eventType = parseInt(parts[1], 10);
+  const normX = parseInt(parts[2], 10);
+  const normY = parseInt(parts[3], 10);
+  const buttonFlags = parseInt(parts[4], 10);
+  const scrollDelta = parseInt(parts[5], 10);
+  const modifierFlags = parseInt(parts[6], 10);
+  const keyCode = parseInt(parts[7], 10);
+  const timestampMs = parseInt(parts[8], 10);
+
+  if (isNaN(eventType)) return null;
+
+  return {
+    eventType: eventType as InputEventType,
+    normX: isNaN(normX) ? 0 : normX,
+    normY: isNaN(normY) ? 0 : normY,
+    buttonFlags: isNaN(buttonFlags) ? 0 : buttonFlags,
+    scrollDelta: isNaN(scrollDelta) ? 0 : scrollDelta,
+    modifierFlags: isNaN(modifierFlags) ? 0 : modifierFlags,
+    keyCode: isNaN(keyCode) ? 0 : keyCode,
+    timestampMs: isNaN(timestampMs) ? Date.now() : timestampMs,
+  };
+}
+
 export class MouseHighlightOverlay {
   private process: ChildProcess | null = null;
+  private eventListeners = new Set<MouseInputEventListener>();
+  private stdoutBuffer = '';
+
+  onInputEvent(listener: MouseInputEventListener): () => void {
+    this.eventListeners.add(listener);
+    return () => this.eventListeners.delete(listener);
+  }
 
   start(): boolean {
     if (os.platform() !== 'win32') {
@@ -47,7 +87,27 @@ export class MouseHighlightOverlay {
       const bundledExe = findOverlayBinary();
       if (bundledExe && fs.existsSync(bundledExe)) {
         logger.info(`[MouseHighlight] Launching precompiled native mouse overlay: ${bundledExe}`);
-        this.process = spawn(bundledExe, [], { detached: true, stdio: 'ignore' });
+        this.stdoutBuffer = '';
+        this.process = spawn(bundledExe, ['--emit-events'], { stdio: ['ignore', 'pipe', 'ignore'] });
+
+        this.process.stdout?.on('data', (data: Buffer) => {
+          this.stdoutBuffer += data.toString('utf-8');
+          const lines = this.stdoutBuffer.split(/\r?\n/);
+          this.stdoutBuffer = lines.pop() ?? '';
+          for (const line of lines) {
+            const ev = parseEventLine(line);
+            if (ev) {
+              for (const listener of this.eventListeners) {
+                try {
+                  listener(ev);
+                } catch (err) {
+                  logger.warn(`[MouseHighlight] Error in input event listener: ${err}`);
+                }
+              }
+            }
+          }
+        });
+
         return true;
       }
 
@@ -60,6 +120,7 @@ export class MouseHighlightOverlay {
   }
 
   stop() {
+    this.stdoutBuffer = '';
     if (this.process) {
       try {
         if (os.platform() === 'win32' && this.process.pid) {

@@ -40,6 +40,8 @@ MCAST_BEACON_IP = "239.255.42.99"
 MCAST_BEACON_PORT = 8888
 MCAST_RTP_IP = "239.255.42.100"
 MCAST_RTP_PORT = 9000
+MCAST_INPUT_RTP_IP = "239.255.42.100"
+MCAST_INPUT_RTP_PORT = 9002
 
 LOG_FILE = "data/ubuntu_agent_debug.log"
 os.makedirs("data", exist_ok=True)
@@ -95,7 +97,10 @@ class UbuntuAgentDebugger:
         # 4. Launch RTP Multicast Listener & Live Video Player Thread
         threading.Thread(target=self.rtp_player_loop, daemon=True).start()
 
-        # 5. Launch WebSocket Reverse Command Loop (blocking or threaded)
+        # 5. Launch Input RTP Multicast Listener (Mouse/Keyboard Events) Thread
+        threading.Thread(target=self.input_rtp_loop, daemon=True).start()
+
+        # 6. Launch WebSocket Reverse Command Loop (blocking or threaded)
         self.ws_command_loop()
 
     def print_banner(self):
@@ -269,6 +274,91 @@ class UbuntuAgentDebugger:
                     pass
             self.ffplay_proc = None
 
+    def input_rtp_loop(self):
+        """Monitors Input RTP multicast stream (mouse/keyboard events) and logs them in real time"""
+        sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM, socket.IPPROTO_UDP)
+        sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+        try:
+            sock.bind(("", MCAST_INPUT_RTP_PORT))
+        except Exception as e:
+            log_event("INPUT_ERR", f"Failed to bind UDP port {MCAST_INPUT_RTP_PORT}: {e}", RED)
+            return
+
+        try:
+            mreq = struct.pack("4s4s", socket.inet_aton(MCAST_INPUT_RTP_IP), socket.inet_aton(self.local_ip))
+            sock.setsockopt(socket.IPPROTO_IP, socket.IP_ADD_MEMBERSHIP, mreq)
+        except:
+            mreq = struct.pack("4sl", socket.inet_aton(MCAST_INPUT_RTP_IP), socket.INADDR_ANY)
+            sock.setsockopt(socket.IPPROTO_IP, socket.IP_ADD_MEMBERSHIP, mreq)
+
+        sock.settimeout(2.0)
+        log_event("INPUT_RTP", f"Listening on multicast {MCAST_INPUT_RTP_IP}:{MCAST_INPUT_RTP_PORT}...", GREEN)
+
+        event_names = {
+            1: "MouseMove",
+            2: "MouseDown",
+            3: "MouseUp",
+            4: "Scroll",
+            5: "KeyState",
+            6: "Heartbeat"
+        }
+
+        pkt_count = 0
+        last_seq = None
+
+        while self.running:
+            try:
+                data, addr = sock.recvfrom(2048)
+                if len(data) < 33:
+                    continue
+
+                v_p_x_cc, m_pt, seq, rtp_ts, ssrc = struct.unpack(">BBHII", data[:12])
+                v = (v_p_x_cc >> 6) & 0x03
+                if v != 2:
+                    continue
+
+                if last_seq is not None and seq == last_seq:
+                    continue
+                last_seq = seq
+
+                ev_type, nx, ny, btn, scroll, mod, key, ts_ms = struct.unpack(">BHHBhBIQ", data[12:33])
+                pkt_count += 1
+
+                ev_name = event_names.get(ev_type, f"Type({ev_type})")
+                pct_x = nx / 65535.0 * 100.0
+                pct_y = ny / 65535.0 * 100.0
+
+                btn_parts = []
+                if btn & 0x01: btn_parts.append("LEFT")
+                if btn & 0x02: btn_parts.append("RIGHT")
+                if btn & 0x04: btn_parts.append("MIDDLE")
+                btn_desc = "+".join(btn_parts) if btn_parts else "None"
+
+                mod_parts = []
+                if mod & 0x01: mod_parts.append("Ctrl")
+                if mod & 0x02: mod_parts.append("Shift")
+                if mod & 0x04: mod_parts.append("Alt")
+                if mod & 0x08: mod_parts.append("Meta")
+                mod_desc = f" [{'+'.join(mod_parts)}]" if mod_parts else ""
+
+                if ev_type == 2:  # MouseDown
+                    log_event("INPUT_CLICK", f"🔴 {BOLD}{btn_desc} CLICK DOWN{RESET} at ({pct_x:5.1f}%, {pct_y:5.1f}%){mod_desc} [seq={seq}]", BOLD + RED)
+                elif ev_type == 3:  # MouseUp
+                    log_event("INPUT_CLICK", f"⚪ {btn_desc} CLICK UP at ({pct_x:5.1f}%, {pct_y:5.1f}%){mod_desc} [seq={seq}]", YELLOW)
+                elif ev_type == 4:  # Scroll
+                    direction = "▲ UP" if scroll > 0 else "▼ DOWN"
+                    log_event("INPUT_SCROLL", f"📜 Scroll {direction} ({scroll:+d}) at ({pct_x:5.1f}%, {pct_y:5.1f}%){mod_desc} [seq={seq}]", MAGENTA)
+                elif ev_type == 5:  # KeyState
+                    log_event("INPUT_KEY", f"⌨️ KeyCode={key}{mod_desc} [seq={seq}]", CYAN)
+                else:  # MouseMove / Heartbeat
+                    if pkt_count <= 5 or pkt_count % 30 == 0:
+                        log_event("INPUT_MOVE", f"🖱️ Pos=({pct_x:5.1f}%, {pct_y:5.1f}%) btn={btn_desc}{mod_desc} [seq={seq}]", DIM + CYAN)
+
+            except socket.timeout:
+                continue
+            except Exception as e:
+                pass
+
     def ws_command_loop(self):
         """Connects reverse WebSocket to teacher console and logs all received events"""
         log_event("WS_CLIENT", f"Preparing reverse WebSocket to ws://{self.teacher_ip}:{self.port}/ws/agent...", CYAN)
@@ -366,6 +456,19 @@ class UbuntuAgentDebugger:
             log_event("EVENT_ERR", f"Parse error: {e} ({raw_json})", RED)
 
 if __name__ == "__main__":
+    if len(sys.argv) > 1 and sys.argv[1] in ("--listen-input", "--input-only"):
+        print(f"{BOLD}{GREEN}==============================================================={RESET}")
+        print(f"{BOLD}{GREEN}   🖱️  GridSight Ubuntu Input RTP Live Monitor / Tester       {RESET}")
+        print(f"{BOLD}{GREEN}==============================================================={RESET}")
+        print(f"{DIM} Listening on Multicast:{RESET} {MCAST_INPUT_RTP_IP}:{MCAST_INPUT_RTP_PORT}")
+        print(f"{DIM} Press Ctrl+C to stop...{RESET}\n")
+        dbg = UbuntuAgentDebugger()
+        try:
+            dbg.input_rtp_loop()
+        except KeyboardInterrupt:
+            print("\nStopped.")
+        sys.exit(0)
+
     t_ip = sys.argv[1] if len(sys.argv) > 1 else None
     agent = UbuntuAgentDebugger(teacher_ip=t_ip)
     try:

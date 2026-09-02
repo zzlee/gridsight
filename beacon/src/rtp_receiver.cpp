@@ -16,6 +16,7 @@
 #include <winsock2.h>
 #include <ws2tcpip.h>
 #include <windows.h>
+#include <gdiplus.h>
 #include <mfapi.h>
 #include <mfidl.h>
 #include <mftransform.h>
@@ -544,8 +545,23 @@ static void ToggleFullscreen(HWND hwnd) {
     }
 }
 
+static RTPReceiver* g_rtp_receiver_instance = nullptr;
+
 static LRESULT CALLBACK OverlayWndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) {
     switch (msg) {
+    case WM_CREATE:
+        SetTimer(hwnd, 2, 16, NULL); // ~60 FPS animation timer for input ripples
+        return 0;
+
+    case WM_TIMER:
+        if (wParam == 2) {
+            if (g_rtp_receiver_instance && g_rtp_receiver_instance->HasActiveAnimations()) {
+                g_rtp_receiver_instance->AdvanceAnimations();
+                InvalidateRect(hwnd, NULL, FALSE);
+            }
+        }
+        return 0;
+
     case WM_ERASEBKGND:
         return 1; // Prevent flicker
 
@@ -606,11 +622,12 @@ static LRESULT CALLBACK OverlayWndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARA
             }
         }
 
+        int view_w = client_w, view_h = client_h, view_x = 0, view_y = 0;
+
         if (has_frame) {
             double target_aspect = (double)fw / (double)fh;
             double client_aspect = (double)client_w / (double)client_h;
 
-            int view_w, view_h, view_x, view_y;
             if (client_aspect > target_aspect) {
                 view_h = client_h;
                 view_w = (int)(client_h * target_aspect);
@@ -635,7 +652,6 @@ static LRESULT CALLBACK OverlayWndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARA
             StretchDIBits(memDC, view_x, view_y, view_w, view_h, 0, 0, fw, fh, frame_copy.data(), &bmi, DIB_RGB_COLORS, SRCCOPY);
         } else {
             // Draw initial placeholder while waiting for first I-frame
-            int view_w, view_h, view_x, view_y;
             double target_aspect = 16.0 / 9.0;
             double client_aspect = (double)client_w / (double)client_h;
 
@@ -700,6 +716,11 @@ static LRESULT CALLBACK OverlayWndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARA
             DeleteObject(hSubFont);
         }
 
+        // Overlay teacher mouse cursor and click effects over memDC before blit
+        if (g_rtp_receiver_instance) {
+            g_rtp_receiver_instance->RenderMouseOverlay((void*)memDC, view_x, view_y, view_w, view_h);
+        }
+
         BitBlt(hdc, 0, 0, client_w, client_h, memDC, 0, 0, SRCCOPY);
 
         SelectObject(memDC, oldBitmap);
@@ -721,10 +742,6 @@ static LRESULT CALLBACK OverlayWndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARA
 #endif
 
 namespace GridSight {
-
-#ifdef _WIN32
-static RTPReceiver* g_rtp_receiver_instance = nullptr;
-#endif
 
 void RTPReceiver::RequestCloseOverlay() {
 #ifdef _WIN32
@@ -1608,6 +1625,218 @@ void RTPReceiver::ReceiveLoop() {
     CloseOverlayWindow();
 }
 
+void RTPReceiver::UpdateInputEvent(const InputRTPEvent& event) {
+#ifdef _WIN32
+    {
+        std::lock_guard<std::mutex> lock(input_mutex_);
+        has_cursor_ = true;
+        cursor_norm_x_ = event.norm_x;
+        cursor_norm_y_ = event.norm_y;
+        cursor_button_flags_ = event.button_flags;
+        cursor_modifier_flags_ = event.modifier_flags;
+        last_cursor_event_time_ = Utils::GetCurrentTimestampMs();
+
+        if (event.event_type == InputEventType::MouseDown) {
+            ClickAnimation anim;
+            anim.norm_x = event.norm_x;
+            anim.norm_y = event.norm_y;
+            anim.radius = 6.0f;
+            anim.max_radius = (event.button_flags & 0x02) ? 38.0f : 32.0f;
+            anim.alpha = 240.0f;
+            anim.type = (event.button_flags & 0x02) ? 1 : ((event.button_flags & 0x04) ? 2 : 0);
+            if (click_animations_.size() >= 8) {
+                click_animations_.erase(click_animations_.begin());
+            }
+            click_animations_.push_back(anim);
+        } else if (event.event_type == InputEventType::Scroll) {
+            ScrollAnimation anim;
+            anim.norm_x = event.norm_x;
+            anim.norm_y = event.norm_y;
+            anim.offset_y = 0.0f;
+            anim.alpha = 230.0f;
+            anim.is_up = (event.scroll_delta > 0);
+            if (scroll_animations_.size() >= 8) {
+                scroll_animations_.erase(scroll_animations_.begin());
+            }
+            scroll_animations_.push_back(anim);
+        }
+    }
+
+    if (hwnd_overlay_) {
+        InvalidateRect((HWND)hwnd_overlay_, NULL, FALSE);
+    }
+#else
+    (void)event;
+#endif
+}
+
+bool RTPReceiver::AdvanceAnimations() {
+#ifdef _WIN32
+    std::lock_guard<std::mutex> lock(input_mutex_);
+    bool active = false;
+
+    for (size_t i = 0; i < click_animations_.size(); ) {
+        auto& anim = click_animations_[i];
+        anim.radius += (anim.max_radius - anim.radius) * 0.32f + 0.6f;
+        anim.alpha -= 18.0f;
+        if (anim.alpha <= 0.0f || anim.radius >= anim.max_radius) {
+            click_animations_.erase(click_animations_.begin() + i);
+        } else {
+            active = true;
+            ++i;
+        }
+    }
+
+    for (size_t i = 0; i < scroll_animations_.size(); ) {
+        auto& anim = scroll_animations_[i];
+        anim.offset_y += anim.is_up ? -1.8f : 1.8f;
+        anim.alpha -= 16.0f;
+        if (anim.alpha <= 0.0f) {
+            scroll_animations_.erase(scroll_animations_.begin() + i);
+        } else {
+            active = true;
+            ++i;
+        }
+    }
+
+    return active;
+#else
+    return false;
+#endif
+}
+
+bool RTPReceiver::HasActiveAnimations() {
+#ifdef _WIN32
+    std::lock_guard<std::mutex> lock(input_mutex_);
+    return !click_animations_.empty() || !scroll_animations_.empty();
+#else
+    return false;
+#endif
+}
+
+void RTPReceiver::RenderMouseOverlay(void* hdc_ptr, int view_x, int view_y, int view_w, int view_h) {
+#ifdef _WIN32
+    HDC memDC = (HDC)hdc_ptr;
+    if (!memDC) return;
+
+    std::lock_guard<std::mutex> lock(input_mutex_);
+    if (!has_cursor_ || view_w <= 0 || view_h <= 0) return;
+
+    uint64_t now_ms = Utils::GetCurrentTimestampMs();
+    if (last_cursor_event_time_ > 0 && (now_ms - last_cursor_event_time_ > 5000)) {
+        return;
+    }
+
+    int cx = view_x + (int)(((double)cursor_norm_x_ / 65535.0) * view_w);
+    int cy = view_y + (int)(((double)cursor_norm_y_ / 65535.0) * view_h);
+
+    Gdiplus::Graphics g(memDC);
+    g.SetSmoothingMode(Gdiplus::SmoothingModeAntiAlias);
+
+    // 1. Draw Click Ripple Animations
+    for (const auto& anim : click_animations_) {
+        int a = (int)std::max(0.0f, std::min(255.0f, anim.alpha));
+        int ex = view_x + (int)(((double)anim.norm_x / 65535.0) * view_w);
+        int ey = view_y + (int)(((double)anim.norm_y / 65535.0) * view_h);
+
+        if (anim.type == 0) {
+            Gdiplus::Pen pen(Gdiplus::Color(a, 0, 229, 255), 2.6f);
+            g.DrawEllipse(&pen, ex - anim.radius, ey - anim.radius, anim.radius * 2.0f, anim.radius * 2.0f);
+            if (anim.radius < 16.0f) {
+                Gdiplus::SolidBrush dotBrush(Gdiplus::Color(a, 0, 229, 255));
+                g.FillEllipse(&dotBrush, ex - 3, ey - 3, 6, 6);
+            }
+        } else if (anim.type == 1) {
+            Gdiplus::Pen pen1(Gdiplus::Color(a, 255, 152, 0), 2.5f);
+            Gdiplus::Pen pen2(Gdiplus::Color((int)(a * 0.7f), 255, 87, 34), 1.5f);
+            g.DrawEllipse(&pen1, ex - anim.radius, ey - anim.radius, anim.radius * 2.0f, anim.radius * 2.0f);
+            float inner_r = std::max(2.0f, anim.radius - 8.0f);
+            g.DrawEllipse(&pen2, ex - inner_r, ey - inner_r, inner_r * 2.0f, inner_r * 2.0f);
+        } else {
+            Gdiplus::Pen pen(Gdiplus::Color(a, 168, 85, 247), 2.5f);
+            g.DrawEllipse(&pen, ex - anim.radius, ey - anim.radius, anim.radius * 2.0f, anim.radius * 2.0f);
+        }
+    }
+
+    // 2. Draw Scroll Indicators
+    Gdiplus::FontFamily fontFamily(L"Segoe UI");
+    Gdiplus::Font font(&fontFamily, 9, Gdiplus::FontStyleBold, Gdiplus::UnitPixel);
+    for (const auto& anim : scroll_animations_) {
+        int a = (int)std::max(0.0f, std::min(255.0f, anim.alpha));
+        int ex = view_x + (int)(((double)anim.norm_x / 65535.0) * view_w) + 14;
+        int ey = view_y + (int)(((double)anim.norm_y / 65535.0) * view_h) + (int)anim.offset_y + 4;
+
+        Gdiplus::SolidBrush bubbleBrush(Gdiplus::Color((int)(a * 0.85f), 15, 23, 42));
+        Gdiplus::SolidBrush textBrush(Gdiplus::Color(a, 56, 189, 248));
+        Gdiplus::Pen bubblePen(Gdiplus::Color((int)(a * 0.6f), 56, 189, 248), 1.0f);
+
+        int bw = 16, bh = 16;
+        g.FillEllipse(&bubbleBrush, ex - bw / 2, ey - bh / 2, bw, bh);
+        g.DrawEllipse(&bubblePen, ex - bw / 2, ey - bh / 2, bw, bh);
+
+        const wchar_t* arrow = anim.is_up ? L"▲" : L"▼";
+        Gdiplus::PointF origin((Gdiplus::REAL)(ex - 5), (Gdiplus::REAL)(ey - 6));
+        g.DrawString(arrow, -1, &font, origin, &textBrush);
+    }
+
+    // 3. Draw Vector Arrow Pointer with Shadow
+    Gdiplus::Point shadowPts[7] = {
+        Gdiplus::Point(cx + 1, cy + 2),
+        Gdiplus::Point(cx + 1, cy + 20),
+        Gdiplus::Point(cx + 5, cy + 16),
+        Gdiplus::Point(cx + 9, cy + 24),
+        Gdiplus::Point(cx + 12, cy + 23),
+        Gdiplus::Point(cx + 8, cy + 15),
+        Gdiplus::Point(cx + 14, cy + 15)
+    };
+    Gdiplus::SolidBrush shadowBrush(Gdiplus::Color(90, 0, 0, 0));
+    g.FillPolygon(&shadowBrush, shadowPts, 7);
+
+    Gdiplus::Point arrowPts[7] = {
+        Gdiplus::Point(cx, cy),
+        Gdiplus::Point(cx, cy + 18),
+        Gdiplus::Point(cx + 4, cy + 14),
+        Gdiplus::Point(cx + 8, cy + 22),
+        Gdiplus::Point(cx + 11, cy + 21),
+        Gdiplus::Point(cx + 7, cy + 13),
+        Gdiplus::Point(cx + 13, cy + 13)
+    };
+    Gdiplus::SolidBrush arrowFill(Gdiplus::Color(255, 255, 255, 255));
+    Gdiplus::Pen arrowBorder(Gdiplus::Color(255, 20, 20, 20), 1.6f);
+    g.FillPolygon(&arrowFill, arrowPts, 7);
+    g.DrawPolygon(&arrowBorder, arrowPts, 7);
+
+    // 4. Modifier Badge
+    if (cursor_modifier_flags_ != 0) {
+        std::wstring modStr;
+        if (cursor_modifier_flags_ & 0x01) modStr += L"Ctrl ";
+        if (cursor_modifier_flags_ & 0x02) modStr += L"Shift ";
+        if (cursor_modifier_flags_ & 0x04) modStr += L"Alt ";
+        if (!modStr.empty()) {
+            modStr.pop_back();
+            Gdiplus::Font modFont(&fontFamily, 9, Gdiplus::FontStyleBold, Gdiplus::UnitPixel);
+            Gdiplus::RectF bounds;
+            g.MeasureString(modStr.c_str(), -1, &modFont, Gdiplus::PointF(0, 0), &bounds);
+
+            int bx = cx + 16;
+            int by = cy + 14;
+            int bw = (int)bounds.Width + 8;
+            int bh = (int)bounds.Height + 4;
+
+            Gdiplus::SolidBrush badgeBg(Gdiplus::Color(200, 15, 23, 42));
+            Gdiplus::Pen badgeBorder(Gdiplus::Color(220, 56, 189, 248), 1.0f);
+            Gdiplus::SolidBrush badgeText(Gdiplus::Color(255, 56, 189, 248));
+
+            g.FillRectangle(&badgeBg, bx, by, bw, bh);
+            g.DrawRectangle(&badgeBorder, bx, by, bw, bh);
+            g.DrawString(modStr.c_str(), -1, &modFont, Gdiplus::PointF((Gdiplus::REAL)(bx + 4), (Gdiplus::REAL)(by + 2)), &badgeText);
+        }
+    }
+#else
+    (void)hdc_ptr; (void)view_x; (void)view_y; (void)view_w; (void)view_h;
+#endif
+}
+
 void RTPReceiver::CreateFullScreenOverlayWindow() {
     if (overlay_active_.exchange(true)) return;
     Utils::Log("INFO", "Broadcast received! Activating presentation popup window.");
@@ -1622,6 +1851,10 @@ void RTPReceiver::CreateFullScreenOverlayWindow() {
 
 void RTPReceiver::UIThreadLoop() {
 #ifdef _WIN32
+    Gdiplus::GdiplusStartupInput gdiplusStartupInput;
+    ULONG_PTR gdiplusToken = 0;
+    Gdiplus::GdiplusStartup(&gdiplusToken, &gdiplusStartupInput, NULL);
+
     HINSTANCE hInstance = GetModuleHandle(NULL);
     WNDCLASSW wc = {0};
     wc.style = CS_DBLCLKS;
@@ -1662,6 +1895,8 @@ void RTPReceiver::UIThreadLoop() {
         DestroyWindow(hwnd);
         hwnd_overlay_ = nullptr;
     }
+
+    Gdiplus::GdiplusShutdown(gdiplusToken);
 #endif
 }
 

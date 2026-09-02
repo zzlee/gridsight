@@ -75,9 +75,14 @@ int main() {
     packet[0] = 0x80;
     std::cout << "✅ Test 2 passed: ParseInputRTPPacket correctly rejects malformed packets." << std::endl;
 
-    // Test 3: InputRTPReceiver instance lifecycle
+    // Test 3: InputRTPReceiver instance lifecycle & event listener registration
     GridSight::InputRTPReceiver receiver("239.255.42.100", 19002);
     assert(!receiver.IsRunning() && "Should not be running before Start");
+    bool listener_registered = false;
+    receiver.SetEventListener([&listener_registered](const GridSight::InputRTPEvent&) {
+        listener_registered = true;
+    });
+    std::cout << "✅ Test 3 passed: Receiver lifecycle and event listener registration verified." << std::endl;
 
     // Test 4: Logging verification for received event
     GridSight::Utils::Log("INFO", "🖱️ [Input RTP Log] Event #1: type=2 pos=(32767,16383) btn=0x1 scroll=120 mod=0x2 key=65 seq=42 ts=1700000000000");

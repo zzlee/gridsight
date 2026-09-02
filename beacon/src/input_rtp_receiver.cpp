@@ -251,6 +251,11 @@ void InputRTPReceiver::ReceiveLoop() {
                 bool processed = ProcessEvent(event);
                 if (processed) {
                     packet_count++;
+                    if (listener_) {
+                        try {
+                            listener_(event);
+                        } catch (...) {}
+                    }
                     bool is_discrete = (event.event_type == InputEventType::MouseDown ||
                                         event.event_type == InputEventType::MouseUp ||
                                         event.event_type == InputEventType::Scroll ||

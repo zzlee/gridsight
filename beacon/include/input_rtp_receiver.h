@@ -5,6 +5,8 @@
 #include <atomic>
 #include <cstdint>
 
+#include <functional>
+
 namespace GridSight {
 
 enum class InputEventType : uint8_t {
@@ -30,6 +32,8 @@ struct InputRTPEvent {
     uint32_t ssrc;
 };
 
+using InputEventListener = std::function<void(const InputRTPEvent&)>;
+
 class InputRTPReceiver {
 public:
     InputRTPReceiver(const std::string& multicast_ip = "239.255.42.100", int port = 9002);
@@ -38,6 +42,7 @@ public:
     bool Start();
     void Stop();
     bool IsRunning() const { return running_.load(); }
+    void SetEventListener(InputEventListener listener) { listener_ = listener; }
 
     static bool ParseInputRTPPacket(const uint8_t* data, size_t size, InputRTPEvent& out_event);
 
@@ -56,6 +61,7 @@ private:
     uint16_t last_seq_{0};
     uint8_t last_button_flags_{0};
     uint8_t last_modifier_flags_{0};
+    InputEventListener listener_;
 };
 
 } // namespace GridSight

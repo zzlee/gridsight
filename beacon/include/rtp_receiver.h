@@ -8,6 +8,8 @@
 #include <string>
 #include <vector>
 
+#include "input_rtp_receiver.h"
+
 namespace GridSight {
 
 class RTPReceiver {
@@ -18,6 +20,11 @@ public:
     bool Start();
     void Stop();
     static void RequestCloseOverlay();
+
+    void UpdateInputEvent(const InputRTPEvent& event);
+    void RenderMouseOverlay(void* hdc, int view_x, int view_y, int view_w, int view_h);
+    bool AdvanceAnimations();
+    bool HasActiveAnimations();
 
 private:
     void ReceiveLoop();
@@ -70,6 +77,34 @@ private:
     bool access_unit_active_ = false;
     bool access_unit_has_idr_ = false;
     bool access_unit_corrupt_ = false;
+
+    // Input RTP Cursor and Click Effect Overlay State
+    struct ClickAnimation {
+        uint16_t norm_x = 0;
+        uint16_t norm_y = 0;
+        float radius = 6.0f;
+        float max_radius = 32.0f;
+        float alpha = 240.0f;
+        uint8_t type = 0; // 0: Left, 1: Right, 2: Middle
+    };
+
+    struct ScrollAnimation {
+        uint16_t norm_x = 0;
+        uint16_t norm_y = 0;
+        float offset_y = 0.0f;
+        float alpha = 230.0f;
+        bool is_up = true;
+    };
+
+    std::mutex input_mutex_;
+    bool has_cursor_ = false;
+    uint16_t cursor_norm_x_ = 0;
+    uint16_t cursor_norm_y_ = 0;
+    uint8_t cursor_button_flags_ = 0;
+    uint8_t cursor_modifier_flags_ = 0;
+    std::vector<ClickAnimation> click_animations_;
+    std::vector<ScrollAnimation> scroll_animations_;
+    uint64_t last_cursor_event_time_ = 0;
 };
 
 } // namespace GridSight

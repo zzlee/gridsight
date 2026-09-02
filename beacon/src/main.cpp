@@ -278,8 +278,11 @@ int main(int argc, char* argv[]) {
         GridSight::Utils::Log("ERROR", "RTPReceiver failed to start; teacher broadcast reception is unavailable");
     }
 
-    // 4. Start Input RTP Receiver for Teacher Mouse/Keyboard Events (Log verification, non-rendering)
+    // 4. Start Input RTP Receiver for Teacher Mouse/Keyboard Events (Broadcast Overlay Rendering)
     GridSight::InputRTPReceiver input_receiver(input_rtp_ip, input_rtp_port);
+    input_receiver.SetEventListener([&rtp_receiver](const GridSight::InputRTPEvent& ev) {
+        rtp_receiver.UpdateInputEvent(ev);
+    });
     if (!input_receiver.Start()) {
         GridSight::Utils::Log("WARN", "InputRTPReceiver failed to start on " + input_rtp_ip + ":" + std::to_string(input_rtp_port));
     }

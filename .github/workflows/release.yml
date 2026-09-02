@@ -62,6 +62,7 @@ jobs:
         uses: actions/download-artifact@v4
         with:
           name: native-windows-binaries
+          path: .
 
       - name: Install Dependencies
         run: |
@@ -99,10 +100,13 @@ jobs:
       - name: Organize Release Files
         run: |
           mkdir -p release-dist
-          cp artifacts/gs-console/gs-console.exe release-dist/gs-console.exe
-          cp artifacts/gs-console/gridsight-console-portable.zip release-dist/gridsight-console-portable.zip
-          cp artifacts/gs-agent/gs-agent.exe release-dist/gs-agent.exe
+          find artifacts -type f -name "gridsight-console-portable.zip" -exec cp {} release-dist/ \;
+          find artifacts -type f -name "gs-console.exe" -exec cp {} release-dist/ \;
+          find artifacts -type f -name "gs-agent.exe" -exec cp {} release-dist/ \;
           ls -lh release-dist/
+          test -f release-dist/gridsight-console-portable.zip
+          test -f release-dist/gs-console.exe
+          test -f release-dist/gs-agent.exe
 
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v2

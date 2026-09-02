@@ -1383,7 +1383,7 @@ app.get(['/api/agent/:id/logs', '/api/agent/logs'], requireTeacherAuth, async (r
 });
 
 // Route: One-click PowerShell installation script for Student PCs
-app.get('/install-agent.ps1', (req, res) => {
+app.get('/install-agent.ps1', async (req, res) => {
   const socketAddress = req.socket.localAddress?.replace(/^::ffff:/, '') || '';
   const candidateHost = activeTeacherIp && activeTeacherIp !== '127.0.0.1'
     ? activeTeacherIp
@@ -1391,11 +1391,12 @@ app.get('/install-agent.ps1', (req, res) => {
       ? socketAddress
       : req.hostname;
   const teacherHost = /^[A-Za-z0-9._-]+$/.test(candidateHost) ? candidateHost : '127.0.0.1';
+  const hmacSecret = await tokenAuth.getHmacSecret();
   const script = buildInstallAgentScript({
     serverHost: `${teacherHost}:${PORT}`,
     teacherHost,
     teacherPort: PORT,
-    hmacSecret: tokenAuth.getHmacSecret(),
+    hmacSecret,
     version: APP_VERSION,
   });
   res.setHeader('Content-Type', 'text/plain; charset=utf-8');

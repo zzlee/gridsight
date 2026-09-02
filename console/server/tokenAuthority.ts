@@ -11,11 +11,11 @@ export class TokenAuthority {
   }
 
   /**
-   * Load or generate the HMAC shared secret.
+   * Load or generate the HMAC shared secret asynchronously using non-blocking I/O.
    * Persists to data/hmac_secret.txt so the same secret survives restarts
    * and existing agent deployments remain valid.
    */
-  getHmacSecret(dataDir?: string): string {
+  async getHmacSecret(dataDir?: string): Promise<string> {
     if (this.hmacSecret) return this.hmacSecret;
 
     const secretFile = dataDir
@@ -23,10 +23,9 @@ export class TokenAuthority {
       : path.resolve(process.cwd(), 'data', 'hmac_secret.txt');
 
     try {
-      if (fs.existsSync(secretFile)) {
-        this.hmacSecret = fs.readFileSync(secretFile, 'utf-8').trim();
-        if (this.hmacSecret) return this.hmacSecret;
-      }
+      const data = await fs.promises.readFile(secretFile, 'utf-8');
+      this.hmacSecret = data.trim();
+      if (this.hmacSecret) return this.hmacSecret;
     } catch { /* fall through to generate */ }
 
     // Generate a new 32-byte (64 hex chars) random secret
@@ -34,12 +33,12 @@ export class TokenAuthority {
 
     try {
       const dir = path.dirname(secretFile);
-      fs.mkdirSync(dir, { recursive: true });
+      await fs.promises.mkdir(dir, { recursive: true });
       /* Atomic write via temp file + rename: a truncated secret file
        * would invalidate every issued token across restarts. */
       const tempFile = `${secretFile}.tmp-${process.pid}`;
-      fs.writeFileSync(tempFile, this.hmacSecret, 'utf-8');
-      fs.renameSync(tempFile, secretFile);
+      await fs.promises.writeFile(tempFile, this.hmacSecret, 'utf-8');
+      await fs.promises.rename(tempFile, secretFile);
     } catch (err) {
       console.error('[TokenAuthority] Failed to persist HMAC secret:', err);
     }
@@ -51,8 +50,8 @@ export class TokenAuthority {
    * Compute HMAC-SHA256 signature for a TOKEN_GRANT reply.
    * Signature = HMAC-SHA256(secret, token + "|" + mac)
    */
-  signTokenGrant(token: string, mac: string): string {
-    const secret = this.getHmacSecret();
+  async signTokenGrant(token: string, mac: string): Promise<string> {
+    const secret = await this.getHmacSecret();
     return crypto
       .createHmac('sha256', secret)
       .update(token + '|' + mac)

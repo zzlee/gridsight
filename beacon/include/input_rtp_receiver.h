@@ -43,7 +43,7 @@ public:
 
 private:
     void ReceiveLoop();
-    void ProcessEvent(const InputRTPEvent& event);
+    bool ProcessEvent(const InputRTPEvent& event);
 
     std::string multicast_ip_;
     int port_;

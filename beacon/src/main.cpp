@@ -229,6 +229,8 @@ int main(int argc, char* argv[]) {
     int multicast_port = GridSight::Utils::GetEnvInt("MULTICAST_PORT", 8888);
     std::string rtp_ip = GridSight::Utils::GetEnv("RTP_IP", "239.255.42.100");
     int rtp_port = GridSight::Utils::GetEnvInt("RTP_PORT", 9000);
+    std::string input_rtp_ip = GridSight::Utils::GetEnv("INPUT_RTP_IP", rtp_ip);
+    int input_rtp_port = GridSight::Utils::GetEnvInt("INPUT_RTP_PORT", 9002);
     std::string hmac_secret = GridSight::Utils::GetEnv("HMAC_SECRET", "");
     std::string teacher_host = GridSight::Utils::GetEnv(
         "TEACHER_HOST",
@@ -276,6 +278,12 @@ int main(int argc, char* argv[]) {
         GridSight::Utils::Log("ERROR", "RTPReceiver failed to start; teacher broadcast reception is unavailable");
     }
 
+    // 4. Start Input RTP Receiver for Teacher Mouse/Keyboard Events (Log verification, non-rendering)
+    GridSight::InputRTPReceiver input_receiver(input_rtp_ip, input_rtp_port);
+    if (!input_receiver.Start()) {
+        GridSight::Utils::Log("WARN", "InputRTPReceiver failed to start on " + input_rtp_ip + ":" + std::to_string(input_rtp_port));
+    }
+
     GridSight::Utils::Log("INFO", "GridSight Beacon worker startup sequence completed.");
 
     while (g_keep_running) {
@@ -285,6 +293,7 @@ int main(int argc, char* argv[]) {
     GridSight::Utils::Log("INFO", "GridSight Beacon shutting down...");
     beacon_client.Stop();
     rtp_receiver.Stop();
+    input_receiver.Stop();
     ws_streamer->Stop();
     http_server->Stop();
     capturer->Release();

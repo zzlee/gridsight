@@ -39,9 +39,16 @@ test-utils:
 		-o build/test_security_utils
 	timeout 30s ./build/test_security_utils
 
-test: test-capture test-utils
+test-input-rtp:
+	mkdir -p build
+	$(HOST_CXX) -std=c++17 -O2 -Wall -Wextra -pthread -Iinclude \
+		tests/test_input_rtp_receiver.cpp src/input_rtp_receiver.cpp src/utils.cpp \
+		-o build/test_input_rtp_receiver
+	timeout 30s ./build/test_input_rtp_receiver
+
+test: test-capture test-utils test-input-rtp
 
 clean:
-	rm -f src/*.o $(TARGET) gs-agent.exe gs-agent build/test_capture_lifecycle build/test_security_utils
+	rm -f src/*.o $(TARGET) gs-agent.exe gs-agent build/test_capture_lifecycle build/test_security_utils build/test_input_rtp_receiver gs-agent.log
 
-.PHONY: all clean test test-capture test-utils
+.PHONY: all clean test test-capture test-utils test-input-rtp

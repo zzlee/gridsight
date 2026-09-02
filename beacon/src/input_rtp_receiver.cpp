@@ -197,12 +197,12 @@ void InputRTPReceiver::Stop() {
     }
 }
 
-void InputRTPReceiver::ProcessEvent(const InputRTPEvent& event) {
+bool InputRTPReceiver::ProcessEvent(const InputRTPEvent& event) {
     // 1. Sequence Tracking & Redundant Deduplication
     if (has_last_seq_) {
         if (event.sequence == last_seq_) {
             // Deduplicated redundant packet received
-            return;
+            return false;
         }
 
         uint16_t expected_seq = static_cast<uint16_t>(last_seq_ + 1);
@@ -229,6 +229,8 @@ void InputRTPReceiver::ProcessEvent(const InputRTPEvent& event) {
             std::to_string(last_modifier_flags_) + " -> 0x" + std::to_string(event.modifier_flags));
         last_modifier_flags_ = event.modifier_flags;
     }
+
+    return true;
 }
 
 void InputRTPReceiver::ReceiveLoop() {
@@ -246,17 +248,25 @@ void InputRTPReceiver::ReceiveLoop() {
         if (bytes > 0) {
             InputRTPEvent event;
             if (ParseInputRTPPacket(buffer.data(), static_cast<size_t>(bytes), event)) {
-                ProcessEvent(event);
-                packet_count++;
-                if (packet_count <= 10 || packet_count % 100 == 0) {
-                    Utils::Log("INFO", "🖱️ [Input RTP] Received event #" + std::to_string(packet_count) +
-                        ": type=" + std::to_string(static_cast<int>(event.event_type)) +
-                        " pos=(" + std::to_string(event.norm_x) + "," + std::to_string(event.norm_y) + ")" +
-                        " btn=0x" + std::to_string(event.button_flags) +
-                        " scroll=" + std::to_string(event.scroll_delta) +
-                        " mod=0x" + std::to_string(event.modifier_flags) +
-                        " key=" + std::to_string(event.key_code) +
-                        " seq=" + std::to_string(event.sequence));
+                bool processed = ProcessEvent(event);
+                if (processed) {
+                    packet_count++;
+                    bool is_discrete = (event.event_type == InputEventType::MouseDown ||
+                                        event.event_type == InputEventType::MouseUp ||
+                                        event.event_type == InputEventType::Scroll ||
+                                        event.event_type == InputEventType::KeyState);
+
+                    if (is_discrete || packet_count <= 10 || packet_count % 100 == 0) {
+                        Utils::Log("INFO", "🖱️ [Input RTP Log] Event #" + std::to_string(packet_count) +
+                            ": type=" + std::to_string(static_cast<int>(event.event_type)) +
+                            " pos=(" + std::to_string(event.norm_x) + "," + std::to_string(event.norm_y) + ")" +
+                            " btn=0x" + std::to_string(event.button_flags) +
+                            " scroll=" + std::to_string(event.scroll_delta) +
+                            " mod=0x" + std::to_string(event.modifier_flags) +
+                            " key=" + std::to_string(event.key_code) +
+                            " seq=" + std::to_string(event.sequence) +
+                            " ts=" + std::to_string(event.timestamp_ms));
+                    }
                 }
             }
         }

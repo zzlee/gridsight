@@ -4,6 +4,7 @@
 #include "../include/ws_server.h"
 #include "../include/rtp_receiver.h"
 #include "../include/token_manager.h"
+#include "../include/input_rtp_receiver.h"
 #include "../include/utils.h"
 #include <iostream>
 #include <memory>

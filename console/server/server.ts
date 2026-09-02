@@ -119,10 +119,11 @@ const pruneSnapshotCache = (now = Date.now()) => {
   for (const [key, entry] of snapshotCache) {
     if (now - entry.timestamp > SNAPSHOT_CACHE_TTL_MS) snapshotCache.delete(key);
   }
-  while (snapshotCache.size > SNAPSHOT_CACHE_MAX_KEYS) {
-    const oldestKey = snapshotCache.keys().next().value as string | undefined;
-    if (!oldestKey) break;
-    snapshotCache.delete(oldestKey);
+  if (snapshotCache.size > SNAPSHOT_CACHE_MAX_KEYS) {
+    for (const [key] of snapshotCache) {
+      snapshotCache.delete(key);
+      if (snapshotCache.size <= SNAPSHOT_CACHE_MAX_KEYS) break;
+    }
   }
 };
 

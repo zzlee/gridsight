@@ -153,7 +153,7 @@ export class MulticastDiscoveryService {
       logger.error(`[Discovery] UDP socket error: ${err.message}`);
     });
 
-    this.server.on('message', (msg, rinfo) => {
+    this.server.on('message', async (msg, rinfo) => {
       try {
         const payload = JSON.parse(msg.toString('utf-8'));
         const pType = (payload.type || '').toUpperCase();
@@ -163,7 +163,7 @@ export class MulticastDiscoveryService {
           const token = this.tokenAuth.generateToken(mac, rinfo.address);
 
           // Compute HMAC signature so agent can verify this is from the real server
-          const signature = this.tokenAuth.signTokenGrant(token, mac);
+          const signature = await this.tokenAuth.signTokenGrant(token, mac);
 
           // Reply with Token Uni-cast
           const reply = JSON.stringify({

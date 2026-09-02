@@ -63,60 +63,67 @@ try {
   Date.now = realDateNow;
 }
 
-// 3. getHmacSecret tests
-const tempDataDir = path.resolve(process.cwd(), 'temp_test_data_' + Date.now());
-try {
-  const authSecret = new TokenAuthority();
-  const secret1 = authSecret.getHmacSecret(tempDataDir);
-  assert(typeof secret1 === 'string' && secret1.length === 64, 'getHmacSecret returns 64-char hex secret (32 bytes)');
+async function main() {
+  // 3. getHmacSecret tests
+  const tempDataDir = path.resolve(process.cwd(), 'temp_test_data_' + Date.now());
+  try {
+    const authSecret = new TokenAuthority();
+    const secret1 = await authSecret.getHmacSecret(tempDataDir);
+    assert(typeof secret1 === 'string' && secret1.length === 64, 'getHmacSecret returns 64-char hex secret (32 bytes)');
 
-  // Reading again should return cached in-memory secret
-  const secret1Cached = authSecret.getHmacSecret(tempDataDir);
-  assert(secret1Cached === secret1, 'getHmacSecret returns cached secret on subsequent calls');
+    // Reading again should return cached in-memory secret
+    const secret1Cached = await authSecret.getHmacSecret(tempDataDir);
+    assert(secret1Cached === secret1, 'getHmacSecret returns cached secret on subsequent calls');
 
-  // Verify secret file persisted on disk
-  const secretFilePath = path.join(tempDataDir, 'hmac_secret.txt');
-  assert(fs.existsSync(secretFilePath), 'getHmacSecret persists secret file to dataDir');
-  const fileContent = fs.readFileSync(secretFilePath, 'utf-8').trim();
-  assert(fileContent === secret1, 'Persisted secret file content matches generated secret');
+    // Verify secret file persisted on disk
+    const secretFilePath = path.join(tempDataDir, 'hmac_secret.txt');
+    assert(fs.existsSync(secretFilePath), 'getHmacSecret persists secret file to dataDir');
+    const fileContent = fs.readFileSync(secretFilePath, 'utf-8').trim();
+    assert(fileContent === secret1, 'Persisted secret file content matches generated secret');
 
-  // A new TokenAuthority instance using the same dataDir should read from disk
-  const authSecret2 = new TokenAuthority();
-  const secret2 = authSecret2.getHmacSecret(tempDataDir);
-  assert(secret2 === secret1, 'New TokenAuthority instance loads existing secret from file');
-} finally {
-  if (fs.existsSync(tempDataDir)) {
-    fs.rmSync(tempDataDir, { recursive: true, force: true });
+    // A new TokenAuthority instance using the same dataDir should read from disk
+    const authSecret2 = new TokenAuthority();
+    const secret2 = await authSecret2.getHmacSecret(tempDataDir);
+    assert(secret2 === secret1, 'New TokenAuthority instance loads existing secret from file');
+  } finally {
+    if (fs.existsSync(tempDataDir)) {
+      fs.rmSync(tempDataDir, { recursive: true, force: true });
+    }
   }
+
+  // 4. getHmacSecret fallback on read/write errors
+  const authFallback = new TokenAuthority();
+  // Invalid directory path to trigger write error
+  const invalidDir = path.resolve(process.cwd(), '\0invalid_path');
+  const fallbackSecret = await authFallback.getHmacSecret(invalidDir);
+  assert(typeof fallbackSecret === 'string' && fallbackSecret.length === 64, 'getHmacSecret handles filesystem errors gracefully and returns secret');
+
+  // 5. signTokenGrant tests
+  const tempDataDirSign = path.resolve(process.cwd(), 'temp_test_data_sign_' + Date.now());
+  try {
+    const authSign = new TokenAuthority();
+    const testToken = 'abcd1234efgh5678';
+    const testMac = 'AA:BB:CC:11:22:33';
+    const expectedSecret = await authSign.getHmacSecret(tempDataDirSign);
+    const signature = await authSign.signTokenGrant(testToken, testMac);
+    const expectedSig = crypto
+      .createHmac('sha256', expectedSecret)
+      .update(testToken + '|' + testMac)
+      .digest('hex');
+
+    assert(signature === expectedSig, 'signTokenGrant computes correct HMAC-SHA256 signature');
+    assert((await authSign.signTokenGrant(testToken, testMac)) === signature, 'signTokenGrant produces deterministic signature');
+    assert((await authSign.signTokenGrant('otherToken', testMac)) !== signature, 'signTokenGrant produces different signature for different token');
+  } finally {
+    if (fs.existsSync(tempDataDirSign)) {
+      fs.rmSync(tempDataDirSign, { recursive: true, force: true });
+    }
+  }
+
+  console.log('\nAll TokenAuthority tests passed successfully! 🎉');
 }
 
-// 4. getHmacSecret fallback on read/write errors
-const authFallback = new TokenAuthority();
-// Invalid directory path to trigger write error
-const invalidDir = path.resolve(process.cwd(), '\0invalid_path');
-const fallbackSecret = authFallback.getHmacSecret(invalidDir);
-assert(typeof fallbackSecret === 'string' && fallbackSecret.length === 64, 'getHmacSecret handles filesystem errors gracefully and returns secret');
-
-// 5. signTokenGrant tests
-const tempDataDirSign = path.resolve(process.cwd(), 'temp_test_data_sign_' + Date.now());
-try {
-  const authSign = new TokenAuthority();
-  const testToken = 'abcd1234efgh5678';
-  const testMac = 'AA:BB:CC:11:22:33';
-  const expectedSecret = authSign.getHmacSecret(tempDataDirSign);
-  const signature = authSign.signTokenGrant(testToken, testMac);
-  const expectedSig = crypto
-    .createHmac('sha256', expectedSecret)
-    .update(testToken + '|' + testMac)
-    .digest('hex');
-
-  assert(signature === expectedSig, 'signTokenGrant computes correct HMAC-SHA256 signature');
-  assert(authSign.signTokenGrant(testToken, testMac) === signature, 'signTokenGrant produces deterministic signature');
-  assert(authSign.signTokenGrant('otherToken', testMac) !== signature, 'signTokenGrant produces different signature for different token');
-} finally {
-  if (fs.existsSync(tempDataDirSign)) {
-    fs.rmSync(tempDataDirSign, { recursive: true, force: true });
-  }
-}
-
-console.log('\nAll TokenAuthority tests passed successfully! 🎉');
+main().catch((err) => {
+  console.error('Test run failed:', err);
+  process.exit(1);
+});

@@ -3,7 +3,7 @@
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 [![Build Agent](https://github.com/your-username/gridsight/actions/workflows/build-agent.yml/badge.svg)](.github/workflows/build-agent.yml)
 [![Build Console](https://github.com/your-username/gridsight/actions/workflows/build-console.yml/badge.svg)](.github/workflows/build-console.yml)
-[![Architecture: v5.8.6](https://img.shields.io/badge/Spec-v5.8.6-emerald.svg)](docs/architecture.md)
+[![Architecture: v5.8.7](https://img.shields.io/badge/Spec-v5.8.7-emerald.svg)](docs/architecture.md)
 
 **GridSight** 專為 70 台具備還原卡之 Windows 電腦教室打造，兼顧「實體座位自由排版」、「全班畫面低負載輪詢」、「單機 30 FPS 焦點調閱」與「教師畫面全體廣播」四大核心功能。
 

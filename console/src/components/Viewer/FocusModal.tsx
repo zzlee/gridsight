@@ -52,13 +52,10 @@ export const FocusModal: React.FC<FocusModalProps> = ({ device, onClose }) => {
   const [isLoadingLogs, setIsLoadingLogs] = useState<boolean>(false);
   const [logError, setLogError] = useState<string | null>(null);
 
-  // Student Screen Recording states
+  // Student Screen Recording states (Server-side native H.264 bitstream pipe)
   const [isRecordingStudent, setIsRecordingStudent] = useState(false);
-  const [isStudentRecordPaused, setIsStudentRecordPaused] = useState(false);
   const [studentRecordTime, setStudentRecordTime] = useState(0);
-
-  const studentRecorderRef = useRef<MediaRecorder | null>(null);
-  const studentChunksRef = useRef<Blob[]>([]);
+  const [studentRecordingLoading, setStudentRecordingLoading] = useState(false);
   const studentRecordTimerRef = useRef<number | null>(null);
 
   // Sync fullscreen state with browser events (e.g. Esc key)
@@ -70,117 +67,114 @@ export const FocusModal: React.FC<FocusModalProps> = ({ device, onClose }) => {
     return () => document.removeEventListener('fullscreenchange', handleFullscreenChange);
   }, []);
 
-  // 3-second stream connection timeout checker & recording cleanup on device change
+  // Check student recording status and stream connection timeout on device change
   useEffect(() => {
     setIsStreamTimeout(false);
     const timer = setTimeout(() => {
       setIsStreamTimeout(true);
     }, 3000);
 
+    if (device?.mac) {
+      AuthService.fetchWithAuth(`/api/record/student/status?mac=${encodeURIComponent(device.mac)}`)
+        .then((r) => r.json())
+        .then((data) => {
+          if (data.isRecording) {
+            setIsRecordingStudent(true);
+            setStudentRecordTime(data.durationSeconds || 0);
+          } else {
+            setIsRecordingStudent(false);
+          }
+        })
+        .catch(() => {});
+    }
+
     return () => {
       clearTimeout(timer);
-      stopStudentRecordingCleanup();
+      if (studentRecordTimerRef.current) {
+        clearInterval(studentRecordTimerRef.current);
+        studentRecordTimerRef.current = null;
+      }
     };
-  }, [device?.id]);
+  }, [device?.id, device?.mac]);
 
-  const stopStudentRecordingCleanup = () => {
-    if (studentRecordTimerRef.current) {
-      clearInterval(studentRecordTimerRef.current);
-      studentRecordTimerRef.current = null;
-    }
-    if (studentRecorderRef.current && studentRecorderRef.current.state !== 'inactive') {
-      try {
-        studentRecorderRef.current.stop();
-      } catch {}
-    }
-    studentRecorderRef.current = null;
-  };
-
-  const handleToggleStudentRecord = () => {
-    if (isRecordingStudent) {
-      if (studentRecorderRef.current && studentRecorderRef.current.state !== 'inactive') {
-        studentRecorderRef.current.stop();
+  // Periodic poll when student recording is active
+  useEffect(() => {
+    if (!isRecordingStudent || !device?.mac) {
+      if (studentRecordTimerRef.current) {
+        clearInterval(studentRecordTimerRef.current);
+        studentRecordTimerRef.current = null;
       }
       return;
     }
 
-    const canvas = playerRef.current?.getCanvas();
-    if (!canvas) {
-      setToastMessage('❌ 尚未取得學生畫面 Canvas，無法啟動錄影');
-      setTimeout(() => setToastMessage(null), 3000);
-      return;
-    }
+    studentRecordTimerRef.current = window.setInterval(async () => {
+      try {
+        const resp = await AuthService.fetchWithAuth(`/api/record/student/status?mac=${encodeURIComponent(device.mac)}`);
+        if (resp.ok) {
+          const data = await resp.json();
+          if (data.isRecording) {
+            setStudentRecordTime(data.durationSeconds || 0);
+          } else {
+            setIsRecordingStudent(false);
+          }
+        }
+      } catch {}
+    }, 1000);
+
+    return () => {
+      if (studentRecordTimerRef.current) {
+        clearInterval(studentRecordTimerRef.current);
+        studentRecordTimerRef.current = null;
+      }
+    };
+  }, [isRecordingStudent, device?.mac]);
+
+  const handleToggleStudentRecord = async () => {
+    if (!device?.mac || studentRecordingLoading) return;
+    setStudentRecordingLoading(true);
 
     try {
-      const stream = canvas.captureStream(30);
-      const mimeTypes = [
-        'video/webm;codecs=vp9',
-        'video/webm;codecs=vp8',
-        'video/webm',
-        'video/mp4',
-      ];
-      let mimeType = 'video/webm';
-      for (const type of mimeTypes) {
-        if (typeof MediaRecorder !== 'undefined' && MediaRecorder.isTypeSupported(type)) {
-          mimeType = type;
-          break;
+      if (isRecordingStudent) {
+        const resp = await AuthService.fetchWithAuth('/api/record/student/stop', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ mac: device.mac }),
+        });
+        if (resp.ok) {
+          const data = await resp.json();
+          setIsRecordingStudent(false);
+          setStudentRecordTime(0);
+          setToastMessage(`🎥 學生原生 H.264 錄影已存檔：${data.filename} (${data.sizeFormatted})`);
+          setTimeout(() => setToastMessage(null), 5000);
+        } else {
+          setToastMessage('❌ 停止學生錄影失敗');
+          setTimeout(() => setToastMessage(null), 3000);
+        }
+      } else {
+        const resp = await AuthService.fetchWithAuth('/api/record/student/start', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            mac: device.mac,
+            label: device.seatNo ? `Seat${device.seatNo}` : device.hostname,
+          }),
+        });
+        if (resp.ok) {
+          setIsRecordingStudent(true);
+          setStudentRecordTime(0);
+          setToastMessage('🎬 學生端原生 H.264 串流錄影已啟動 (0% CPU 損耗)');
+          setTimeout(() => setToastMessage(null), 3000);
+        } else {
+          const err = await resp.json();
+          setToastMessage(`❌ 啟動錄影失敗：${err.error || '未知錯誤'}`);
+          setTimeout(() => setToastMessage(null), 3000);
         }
       }
-
-      studentChunksRef.current = [];
-      const recorder = new MediaRecorder(stream, { mimeType });
-      studentRecorderRef.current = recorder;
-
-      recorder.ondataavailable = (e) => {
-        if (e.data && e.data.size > 0) {
-          studentChunksRef.current.push(e.data);
-        }
-      };
-
-      recorder.onstop = () => {
-        const chunks = studentChunksRef.current;
-        if (chunks.length > 0) {
-          const blob = new Blob(chunks, { type: mimeType });
-          const ext = mimeType.includes('mp4') ? 'mp4' : 'webm';
-          const timestamp = new Date().toISOString().replace(/[:.]/g, '-').slice(0, 19);
-            const filename = `GridSight_${device?.seatNo || device?.hostname || 'Student'}_Record_${timestamp}.${ext}`;
-          const sizeMB = (blob.size / (1024 * 1024)).toFixed(2);
-          const sizeKB = (blob.size / 1024).toFixed(0);
-          const displaySize = blob.size >= 1048576 ? `${sizeMB} MB` : `${sizeKB} KB`;
-
-          const url = URL.createObjectURL(blob);
-          const link = document.createElement('a');
-          link.href = url;
-          link.download = filename;
-          document.body.appendChild(link);
-          link.click();
-          document.body.removeChild(link);
-          URL.revokeObjectURL(url);
-
-          setToastMessage(`🎥 學生畫面錄影已儲存：${filename} (${displaySize})`);
-          setTimeout(() => setToastMessage(null), 4000);
-        }
-
-        setIsRecordingStudent(false);
-        setIsStudentRecordPaused(false);
-        if (studentRecordTimerRef.current) {
-          clearInterval(studentRecordTimerRef.current);
-          studentRecordTimerRef.current = null;
-        }
-      };
-
-      recorder.start(1000);
-      setIsRecordingStudent(true);
-      setIsStudentRecordPaused(false);
-      setStudentRecordTime(0);
-
-      studentRecordTimerRef.current = window.setInterval(() => {
-        setStudentRecordTime((t) => t + 1);
-      }, 1000);
-    } catch (err) {
-      console.warn('[FocusModal] Student record start failed:', err);
-      setToastMessage('❌ 學生畫面錄影啟動失敗');
+    } catch {
+      setToastMessage('❌ 無法連線至伺服器');
       setTimeout(() => setToastMessage(null), 3000);
+    } finally {
+      setStudentRecordingLoading(false);
     }
   };
 

@@ -6,16 +6,27 @@ import crypto from 'crypto';
 import { fileURLToPath } from 'url';
 import fs from 'fs';
 import { createServer } from 'http';
+import { spawn, ChildProcess } from 'child_process';
 import { WebSocketServer, WebSocket } from 'ws';
 import { TokenAuthority } from './tokenAuthority.js';
 import { MulticastDiscoveryService } from './multicastDiscovery.js';
-import { TeacherBroadcastStreamer } from './broadcastStreamer.js';
+import { TeacherBroadcastStreamer, findFfmpegBinary } from './broadcastStreamer.js';
 import { InputEventType } from './inputRtpStreamer.js';
 import { logger } from './logger.js';
 import { promptSelectNic } from './nicSelector.js';
 import { openBrowser } from './browserLauncher.js';
 import { buildInstallAgentScript } from './installerScript.js';
 import type { ClassroomLayout, StudentDevice } from './types.js';
+
+interface StudentRecordingSession {
+  mac: string;
+  label: string;
+  filename: string;
+  fullPath: string;
+  process: ChildProcess;
+  startTime: number;
+}
+const activeStudentRecordings = new Map<string, StudentRecordingSession>();
 
 const currentDirname = typeof __dirname !== 'undefined' ? __dirname : path.dirname(fileURLToPath(import.meta.url || 'file:///'));
 
@@ -33,7 +44,7 @@ const APP_VERSION: string = (() => {
       if (pkg.version) return pkg.version;
     } catch { /* ignore */ }
   }
-  return '5.8.6'; // fallback
+  return '5.8.7'; // fallback
 })();
 
 const app = express();
@@ -180,6 +191,14 @@ wss.on('connection', (ws, req) => {
       }
 
       if (isBinary) {
+        // Forward H.264 video NALU frames directly to active student recorder if recording
+        const rec = activeStudentRecordings.get(mac);
+        if (rec && rec.process.stdin && !rec.process.stdin.destroyed) {
+          try {
+            rec.process.stdin.write(data);
+          } catch {}
+        }
+
         // Forward H.264 video NALU frames directly to active teacher viewers
         const viewers = viewerSockets.get(mac);
         if (viewers && viewers.size > 0) {
@@ -220,6 +239,12 @@ wss.on('connection', (ws, req) => {
     ws.on('close', () => {
       if (agentSockets.get(mac) === ws) {
         agentSockets.delete(mac);
+      }
+      const rec = activeStudentRecordings.get(mac);
+      if (rec) {
+        try { rec.process.stdin.end(); } catch {}
+        activeStudentRecordings.delete(mac);
+        logger.info(`[Student Record] Student ${mac} disconnected, finished recording ${rec.filename}`);
       }
       logger.info(`[WS Relay] Student Agent disconnected: ${mac}`);
     });
@@ -371,6 +396,17 @@ const ensureUploadsDirectory = async () => {
     await fs.promises.mkdir(UPLOADS_DIR, { recursive: true });
   } catch (err) {
     logger.warn(`[Share] Failed to create uploads directory ${UPLOADS_DIR}: ${err}`);
+  }
+};
+
+const defaultRecordingsDir = path.join(defaultDataDir, 'recordings');
+const RECORDINGS_DIR = process.env.RECORDINGS_DIR || defaultRecordingsDir;
+
+const ensureRecordingsDirectory = async () => {
+  try {
+    await fs.promises.mkdir(RECORDINGS_DIR, { recursive: true });
+  } catch (err) {
+    logger.warn(`[Recordings] Failed to create recordings directory ${RECORDINGS_DIR}: ${err}`);
   }
 };
 
@@ -543,11 +579,29 @@ const notifyStopBroadcast = () => {
 };
 
 app.post('/api/broadcast/start', requireTeacherAuth, async (req, res) => {
-  const result = await broadcastStreamer.startStream({ ...(req.body || {}), localIp: activeTeacherIp });
+  await ensureRecordingsDirectory();
+  const shouldRecord = req.body?.record === true || req.body?.record === 'true';
+  let recordFile: string | undefined;
+  if (shouldRecord) {
+    const now = new Date();
+    const pad = (n: number) => String(n).padStart(2, '0');
+    const timestamp = `${now.getFullYear()}-${pad(now.getMonth() + 1)}-${pad(now.getDate())}_${pad(now.getHours())}-${pad(now.getMinutes())}-${pad(now.getSeconds())}`;
+    recordFile = path.join(RECORDINGS_DIR, `GridSight_Broadcast_${timestamp}.mp4`);
+  }
+  const result = await broadcastStreamer.startStream({
+    ...(req.body || {}),
+    localIp: activeTeacherIp,
+    record: shouldRecord,
+    recordFile,
+  });
   if (!result.ok) {
     return res.status(500).json({ status: 'error', active: false, error: result.error || '廣播啟動失敗' });
   }
-  res.json({ status: 'streaming', active: true });
+  res.json({
+    status: 'streaming',
+    active: true,
+    recording: broadcastStreamer.getRecordingStatus().isRecording,
+  });
 });
 
 app.post('/api/broadcast/stop', requireTeacherAuth, (req, res) => {
@@ -562,6 +616,283 @@ app.get('/api/broadcast/status', requireTeacherAuth, (req, res) => {
     mode: broadcastStreamer.getMode(),
     quality: broadcastStreamer.getQuality(),
     bitrateKbps: broadcastStreamer.getBitrateKbps(),
+    recording: broadcastStreamer.getRecordingStatus(),
+  });
+});
+
+// === Screen Recording API Routes (Native In-Pipeline DXGI & Mouse Overlay) ===
+app.get('/api/record/status', requireTeacherAuth, (req, res) => {
+  const status = broadcastStreamer.getRecordingStatus();
+  res.json({
+    ...status,
+    isBroadcasting: broadcastStreamer.isActive() && !status.isRecordOnly,
+  });
+});
+
+app.post('/api/record/start', requireTeacherAuth, async (req, res) => {
+  await ensureRecordingsDirectory();
+  const now = new Date();
+  const pad = (n: number) => String(n).padStart(2, '0');
+  const timestamp = `${now.getFullYear()}-${pad(now.getMonth() + 1)}-${pad(now.getDate())}_${pad(now.getHours())}-${pad(now.getMinutes())}-${pad(now.getSeconds())}`;
+  const filename = `GridSight_Record_${timestamp}.mp4`;
+  const recordFile = path.join(RECORDINGS_DIR, filename);
+
+  if (broadcastStreamer.isActive()) {
+    const status = broadcastStreamer.getRecordingStatus();
+    if (status.isRecording) {
+      return res.json({ status: 'recording', alreadyRecording: true, ...status });
+    }
+    const ok = await broadcastStreamer.toggleRecordingOnActiveStream(true, RECORDINGS_DIR);
+    if (!ok) {
+      return res.status(500).json({ error: '無法為當前廣播啟用同步錄製' });
+    }
+    return res.json({ status: 'recording', ...broadcastStreamer.getRecordingStatus() });
+  }
+
+  // Not broadcasting -> recordOnly mode
+  const result = await broadcastStreamer.startStream({
+    sourceType: 'screen',
+    quality: req.body?.quality || 'high',
+    recordOnly: true,
+    recordFile,
+    localIp: activeTeacherIp,
+  });
+  if (!result.ok) {
+    return res.status(500).json({ error: result.error || '啟動螢幕錄製失敗' });
+  }
+  res.json({ status: 'recording', ...broadcastStreamer.getRecordingStatus() });
+});
+
+app.post('/api/record/stop', requireTeacherAuth, async (req, res) => {
+  const status = broadcastStreamer.getRecordingStatus();
+  if (!status.isRecording) {
+    return res.json({ status: 'idle', message: '目前無正在進行的錄製' });
+  }
+
+  if (status.isRecordOnly) {
+    broadcastStreamer.stopStream();
+  } else {
+    await broadcastStreamer.toggleRecordingOnActiveStream(false);
+  }
+
+  const finalInfo = broadcastStreamer.getRecordingStatus().lastSavedRecording;
+  res.json({ status: 'stopped', fileInfo: finalInfo });
+});
+
+app.get('/api/record/list', requireTeacherAuth, async (req, res) => {
+  await ensureRecordingsDirectory();
+  try {
+    const files = await fs.promises.readdir(RECORDINGS_DIR);
+    const mp4Files = files.filter((f) => f.toLowerCase().endsWith('.mp4'));
+    const list = await Promise.all(
+      mp4Files.map(async (filename) => {
+        const fullPath = path.join(RECORDINGS_DIR, filename);
+        const stat = await fs.promises.stat(fullPath);
+        const sizeMB = (stat.size / (1024 * 1024)).toFixed(1);
+        return {
+          filename,
+          sizeBytes: stat.size,
+          sizeFormatted: `${sizeMB} MB`,
+          createdAt: stat.birthtimeMs || stat.mtimeMs,
+          downloadUrl: `/api/record/download/${encodeURIComponent(filename)}`,
+        };
+      })
+    );
+    list.sort((a, b) => b.createdAt - a.createdAt);
+    res.json(list);
+  } catch (err) {
+    res.status(500).json({ error: '無法讀取錄影清單' });
+  }
+});
+
+app.get('/api/record/download/:filename', requireTeacherAuth, (req, res) => {
+  const rawFilename = req.params.filename;
+  const safeFilename = path.basename(rawFilename);
+  const filePath = path.join(RECORDINGS_DIR, safeFilename);
+  const resolved = path.resolve(filePath);
+  if (!resolved.startsWith(path.resolve(RECORDINGS_DIR) + path.sep)) {
+    return res.status(403).json({ error: '拒絕存取' });
+  }
+  if (!fs.existsSync(resolved)) {
+    return res.status(404).json({ error: '檔案不存在' });
+  }
+  res.download(resolved, safeFilename);
+});
+
+app.delete('/api/record/:filename', requireTeacherAuth, async (req, res) => {
+  const rawFilename = req.params.filename;
+  const safeFilename = path.basename(rawFilename);
+  const filePath = path.join(RECORDINGS_DIR, safeFilename);
+  const resolved = path.resolve(filePath);
+  if (!resolved.startsWith(path.resolve(RECORDINGS_DIR) + path.sep)) {
+    return res.status(403).json({ error: '拒絕存取' });
+  }
+  try {
+    await fs.promises.unlink(resolved);
+    res.json({ ok: true });
+  } catch (err) {
+    res.status(500).json({ error: '刪除檔案失敗' });
+  }
+});
+
+// === Student Focus Stream Native H.264 Recording API ===
+app.get('/api/record/student/status', requireTeacherAuth, (req, res) => {
+  const rawTarget = (req.query.mac as string) || (req.query.target as string) || '';
+  let mac = normalizeTarget(rawTarget);
+  if (!activeStudentRecordings.has(mac)) {
+    const dev = discoveryService.getDevices().find(
+      (d) => d.mac === mac || d.ip === rawTarget || d.hostname === rawTarget || normalizeTarget(d.mac) === mac
+    );
+    if (dev) mac = normalizeTarget(dev.mac);
+  }
+
+  const rec = activeStudentRecordings.get(mac);
+  if (!rec) {
+    return res.json({ isRecording: false });
+  }
+  let fileSizeBytes = 0;
+  try {
+    fileSizeBytes = fs.statSync(rec.fullPath).size;
+  } catch {}
+  res.json({
+    isRecording: true,
+    mac: rec.mac,
+    label: rec.label,
+    filename: rec.filename,
+    startTime: rec.startTime,
+    durationSeconds: Math.floor((Date.now() - rec.startTime) / 1000),
+    fileSizeBytes,
+  });
+});
+
+app.post('/api/record/student/start', requireTeacherAuth, async (req, res) => {
+  await ensureRecordingsDirectory();
+  const rawTarget = (req.body?.mac as string) || (req.body?.target as string) || '';
+  let mac = normalizeTarget(rawTarget);
+  const dev = discoveryService.getDevices().find(
+    (d) => d.mac === mac || d.ip === rawTarget || d.hostname === rawTarget || normalizeTarget(d.mac) === mac
+  );
+  if (dev) mac = normalizeTarget(dev.mac);
+
+  const label = (req.body?.label as string) || (dev?.seatNo ? `Seat${dev.seatNo}` : (dev?.hostname || mac.replace(/[:]/g, '').slice(-4)));
+
+  if (activeStudentRecordings.has(mac)) {
+    const existing = activeStudentRecordings.get(mac)!;
+    return res.json({
+      ok: true,
+      alreadyRecording: true,
+      filename: existing.filename,
+      startTime: existing.startTime,
+    });
+  }
+
+  const now = new Date();
+  const pad = (n: number) => String(n).padStart(2, '0');
+  const timestamp = `${now.getFullYear()}-${pad(now.getMonth() + 1)}-${pad(now.getDate())}_${pad(now.getHours())}-${pad(now.getMinutes())}-${pad(now.getSeconds())}`;
+  const safeLabel = label.replace(/[^\w\u4e00-\u9fa5-]/g, '_');
+  const filename = `GridSight_Student_${safeLabel}_${timestamp}.mp4`;
+  const fullPath = path.join(RECORDINGS_DIR, filename);
+
+  const ffmpegCmd = findFfmpegBinary();
+  const ffmpegArgs = [
+    '-r', '30',
+    '-f', 'h264',
+    '-i', '-',
+    '-c:v', 'copy',
+    '-movflags', '+frag_keyframe+empty_moov+default_base_moof',
+    '-y',
+    fullPath
+  ];
+
+  try {
+    const child = spawn(ffmpegCmd, ffmpegArgs, {
+      stdio: ['pipe', 'ignore', 'ignore']
+    });
+
+    child.on('error', (err) => {
+      logger.warn(`[Student Record] FFmpeg error for ${mac}: ${err.message}`);
+      activeStudentRecordings.delete(mac);
+    });
+
+    child.on('exit', (code) => {
+      logger.info(`[Student Record] FFmpeg finished for ${mac} (code ${code})`);
+      activeStudentRecordings.delete(mac);
+    });
+
+    const session: StudentRecordingSession = {
+      mac,
+      label,
+      filename,
+      fullPath,
+      process: child,
+      startTime: Date.now(),
+    };
+
+    activeStudentRecordings.set(mac, session);
+    logger.info(`[Student Record] Started native H.264 recording for student ${mac} (${label}) -> ${filename}`);
+
+    res.json({
+      ok: true,
+      isRecording: true,
+      filename,
+      startTime: session.startTime,
+    });
+  } catch (err: any) {
+    logger.error(`[Student Record] Failed to launch FFmpeg: ${err.message}`);
+    res.status(500).json({ error: '無法啟動學生畫面錄製行程' });
+  }
+});
+
+app.post('/api/record/student/stop', requireTeacherAuth, async (req, res) => {
+  const rawTarget = (req.body?.mac as string) || (req.body?.target as string) || '';
+  let mac = normalizeTarget(rawTarget);
+  if (!activeStudentRecordings.has(mac)) {
+    const dev = discoveryService.getDevices().find(
+      (d) => d.mac === mac || d.ip === rawTarget || d.hostname === rawTarget || normalizeTarget(d.mac) === mac
+    );
+    if (dev) mac = normalizeTarget(dev.mac);
+  }
+
+  const rec = activeStudentRecordings.get(mac);
+  if (!rec) {
+    return res.json({ ok: true, isRecording: false, message: '目前無正在進行的學生錄製' });
+  }
+
+  activeStudentRecordings.delete(mac);
+
+  try {
+    rec.process.stdin.end();
+  } catch {}
+
+  // Wait brief moment for FFmpeg to finalize
+  await new Promise<void>((resolve) => {
+    const timer = setTimeout(() => {
+      try { rec.process.kill('SIGTERM'); } catch {}
+      resolve();
+    }, 1000);
+    rec.process.once('exit', () => {
+      clearTimeout(timer);
+      resolve();
+    });
+  });
+
+  let sizeBytes = 0;
+  try {
+    sizeBytes = fs.statSync(rec.fullPath).size;
+  } catch {}
+
+  const durationSeconds = Math.floor((Date.now() - rec.startTime) / 1000);
+  const sizeMB = (sizeBytes / (1024 * 1024)).toFixed(1);
+
+  logger.info(`[Student Record] Stopped recording for ${mac}: ${rec.filename} (${sizeMB} MB, ${durationSeconds}s)`);
+
+  res.json({
+    ok: true,
+    filename: rec.filename,
+    durationSeconds,
+    sizeBytes,
+    sizeFormatted: `${sizeMB} MB`,
+    downloadUrl: `/api/record/download/${encodeURIComponent(rec.filename)}`,
   });
 });
 

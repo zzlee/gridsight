@@ -1,41 +1,80 @@
 import React, { useState, useEffect, useRef } from 'react';
 import {
   Video,
-  VideoOff,
-  Mic,
-  MicOff,
   Square,
-  Pause,
-  Play,
   X,
   CheckCircle,
   AlertTriangle,
   Download,
   Clock,
   HardDrive,
+  Film,
+  Trash2,
+  RefreshCw,
+  Play,
+  Radio,
 } from 'lucide-react';
+import { AuthService } from '../../services/authService';
 
 interface TeacherRecordModalProps {
   isOpen: boolean;
   onClose: () => void;
+  isBroadcasting?: boolean;
 }
 
-export const TeacherRecordModal: React.FC<TeacherRecordModalProps> = ({ isOpen, onClose }) => {
-  const [includeMic, setIncludeMic] = useState(false);
-  const [isRecording, setIsRecording] = useState(false);
-  const [isPaused, setIsPaused] = useState(false);
-  const [recordingTime, setRecordingTime] = useState(0);
+interface RecordingFile {
+  filename: string;
+  sizeBytes: number;
+  sizeFormatted: string;
+  createdAt: number;
+  downloadUrl: string;
+}
+
+interface ServerRecordStatus {
+  isRecording: boolean;
+  isRecordOnly: boolean;
+  isBroadcasting: boolean;
+  filename: string | null;
+  fullPath: string | null;
+  startTime: number | null;
+  durationSeconds: number;
+  fileSizeBytes: number;
+}
+
+export const TeacherRecordModal: React.FC<TeacherRecordModalProps> = ({
+  isOpen,
+  onClose,
+  isBroadcasting = false,
+}) => {
+  const [activeTab, setActiveTab] = useState<'RECORD' | 'FILES'>('RECORD');
+  const [status, setStatus] = useState<ServerRecordStatus>({
+    isRecording: false,
+    isRecordOnly: false,
+    isBroadcasting: false,
+    filename: null,
+    fullPath: null,
+    startTime: null,
+    durationSeconds: 0,
+    fileSizeBytes: 0,
+  });
+  const [recordingsList, setRecordingsList] = useState<RecordingFile[]>([]);
+  const [loading, setLoading] = useState(false);
+  const [listLoading, setListLoading] = useState(false);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
   const [toastMessage, setToastMessage] = useState<string | null>(null);
+  const [previewVideo, setPreviewVideo] = useState<string | null>(null);
 
-  const mediaRecorderRef = useRef<MediaRecorder | null>(null);
-  const recordedChunksRef = useRef<Blob[]>([]);
-  const streamRef = useRef<MediaStream | null>(null);
-  const micStreamRef = useRef<MediaStream | null>(null);
-  const audioContextRef = useRef<AudioContext | null>(null);
-  const timerIntervalRef = useRef<number | null>(null);
+  const [autoRecordBroadcast, setAutoRecordBroadcast] = useState<boolean>(() => {
+    return localStorage.getItem('gridsight_auto_record_broadcast') === 'true';
+  });
 
-  // Timer formatted as HH:MM:SS or MM:SS
+  const pollTimerRef = useRef<number | null>(null);
+
+  const showToast = (msg: string) => {
+    setToastMessage(msg);
+    setTimeout(() => setToastMessage(null), 4000);
+  };
+
   const formatTime = (seconds: number) => {
     const hrs = Math.floor(seconds / 3600);
     const mins = Math.floor((seconds % 3600) / 60);
@@ -46,217 +85,175 @@ export const TeacherRecordModal: React.FC<TeacherRecordModalProps> = ({ isOpen, 
     return `${String(mins).padStart(2, '0')}:${String(secs).padStart(2, '0')}`;
   };
 
-  // Clean up timer and streams when component unmounts
-  useEffect(() => {
-    return () => {
-      stopRecordingCleanup();
-    };
-  }, []);
-
-  const stopRecordingCleanup = () => {
-    if (timerIntervalRef.current) {
-      clearInterval(timerIntervalRef.current);
-      timerIntervalRef.current = null;
-    }
-    if (streamRef.current) {
-      streamRef.current.getTracks().forEach((track) => track.stop());
-      streamRef.current = null;
-    }
-    if (micStreamRef.current) {
-      micStreamRef.current.getTracks().forEach((track) => track.stop());
-      micStreamRef.current = null;
-    }
-    if (audioContextRef.current && audioContextRef.current.state !== 'closed') {
-      audioContextRef.current.close().catch(() => {});
-      audioContextRef.current = null;
-    }
-  };
-
-  const getSupportedMimeType = (): string => {
-    const types = [
-      'video/webm;codecs=vp9,opus',
-      'video/webm;codecs=vp8,opus',
-      'video/webm;codecs=h264,opus',
-      'video/webm',
-      'video/mp4',
-    ];
-    for (const type of types) {
-      if (typeof MediaRecorder !== 'undefined' && MediaRecorder.isTypeSupported(type)) {
-        return type;
+  const fetchStatus = async () => {
+    try {
+      const res = await AuthService.fetchWithAuth('/api/record/status');
+      if (res.ok) {
+        const data = await res.json();
+        setStatus(data);
       }
-    }
-    return 'video/webm';
+    } catch {}
   };
 
-  const isMediaSupported = typeof navigator !== 'undefined' && !!navigator.mediaDevices && typeof navigator.mediaDevices.getDisplayMedia === 'function';
+  const fetchRecordingsList = async () => {
+    setListLoading(true);
+    try {
+      const res = await AuthService.fetchWithAuth('/api/record/list');
+      if (res.ok) {
+        const data = await res.json();
+        setRecordingsList(data);
+      }
+    } catch {
+    } finally {
+      setListLoading(false);
+    }
+  };
+
+  // Poll status when recording is active or modal is open
+  useEffect(() => {
+    fetchStatus();
+    if (isOpen || status.isRecording) {
+      pollTimerRef.current = window.setInterval(fetchStatus, 1000);
+    }
+    return () => {
+      if (pollTimerRef.current) {
+        clearInterval(pollTimerRef.current);
+        pollTimerRef.current = null;
+      }
+    };
+  }, [isOpen, status.isRecording]);
+
+  useEffect(() => {
+    if (isOpen && activeTab === 'FILES') {
+      fetchRecordingsList();
+    }
+  }, [isOpen, activeTab]);
+
+  const handleToggleAutoRecord = (enabled: boolean) => {
+    setAutoRecordBroadcast(enabled);
+    localStorage.setItem('gridsight_auto_record_broadcast', enabled ? 'true' : 'false');
+  };
 
   const handleStartRecording = async () => {
+    setLoading(true);
     setErrorMsg(null);
-    recordedChunksRef.current = [];
-
-    if (!isMediaSupported) {
-      setErrorMsg('此瀏覽器或連線環境未開放螢幕錄影 API（非安全上下文）。請在教師本機使用 http://localhost:3000 或透過 HTTPS 存取控制台。');
-      return;
-    }
-
     try {
-      // 1. Capture teacher screen
-      const displayStream = await navigator.mediaDevices.getDisplayMedia({
-        video: { displaySurface: 'monitor' } as any,
-        audio: true, // Request system audio if supported by browser
+      const res = await AuthService.fetchWithAuth('/api/record/start', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ quality: 'high' }),
       });
-
-      streamRef.current = displayStream;
-
-      const videoTrack = displayStream.getVideoTracks()[0];
-      if (!videoTrack) {
-        throw new Error('未取得螢幕視訊軌');
+      if (res.ok) {
+        const data = await res.json();
+        setStatus(data);
+        showToast('🎬 伺服器原生螢幕錄影已啟動 (DXGI + 滑鼠特效)');
+      } else {
+        const err = await res.json();
+        setErrorMsg(err.error || '啟動錄影失敗');
       }
-
-      // Handle user stopping screen share via browser OSD banner
-      videoTrack.onended = () => {
-        if (mediaRecorderRef.current && mediaRecorderRef.current.state !== 'inactive') {
-          handleStopRecording();
-        }
-      };
-
-      let finalStream = displayStream;
-
-      // 2. Capture microphone if enabled & combine audio tracks
-      if (includeMic) {
-        try {
-          const micStream = await navigator.mediaDevices.getUserMedia({ audio: true });
-          micStreamRef.current = micStream;
-
-          const displayAudioTrack = displayStream.getAudioTracks()[0];
-          const micAudioTrack = micStream.getAudioTracks()[0];
-
-          if (displayAudioTrack || micAudioTrack) {
-            const audioCtx = new (window.AudioContext || (window as any).webkitAudioContext)();
-            audioContextRef.current = audioCtx;
-            const dest = audioCtx.createMediaStreamDestination();
-
-            if (displayAudioTrack) {
-              const displaySource = audioCtx.createMediaStreamSource(new MediaStream([displayAudioTrack]));
-              displaySource.connect(dest);
-            }
-
-            if (micAudioTrack) {
-              const micSource = audioCtx.createMediaStreamSource(new MediaStream([micAudioTrack]));
-              micSource.connect(dest);
-            }
-
-            const combinedTracks = [videoTrack, ...dest.stream.getAudioTracks()];
-            finalStream = new MediaStream(combinedTracks);
-          }
-        } catch (micErr) {
-          console.warn('[TeacherRecordModal] Could not capture microphone:', micErr);
-          setErrorMsg('麥克風存取失敗，將繼續錄製無麥克風畫面。');
-        }
-      }
-
-      // 3. Setup MediaRecorder
-      const mimeType = getSupportedMimeType();
-      const recorder = new MediaRecorder(finalStream, { mimeType });
-      mediaRecorderRef.current = recorder;
-
-      recorder.ondataavailable = (e) => {
-        if (e.data && e.data.size > 0) {
-          recordedChunksRef.current.push(e.data);
-        }
-      };
-
-      recorder.onstop = () => {
-        saveRecordedFile(mimeType);
-        stopRecordingCleanup();
-        setIsRecording(false);
-        setIsPaused(false);
-      };
-
-      recorder.start(1000); // Collect slice every 1 sec
-      setIsRecording(true);
-      setIsPaused(false);
-      setRecordingTime(0);
-      onClose(); // Hide main config modal during recording
-
-      // Start timer
-      timerIntervalRef.current = window.setInterval(() => {
-        setRecordingTime((t) => t + 1);
-      }, 1000);
     } catch (err: any) {
-      console.warn('[TeacherRecordModal] Start recording failed:', err);
-      if (err.name !== 'NotAllowedError') {
-        setErrorMsg(err.message || '啟動螢幕錄影失敗，請確認瀏覽器支援與權限。');
+      setErrorMsg('無法連接伺服器');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleStopRecording = async () => {
+    setLoading(true);
+    setErrorMsg(null);
+    try {
+      const res = await AuthService.fetchWithAuth('/api/record/stop', {
+        method: 'POST',
+      });
+      if (res.ok) {
+        const data = await res.json();
+        setStatus((s) => ({ ...s, isRecording: false }));
+        if (data.fileInfo) {
+          const mb = (data.fileInfo.sizeBytes / (1024 * 1024)).toFixed(1);
+          showToast(`✅ 錄影已完成並儲存至伺服器：${data.fileInfo.filename} (${mb} MB)`);
+        } else {
+          showToast('✅ 螢幕錄影已停止');
+        }
+        fetchRecordingsList();
+      } else {
+        const err = await res.json();
+        setErrorMsg(err.error || '停止錄影失敗');
       }
+    } catch {
+      setErrorMsg('無法連接伺服器');
+    } finally {
+      setLoading(false);
     }
   };
 
-  const handlePauseResume = () => {
-    if (!mediaRecorderRef.current) return;
-    if (isPaused) {
-      mediaRecorderRef.current.resume();
-      setIsPaused(false);
-      timerIntervalRef.current = window.setInterval(() => {
-        setRecordingTime((t) => t + 1);
-      }, 1000);
-    } else {
-      mediaRecorderRef.current.pause();
-      setIsPaused(true);
-      if (timerIntervalRef.current) {
-        clearInterval(timerIntervalRef.current);
-        timerIntervalRef.current = null;
+  const handleDeleteRecording = async (filename: string) => {
+    if (!window.confirm(`確定要刪除錄影檔案「${filename}」嗎？此動作無法復原。`)) return;
+    try {
+      const res = await AuthService.fetchWithAuth(`/api/record/${encodeURIComponent(filename)}`, {
+        method: 'DELETE',
+      });
+      if (res.ok) {
+        setRecordingsList((list) => list.filter((f) => f.filename !== filename));
+        showToast('🗑️ 錄影檔案已刪除');
       }
-    }
-  };
-
-  const handleStopRecording = () => {
-    if (mediaRecorderRef.current && mediaRecorderRef.current.state !== 'inactive') {
-      mediaRecorderRef.current.stop();
-    } else {
-      stopRecordingCleanup();
-      setIsRecording(false);
-      setIsPaused(false);
-    }
-  };
-
-  const saveRecordedFile = (mimeType: string) => {
-    const chunks = recordedChunksRef.current;
-    if (chunks.length === 0) return;
-
-    const blob = new Blob(chunks, { type: mimeType });
-    const ext = mimeType.includes('mp4') ? 'mp4' : 'webm';
-    const timestamp = new Date().toISOString().replace(/[:.]/g, '-').slice(0, 19);
-    const filename = `GridSight_Teacher_Record_${timestamp}.${ext}`;
-    const sizeMB = (blob.size / (1024 * 1024)).toFixed(2);
-
-    const url = URL.createObjectURL(blob);
-    const link = document.createElement('a');
-    link.href = url;
-    link.download = filename;
-    document.body.appendChild(link);
-    link.click();
-    document.body.removeChild(link);
-    URL.revokeObjectURL(url);
-
-    setToastMessage(`🎥 教師畫面錄影已儲存：${filename} (${sizeMB} MB)`);
-    setTimeout(() => setToastMessage(null), 4000);
+    } catch {}
   };
 
   return (
     <>
-      {/* Configuration Modal when opening recording setup */}
-      {isOpen && !isRecording && (
+      {/* Floating Recording OSD (always visible whenever recording is active in background) */}
+      {status.isRecording && !isOpen && (
+        <div className="fixed top-16 right-5 z-50 bg-slate-950/95 border border-red-500/60 rounded-xl p-3 shadow-2xl backdrop-blur-md flex items-center space-x-3 animate-in fade-in slide-in-from-top-3 duration-200 select-none">
+          <div className="flex items-center space-x-2 px-2.5 py-1 bg-slate-900 border border-slate-800 rounded-lg">
+            <span className="w-2.5 h-2.5 rounded-full bg-red-500 animate-pulse" />
+            <span className="text-xs font-semibold text-slate-200">
+              {status.isBroadcasting ? '廣播同步錄製中' : '教師螢幕錄影中'}
+            </span>
+            <span className="text-xs font-mono font-bold text-red-400 flex items-center space-x-1">
+              <Clock className="w-3 h-3" />
+              <span>{formatTime(status.durationSeconds)}</span>
+            </span>
+            {status.fileSizeBytes > 0 && (
+              <span className="text-[11px] font-mono text-slate-400">
+                ({(status.fileSizeBytes / (1024 * 1024)).toFixed(1)} MB)
+              </span>
+            )}
+          </div>
+
+          <button
+            onClick={handleStopRecording}
+            disabled={loading}
+            className="px-3 py-1.5 rounded-lg bg-red-600 hover:bg-red-700 text-white border border-red-500 text-xs font-bold transition-all shadow-md active:scale-95 flex items-center space-x-1.5"
+            title="停止螢幕錄製並儲存"
+          >
+            <Square className="w-3.5 h-3.5 fill-current" />
+            <span>停止錄影</span>
+          </button>
+        </div>
+      )}
+
+      {/* Main Recording Management Modal */}
+      {isOpen && (
         <div className="fixed inset-0 z-50 bg-slate-950/80 backdrop-blur-sm flex items-center justify-center p-4 select-none animate-in fade-in duration-150">
-          <div className="bg-slate-900 border border-slate-800 rounded-xl max-w-md w-full overflow-hidden shadow-2xl">
+          <div className="bg-slate-900 border border-slate-800 rounded-xl max-w-xl w-full overflow-hidden shadow-2xl flex flex-col max-h-[90vh]">
             {/* Modal Header */}
-            <div className="flex items-center justify-between px-5 py-4 bg-slate-950 border-b border-slate-800">
+            <div className="flex items-center justify-between px-5 py-4 bg-slate-950 border-b border-slate-800 shrink-0">
               <div className="flex items-center space-x-2.5">
-                <div className="p-2 rounded-lg bg-red-500/10 border border-red-500/30 text-red-400">
+                <div className={`p-2 rounded-lg border ${status.isRecording ? 'bg-red-500/20 border-red-500/50 text-red-400' : 'bg-red-500/10 border-red-500/30 text-red-400'}`}>
                   <Video className="w-5 h-5" />
                 </div>
                 <div>
-                  <h3 className="font-bold text-slate-100 text-base">教師螢幕教學錄影</h3>
-                  <p className="text-xs text-slate-400">錄製教師畫面與聲音教學過程</p>
+                  <h3 className="font-bold text-slate-100 text-base flex items-center space-x-2">
+                    <span>教師螢幕教學錄影</span>
+                    {status.isRecording && (
+                      <span className="px-2 py-0.5 rounded-full bg-red-500/20 border border-red-500/40 text-[10px] font-bold text-red-400 animate-pulse">
+                        REC 錄製中
+                      </span>
+                    )}
+                  </h3>
+                  <p className="text-xs text-slate-400">
+                    採用服務端 DXGI GPU 硬體管線（自帶真實游標、光環波紋與滾輪氣泡特效）
+                  </p>
                 </div>
               </div>
               <button
@@ -267,8 +264,39 @@ export const TeacherRecordModal: React.FC<TeacherRecordModalProps> = ({ isOpen, 
               </button>
             </div>
 
-            {/* Modal Content */}
-            <div className="p-5 space-y-4">
+            {/* Navigation Tabs */}
+            <div className="flex items-center border-b border-slate-800 px-5 pt-3 bg-slate-950/60 shrink-0 space-x-4">
+              <button
+                onClick={() => setActiveTab('RECORD')}
+                className={`pb-2.5 text-xs font-semibold border-b-2 transition-all flex items-center space-x-1.5 ${
+                  activeTab === 'RECORD'
+                    ? 'border-red-500 text-red-400 font-bold'
+                    : 'border-transparent text-slate-400 hover:text-slate-200'
+                }`}
+              >
+                <Video className="w-4 h-4" />
+                <span>即時錄製控制</span>
+              </button>
+              <button
+                onClick={() => setActiveTab('FILES')}
+                className={`pb-2.5 text-xs font-semibold border-b-2 transition-all flex items-center space-x-1.5 ${
+                  activeTab === 'FILES'
+                    ? 'border-red-500 text-red-400 font-bold'
+                    : 'border-transparent text-slate-400 hover:text-slate-200'
+                }`}
+              >
+                <Film className="w-4 h-4" />
+                <span>歷史錄影清單</span>
+                {recordingsList.length > 0 && (
+                  <span className="px-1.5 py-0.2 rounded-full bg-slate-800 text-[10px] text-slate-300">
+                    {recordingsList.length}
+                  </span>
+                )}
+              </button>
+            </div>
+
+            {/* Modal Body */}
+            <div className="p-5 space-y-4 overflow-y-auto grow">
               {errorMsg && (
                 <div className="p-3 bg-amber-500/10 border border-amber-500/30 rounded-lg text-amber-300 text-xs flex items-center space-x-2">
                   <AlertTriangle className="w-4 h-4 shrink-0 text-amber-400" />
@@ -276,101 +304,211 @@ export const TeacherRecordModal: React.FC<TeacherRecordModalProps> = ({ isOpen, 
                 </div>
               )}
 
-              {/* Options */}
-              <div className="space-y-3">
-                <label className="flex items-center justify-between p-3.5 bg-slate-950/60 border border-slate-800 rounded-lg cursor-pointer hover:border-slate-700 transition-colors">
-                  <div className="flex items-center space-x-3">
-                    {includeMic ? (
-                      <Mic className="w-5 h-5 text-emerald-400" />
-                    ) : (
-                      <MicOff className="w-5 h-5 text-slate-400" />
-                    )}
-                    <div>
-                      <div className="text-sm font-semibold text-slate-200">同步錄製教師麥克風聲音</div>
-                      <div className="text-xs text-slate-400">開啟後將混合螢幕音訊與麥克風聲音</div>
+              {activeTab === 'RECORD' && (
+                <div className="space-y-4">
+                  {/* Status Banner */}
+                  {status.isRecording ? (
+                    <div className="p-4 bg-red-950/30 border border-red-500/40 rounded-xl space-y-3">
+                      <div className="flex items-center justify-between">
+                        <div className="flex items-center space-x-2">
+                          <span className="w-3 h-3 rounded-full bg-red-500 animate-pulse" />
+                          <span className="text-sm font-bold text-red-200">
+                            {status.isBroadcasting ? '全體廣播同步錄製中' : '教師端螢幕錄製中'}
+                          </span>
+                        </div>
+                        <div className="flex items-center space-x-1 font-mono text-base font-bold text-red-400 bg-black/40 px-2.5 py-1 rounded-lg border border-red-500/30">
+                          <Clock className="w-4 h-4" />
+                          <span>{formatTime(status.durationSeconds)}</span>
+                        </div>
+                      </div>
+
+                      <div className="text-xs text-slate-300 space-y-1 font-mono bg-slate-950/60 p-2.5 rounded-lg border border-slate-800">
+                        <div className="flex justify-between">
+                          <span className="text-slate-400">目前存檔名稱：</span>
+                          <span className="text-slate-200 truncate max-w-[280px]">{status.filename}</span>
+                        </div>
+                        <div className="flex justify-between">
+                          <span className="text-slate-400">即時檔案大小：</span>
+                          <span className="text-emerald-400 font-bold">
+                            {(status.fileSizeBytes / (1024 * 1024)).toFixed(2)} MB
+                          </span>
+                        </div>
+                      </div>
+
+                      <button
+                        onClick={handleStopRecording}
+                        disabled={loading}
+                        className="w-full py-2.5 bg-red-600 hover:bg-red-700 active:scale-[0.99] text-white font-bold rounded-lg transition-all shadow-md shadow-red-950 flex items-center justify-center space-x-2"
+                      >
+                        <Square className="w-4 h-4 fill-current" />
+                        <span>停止錄製並完成存檔</span>
+                      </button>
+                    </div>
+                  ) : (
+                    <div className="p-4 bg-slate-950/60 border border-slate-800 rounded-xl space-y-3 text-center">
+                      <div className="w-12 h-12 rounded-full bg-slate-800/80 border border-slate-700 flex items-center justify-center mx-auto text-slate-400">
+                        <Video className="w-6 h-6" />
+                      </div>
+                      <div>
+                        <h4 className="text-sm font-bold text-slate-200">
+                          {isBroadcasting ? '當前全體廣播進行中' : '準備開始螢幕錄製'}
+                        </h4>
+                        <p className="text-xs text-slate-400 mt-1 max-w-sm mx-auto">
+                          {isBroadcasting
+                            ? '點擊下方按鈕即可同步錄下全體廣播串流（0% 額外效能損耗，內建完整滑鼠特效）。'
+                            : '以服務端 DXGI GPU 原生管線在後台錄製教師畫面，老師本機螢幕乾淨無任何遮擋。'}
+                        </p>
+                      </div>
+
+                      <button
+                        onClick={handleStartRecording}
+                        disabled={loading}
+                        className="px-6 py-2.5 bg-red-600 hover:bg-red-700 active:scale-[0.99] text-white font-bold rounded-lg transition-all shadow-md shadow-red-950 inline-flex items-center space-x-2 mx-auto"
+                      >
+                        <Video className="w-4 h-4" />
+                        <span>{isBroadcasting ? '同步錄製廣播畫面' : '開始螢幕錄影'}</span>
+                      </button>
+                    </div>
+                  )}
+
+                  {/* Settings & Specifications */}
+                  <div className="space-y-3">
+                    <label className="flex items-center justify-between p-3.5 bg-slate-950/60 border border-slate-800 rounded-lg cursor-pointer hover:border-slate-700 transition-colors">
+                      <div className="flex items-center space-x-3">
+                        <Radio className="w-5 h-5 text-purple-400 shrink-0" />
+                        <div>
+                          <div className="text-sm font-semibold text-slate-200">全體廣播時自動同步錄影</div>
+                          <div className="text-xs text-slate-400">
+                            每次點擊「廣播畫面」時自動在後台同步保存 MP4 教學影片
+                          </div>
+                        </div>
+                      </div>
+                      <input
+                        type="checkbox"
+                        checked={autoRecordBroadcast}
+                        onChange={(e) => handleToggleAutoRecord(e.target.checked)}
+                        className="w-4 h-4 rounded border-slate-700 text-purple-600 focus:ring-purple-500 bg-slate-900 cursor-pointer"
+                      />
+                    </label>
+
+                    <div className="p-3.5 bg-slate-950/40 border border-slate-800/80 rounded-lg text-xs space-y-1.5 text-slate-400 font-mono">
+                      <div className="flex items-center space-x-2 text-slate-300 font-semibold">
+                        <HardDrive className="w-4 h-4 text-sky-400" />
+                        <span>核心管線規格</span>
+                      </div>
+                      <p>• 影像格式：H.264 MP4 (Fragmented MP4，中斷不壞檔)</p>
+                      <p>• 滑鼠合成：原生 Windows 游標 + 停頓光環 + 點擊波紋 + 滾輪氣泡 (0ms 幀同步)</p>
+                      <p>• 儲存目錄：本機 <code>data/recordings/</code>，任何裝置皆可線上下載</p>
                     </div>
                   </div>
-                  <input
-                    type="checkbox"
-                    checked={includeMic}
-                    onChange={(e) => setIncludeMic(e.target.checked)}
-                    className="w-4 h-4 rounded border-slate-700 text-red-600 focus:ring-red-500 bg-slate-900 cursor-pointer"
-                  />
-                </label>
-
-                <div className="p-3.5 bg-slate-950/40 border border-slate-800/80 rounded-lg text-xs space-y-1.5 text-slate-400 font-mono">
-                  <div className="flex items-center space-x-2 text-slate-300 font-semibold">
-                    <HardDrive className="w-4 h-4 text-sky-400" />
-                    <span>輸出格式與儲存</span>
-                  </div>
-                  <p>• 自動偵測瀏覽器最高相容格式 (WebM / VP9 / H.264)</p>
-                  <p>• 停止錄影後將自動下載影片檔至電腦 Downloads 資料夾</p>
                 </div>
-              </div>
+              )}
 
-              {/* Actions */}
-              <div className="flex items-center justify-end space-x-3 pt-2">
-                <button
-                  onClick={onClose}
-                  className="px-4 py-2 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-300 text-xs font-semibold transition-colors"
-                >
-                  取消
-                </button>
-                <button
-                  onClick={handleStartRecording}
-                  disabled={!isMediaSupported}
-                  className="px-4 py-2 rounded-lg bg-red-600 hover:bg-red-700 disabled:opacity-50 disabled:cursor-not-allowed text-white text-xs font-bold transition-all shadow-md shadow-red-950 flex items-center space-x-1.5 active:scale-95"
-                >
-                  <Video className="w-4 h-4 fill-current" />
-                  <span>選擇畫面並開始錄影</span>
-                </button>
-              </div>
+              {activeTab === 'FILES' && (
+                <div className="space-y-3">
+                  <div className="flex items-center justify-between pb-1">
+                    <span className="text-xs text-slate-400 font-medium">
+                      共 {recordingsList.length} 個錄影檔案
+                    </span>
+                    <button
+                      onClick={fetchRecordingsList}
+                      disabled={listLoading}
+                      className="text-xs text-sky-400 hover:text-sky-300 flex items-center space-x-1 transition-colors"
+                    >
+                      <RefreshCw className={`w-3.5 h-3.5 ${listLoading ? 'animate-spin' : ''}`} />
+                      <span>重新整理</span>
+                    </button>
+                  </div>
+
+                  {recordingsList.length === 0 ? (
+                    <div className="py-12 text-center text-slate-500 text-xs space-y-2">
+                      <Film className="w-8 h-8 mx-auto opacity-40" />
+                      <p>尚未有任何歷史螢幕錄影檔案</p>
+                    </div>
+                  ) : (
+                    <div className="space-y-2 max-h-[340px] overflow-y-auto pr-1">
+                      {recordingsList.map((file) => (
+                        <div
+                          key={file.filename}
+                          className="p-3 bg-slate-950/60 border border-slate-800/80 hover:border-slate-700 rounded-lg flex items-center justify-between text-xs transition-colors"
+                        >
+                          <div className="space-y-0.5 truncate mr-3">
+                            <div className="font-semibold text-slate-200 truncate" title={file.filename}>
+                              {file.filename}
+                            </div>
+                            <div className="text-[11px] text-slate-400 font-mono flex items-center space-x-3">
+                              <span>{new Date(file.createdAt).toLocaleString()}</span>
+                              <span className="text-emerald-400 font-bold">{file.sizeFormatted}</span>
+                            </div>
+                          </div>
+
+                          <div className="flex items-center space-x-1.5 shrink-0">
+                            <a
+                              href={file.downloadUrl}
+                              download={file.filename}
+                              className="p-2 rounded-lg bg-sky-950/40 hover:bg-sky-900/60 border border-sky-500/40 text-sky-300 hover:text-sky-200 transition-colors"
+                              title="下載 MP4 檔案"
+                            >
+                              <Download className="w-3.5 h-3.5" />
+                            </a>
+                            <button
+                              onClick={() => setPreviewVideo(file.downloadUrl)}
+                              className="p-2 rounded-lg bg-purple-950/40 hover:bg-purple-900/60 border border-purple-500/40 text-purple-300 hover:text-purple-200 transition-colors"
+                              title="預覽播放影片"
+                            >
+                              <Play className="w-3.5 h-3.5" />
+                            </button>
+                            <button
+                              onClick={() => handleDeleteRecording(file.filename)}
+                              className="p-2 rounded-lg bg-red-950/40 hover:bg-red-900/60 border border-red-500/40 text-red-300 hover:text-red-200 transition-colors"
+                              title="刪除錄影檔"
+                            >
+                              <Trash2 className="w-3.5 h-3.5" />
+                            </button>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+
+                  {/* Video Preview Popup */}
+                  {previewVideo && (
+                    <div className="p-3 bg-black/80 rounded-xl border border-purple-500/40 space-y-2 mt-2">
+                      <div className="flex items-center justify-between text-xs text-purple-300 font-semibold">
+                        <span>影片即時預覽</span>
+                        <button
+                          onClick={() => setPreviewVideo(null)}
+                          className="text-slate-400 hover:text-white"
+                        >
+                          關閉預覽 ✕
+                        </button>
+                      </div>
+                      <video
+                        src={previewVideo}
+                        controls
+                        autoPlay
+                        className="w-full rounded-lg max-h-[220px] bg-black"
+                      />
+                    </div>
+                  )}
+                </div>
+              )}
+            </div>
+
+            {/* Modal Footer */}
+            <div className="px-5 py-3.5 bg-slate-950 border-t border-slate-800 flex justify-end shrink-0">
+              <button
+                onClick={onClose}
+                className="px-4 py-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-300 text-xs font-semibold transition-colors"
+              >
+                關閉
+              </button>
             </div>
           </div>
         </div>
       )}
 
-      {/* Floating Recording Control OSD (Visible when recording is active) */}
-      {isRecording && (
-        <div className="fixed top-16 right-5 z-50 bg-slate-950/95 border border-red-500/60 rounded-xl p-3 shadow-2xl backdrop-blur-md flex items-center space-x-3 animate-in fade-in slide-in-from-top-3 duration-200 select-none">
-          {/* Status Indicator & Timer */}
-          <div className="flex items-center space-x-2 px-2.5 py-1 bg-slate-900 border border-slate-800 rounded-lg">
-            <span className={`w-3 h-3 rounded-full ${isPaused ? 'bg-amber-400' : 'bg-red-500 animate-pulse'}`} />
-            <span className="text-xs font-semibold text-slate-200">
-              {isPaused ? '錄影已暫停' : '教師錄影中'}
-            </span>
-            <span className="text-xs font-mono font-bold text-red-400 flex items-center space-x-1">
-              <Clock className="w-3.5 h-3.5" />
-              <span>{formatTime(recordingTime)}</span>
-            </span>
-          </div>
-
-          {/* Pause / Resume Button */}
-          <button
-            onClick={handlePauseResume}
-            className={`p-2 rounded-lg border text-xs font-semibold transition-all active:scale-95 flex items-center space-x-1 ${
-              isPaused
-                ? 'bg-emerald-600/30 border-emerald-500/50 text-emerald-300 hover:bg-emerald-600/50'
-                : 'bg-amber-600/30 border-amber-500/50 text-amber-300 hover:bg-amber-600/50'
-            }`}
-            title={isPaused ? '繼續錄影' : '暫停錄影'}
-          >
-            {isPaused ? <Play className="w-4 h-4 fill-current" /> : <Pause className="w-4 h-4 fill-current" />}
-          </button>
-
-          {/* Stop & Save Button */}
-          <button
-            onClick={handleStopRecording}
-            className="px-3 py-2 rounded-lg bg-red-600 hover:bg-red-700 text-white border border-red-500 text-xs font-bold transition-all shadow-md active:scale-95 flex items-center space-x-1.5"
-            title="停止錄影並下載儲存"
-          >
-            <Square className="w-4 h-4 fill-current" />
-            <span>停止並存檔</span>
-          </button>
-        </div>
-      )}
-
-      {/* Save Toast Notification */}
+      {/* Toast Notification */}
       {toastMessage && (
         <div className="fixed bottom-6 left-1/2 -translate-x-1/2 z-50 bg-slate-950/95 border border-emerald-500/60 text-emerald-200 text-xs px-4 py-2.5 rounded-xl shadow-2xl backdrop-blur-md flex items-center space-x-2 animate-in fade-in slide-in-from-bottom-2 duration-200">
           <CheckCircle className="w-4 h-4 text-emerald-400 shrink-0" />

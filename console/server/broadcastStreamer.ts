@@ -6,7 +6,7 @@ import { logger } from './logger.js';
 import { MouseHighlightOverlay } from './mouseHighlight.js';
 import { TeacherInputRtpStreamer } from './inputRtpStreamer.js';
 
-const findFfmpegBinary = (): string => {
+export const findFfmpegBinary = (): string => {
   if (os.platform() === 'win32') {
     const candidates = [
       path.resolve(process.cwd(), 'bin', 'ffmpeg.exe'),
@@ -49,6 +49,12 @@ export interface StreamerOptions {
   source?: string;
   /** For sourceType 'file'/'url': optional max output frame height for the test stream (e.g. 720 lower decode load on student agents). Auto-fits width, preserves aspect. */
   scale?: number;
+  /** Whether to synchronously record the stream into an MP4 file */
+  record?: boolean;
+  /** Custom destination file path for the recording */
+  recordFile?: string;
+  /** If true, records screen locally without sending RTP multicast packets */
+  recordOnly?: boolean;
 }
 
 export interface StreamStartResult {
@@ -111,6 +117,11 @@ export class TeacherBroadcastStreamer {
   private currentBitrateKbps: number = 0;
   private mouseOverlay = new MouseHighlightOverlay();
   private inputRtpStreamer = new TeacherInputRtpStreamer();
+  private isRecording = false;
+  private isRecordOnly = false;
+  private currentRecordFile: string | null = null;
+  private recordingStartTime: number | null = null;
+  private lastSavedRecording: { filename: string; fullPath: string; durationSeconds: number; sizeBytes: number } | null = null;
 
   constructor() {
     this.mouseOverlay.onInputEvent((event) => {
@@ -138,6 +149,46 @@ export class TeacherBroadcastStreamer {
 
   getBitrateKbps(): number {
     return this.isStreaming ? this.currentBitrateKbps : 0;
+  }
+
+  getRecordingStatus() {
+    let fileSizeBytes = 0;
+    if (this.currentRecordFile) {
+      try {
+        fileSizeBytes = fs.statSync(this.currentRecordFile).size;
+      } catch {}
+    }
+    return {
+      isRecording: this.isRecording,
+      isRecordOnly: this.isRecordOnly,
+      filename: this.currentRecordFile ? path.basename(this.currentRecordFile) : null,
+      fullPath: this.currentRecordFile,
+      startTime: this.recordingStartTime,
+      durationSeconds: this.recordingStartTime ? Math.floor((Date.now() - this.recordingStartTime) / 1000) : 0,
+      fileSizeBytes,
+      lastSavedRecording: this.lastSavedRecording,
+    };
+  }
+
+  async toggleRecordingOnActiveStream(enable: boolean, recordingsDir?: string): Promise<boolean> {
+    if (!this.isActive()) return false;
+    if (this.isRecordOnly && !enable) {
+      this.stopStream();
+      return true;
+    }
+    if (this.isRecording === enable) return true;
+
+    const currentOptions: StreamerOptions = {
+      sourceType: this.currentSourceType as any,
+      quality: this.currentQuality || 'high',
+      bitrateKbps: this.currentBitrateKbps,
+      record: enable,
+      recordFile: enable && recordingsDir ? path.join(recordingsDir, `GridSight_Record_${new Date().toISOString().replace(/[:.]/g, '-').slice(0, 19)}.mp4`) : undefined,
+    };
+    this.stopStream();
+    await new Promise((r) => setTimeout(r, 200));
+    const res = await this.startStream(currentOptions);
+    return res.ok;
   }
 
   async startStream(options: StreamerOptions = {}): Promise<StreamStartResult> {
@@ -168,10 +219,32 @@ export class TeacherBroadcastStreamer {
       logger.warn(`[Broadcast] Ignoring localIp ${options.localIp}: not a local interface address`);
     }
 
+    if (options.record || options.recordOnly) {
+      const now = new Date();
+      const pad = (n: number) => String(n).padStart(2, '0');
+      const timestamp = `${now.getFullYear()}-${pad(now.getMonth() + 1)}-${pad(now.getDate())}_${pad(now.getHours())}-${pad(now.getMinutes())}-${pad(now.getSeconds())}`;
+      const defaultFilename = `GridSight_Record_${timestamp}.mp4`;
+      const recordDir = options.recordFile ? path.dirname(options.recordFile) : path.resolve(process.cwd(), 'data/recordings');
+      try {
+        fs.mkdirSync(recordDir, { recursive: true });
+      } catch {}
+      this.currentRecordFile = options.recordFile || path.join(recordDir, defaultFilename);
+      this.isRecording = true;
+      this.isRecordOnly = !!options.recordOnly;
+      this.recordingStartTime = Date.now();
+      logger.info(`[Broadcast/Record] Recording initiated: ${this.currentRecordFile} (recordOnly: ${this.isRecordOnly})`);
+    } else {
+      this.isRecording = false;
+      this.isRecordOnly = false;
+      this.currentRecordFile = null;
+      this.recordingStartTime = null;
+    }
+
     logger.info(
-      `[Broadcast] Initiating RTP Multicast Stream -> ${multicastIp}:${port} @ ${fps}fps (${bitrate}kbps)` +
+      `[Broadcast] Initiating ${options.recordOnly ? 'Screen Recording' : 'RTP Multicast Stream'} -> ${multicastIp}:${port} @ ${fps}fps (${bitrate}kbps)` +
         (scale > 0 ? `, scaled to <=${scale}p` : ', native resolution') +
-        (localaddr ? ` via ${localaddr}` : '')
+        (localaddr ? ` via ${localaddr}` : '') +
+        (this.isRecording ? ` [Recording to: ${this.currentRecordFile}]` : '')
     );
 
     let inputArgs: string[];
@@ -293,25 +366,75 @@ export class TeacherBroadcastStreamer {
     }
 
     const rtpUrl = `rtp://${multicastIp}:${port}?pkt_size=1316&ttl=2${localaddr ? `&localaddr=${localaddr}` : ''}`;
+    let outputArgs: string[] = [];
+
+    if (this.isRecordOnly && this.currentRecordFile) {
+      const cleanPath = this.currentRecordFile.replace(/\\/g, '/');
+      outputArgs = [
+        '-c:v', 'libx264',
+        '-preset', 'ultrafast',
+        '-tune', 'zerolatency',
+        '-b:v', `${bitrate}k`,
+        '-maxrate', `${bitrate}k`,
+        '-bufsize', `${Math.floor(bitrate / 2)}k`,
+        '-pix_fmt', 'yuv420p',
+        '-g', String(fps),
+        '-keyint_min', String(fps),
+        '-sc_threshold', '0',
+        '-slices', '1',
+        '-bf', '0',
+        '-flags', '+low_delay+global_header',
+        '-f', 'mp4',
+        '-movflags', '+frag_keyframe+empty_moov+default_base_moof',
+        cleanPath
+      ];
+    } else if (this.isRecording && this.currentRecordFile) {
+      const cleanPath = this.currentRecordFile.replace(/\\/g, '/');
+      const teeTarget = `[f=rtp]${rtpUrl}|[f=mp4:movflags=+frag_keyframe+empty_moov+default_base_moof]'${cleanPath}'`;
+      outputArgs = [
+        '-c:v', 'libx264',
+        '-preset', 'ultrafast',
+        '-tune', 'zerolatency',
+        '-b:v', `${bitrate}k`,
+        '-maxrate', `${bitrate}k`,
+        '-bufsize', `${Math.floor(bitrate / 2)}k`,
+        '-pix_fmt', 'yuv420p',
+        '-g', String(fps),
+        '-keyint_min', String(fps),
+        '-sc_threshold', '0',
+        '-slices', '1',
+        '-bf', '0',
+        '-flags', '+low_delay+global_header',
+        '-x264-params', 'repeat-headers=1:sliced-threads=0:force-cfr=1',
+        '-f', 'tee',
+        '-map', '0:v',
+        teeTarget
+      ];
+    } else {
+      outputArgs = [
+        '-c:v', 'libx264',
+        '-preset', 'ultrafast',
+        '-tune', 'zerolatency',
+        '-b:v', `${bitrate}k`,
+        '-maxrate', `${bitrate}k`,
+        '-bufsize', `${Math.floor(bitrate / 2)}k`,
+        '-pix_fmt', 'yuv420p',
+        '-g', String(fps),
+        '-keyint_min', String(fps),
+        '-sc_threshold', '0',
+        '-slices', '1',
+        '-bf', '0',
+        '-flags', '+low_delay+global_header',
+        '-x264-params', 'repeat-headers=1:sliced-threads=0:force-cfr=1',
+        '-f', 'rtp',
+        rtpUrl
+      ];
+    }
+
     const ffmpegArgs = [
       ...inputArgs,
       ...mediaConstraints,
-      '-c:v', 'libx264',
-      '-preset', 'ultrafast',
-      '-tune', 'zerolatency',
-      '-b:v', `${bitrate}k`,
-      '-maxrate', `${bitrate}k`,
-      '-bufsize', `${Math.floor(bitrate / 2)}k`,
-      '-pix_fmt', 'yuv420p',
-      '-g', String(fps),
-      '-keyint_min', String(fps),
-      '-sc_threshold', '0',
-      '-slices', '1',
-      '-bf', '0',
-      '-flags', '+low_delay',
-      '-x264-params', 'repeat-headers=1:sliced-threads=0:force-cfr=1',
-      '-f', 'rtp',
-      rtpUrl
+      ...outputArgs
     ];
 
     const ffmpegCmd = findFfmpegBinary();
@@ -412,7 +535,24 @@ export class TeacherBroadcastStreamer {
     this.isStreaming = false;
     this.currentSourceType = 'screen';
     this.currentQuality = null;
-    this.currentBitrateKbps = 0;
+    if (this.isRecording && this.currentRecordFile) {
+      const durationSeconds = this.recordingStartTime ? Math.floor((Date.now() - this.recordingStartTime) / 1000) : 0;
+      let sizeBytes = 0;
+      try {
+        sizeBytes = fs.statSync(this.currentRecordFile).size;
+      } catch {}
+      this.lastSavedRecording = {
+        filename: path.basename(this.currentRecordFile),
+        fullPath: this.currentRecordFile,
+        durationSeconds,
+        sizeBytes,
+      };
+      logger.info(`[Record] Screen recording saved: ${this.currentRecordFile} (${(sizeBytes / (1024 * 1024)).toFixed(2)} MB, ${durationSeconds}s)`);
+    }
+    this.isRecording = false;
+    this.isRecordOnly = false;
+    this.currentRecordFile = null;
+    this.recordingStartTime = null;
 
     if (this.captureProcess) {
       try {

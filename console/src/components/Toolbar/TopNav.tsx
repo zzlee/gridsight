@@ -84,6 +84,7 @@ export const TopNav: React.FC<TopNavProps> = ({
   const [broadcastLoading, setBroadcastLoading] = useState(false);
   const [broadcastQuality, setBroadcastQuality] = useState<BroadcastQuality>('medium');
   const [broadcastBitrateKbps, setBroadcastBitrateKbps] = useState<number>(0);
+  const [isServerRecording, setIsServerRecording] = useState(false);
   const [qualityMenuOpen, setQualityMenuOpen] = useState(false);
   const qualityMenuRef = useRef<HTMLDivElement>(null);
 
@@ -96,6 +97,7 @@ export const TopNav: React.FC<TopNavProps> = ({
           const data = await resp.json();
           const active = !!data.active;
           setIsBroadcasting(active);
+          setIsServerRecording(!!data.recording?.isRecording);
           if (data.quality && data.quality in QUALITY_PRESETS) {
             setBroadcastQuality(data.quality);
           }
@@ -127,16 +129,24 @@ export const TopNav: React.FC<TopNavProps> = ({
         const resp = await AuthService.fetchWithAuth('/api/broadcast/stop', { method: 'POST' });
         if (resp.ok) {
           setIsBroadcasting(false);
+          setIsServerRecording(false);
         }
       } else {
         const preset = QUALITY_PRESETS[broadcastQuality];
+        const autoRecord = localStorage.getItem('gridsight_auto_record_broadcast') === 'true';
         const resp = await AuthService.fetchWithAuth('/api/broadcast/start', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ quality: broadcastQuality, fps: preset.fps, bitrateKbps: preset.bitrateKbps }),
+          body: JSON.stringify({ 
+            quality: broadcastQuality, 
+            fps: preset.fps, 
+            bitrateKbps: preset.bitrateKbps,
+            record: autoRecord,
+          }),
         });
         if (resp.ok) {
           setIsBroadcasting(true);
+          if (autoRecord) setIsServerRecording(true);
         }
       }
     } catch {
@@ -323,11 +333,15 @@ export const TopNav: React.FC<TopNavProps> = ({
             {onOpenTeacherRecord && (
               <button
                 onClick={onOpenTeacherRecord}
-                className="flex items-center space-x-1.5 px-3 py-1.5 rounded-lg bg-red-950/40 hover:bg-red-900/60 border border-red-500/40 text-xs font-semibold text-red-300 hover:text-red-200 transition-all shadow-sm active:scale-95"
-                title="錄製教師畫面與教學過程 (支援麥克風與聲音混合)"
+                className={`flex items-center space-x-1.5 px-3 py-1.5 rounded-lg border text-xs font-semibold transition-all shadow-sm active:scale-95 ${
+                  isServerRecording
+                    ? 'bg-red-600 hover:bg-red-700 border-red-500 text-white animate-pulse shadow-md shadow-red-950'
+                    : 'bg-red-950/40 hover:bg-red-900/60 border-red-500/40 text-red-300 hover:text-red-200'
+                }`}
+                title="服務端 DXGI 原生螢幕錄影 (自帶真實游標、光環波紋與滾輪氣泡，0ms 幀同步)"
               >
-                <Video className="w-3.5 h-3.5 text-red-400" />
-                <span>螢幕錄影</span>
+                <Video className={`w-3.5 h-3.5 ${isServerRecording ? 'fill-current text-white' : 'text-red-400'}`} />
+                <span>{isServerRecording ? '錄影中' : '螢幕錄影'}</span>
               </button>
             )}
 

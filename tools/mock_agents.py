@@ -24,10 +24,10 @@ def _read_version() -> str:
         Path.cwd() / 'package.json',
     ]:
         try:
-            return json.loads(candidate.read_text()).get('version', '5.8.5')
+            return json.loads(candidate.read_text()).get('version', '5.8.6')
         except Exception:
             pass
-    return '5.8.5'
+    return '5.8.6'
 
 APP_VERSION = _read_version()
 

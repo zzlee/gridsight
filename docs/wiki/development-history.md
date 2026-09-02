@@ -163,6 +163,7 @@ timeline
 | **v5.8.3** | 2026-08 | `broadcastStreamer.ts`, `TopNav.tsx`, `BroadcastTestModal.tsx` | 教師全體廣播三檔品質（高/中/低）選擇、螢幕擷取解析度縮放、`/api/broadcast/status` 回報品質 |
 | **v5.8.4** | 2026-09 | `mouse_overlay.cpp`, `TopNav.tsx`, `broadcastStreamer.ts` | 預編譯原生獨立滑鼠特效（True Alpha 32-bit ARGB、微型透光光圈、GDI+ 真實 Windows 游標圖示）、廣播流量即時整合 HUD、遠端撤銷關機 (`CANCEL_SHUTDOWN`)、分發失敗重試與 Ubuntu 即時除錯 Agent |
 | **v5.8.5** | 2026-09 | `mouse_overlay.cpp`, `inputRtpStreamer.ts`, `ubuntu_agent_debugger.py` | 教師端無頭低階掛鉤 (Headless Hook)、純淨桌面視訊擷取、Input RTP 即時多播流 (Port 9002)、學生端平滑滑鼠特效合成、CI/CD 全面靜態編譯零 GCC DLL 依賴 |
+| **v5.8.6** | 2026-09 | `screen_capture.cpp`, `broadcastStreamer.ts` | 擷取管線硬體合成 (OBS 模式)：DXGI GPU 零拷貝截圖、視訊幀記憶體內烙印真實游標/光圈波紋/滾輪氣泡、教師端純淨零干擾、0ms 幀精準同步、完全支援原生錄影、靜音關閉 Input RTP |
 
 ---
 

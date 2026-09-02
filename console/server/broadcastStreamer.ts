@@ -397,11 +397,11 @@ export class TeacherBroadcastStreamer {
 
     if (sourceType === 'screen' && !this.captureProcess) {
       this.mouseOverlay.start();
+      this.inputRtpStreamer.start({
+        localIp: localaddr || undefined,
+        multicastIp: multicastIp,
+      });
     }
-    this.inputRtpStreamer.start({
-      localIp: localaddr || undefined,
-      multicastIp: multicastIp,
-    });
     logger.info('[Broadcast] FFmpeg startup verified, streaming is live');
     return { ok: true };
   }

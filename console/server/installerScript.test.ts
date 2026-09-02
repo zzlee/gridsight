@@ -7,7 +7,7 @@ const script = buildInstallAgentScript({
   teacherHost: '192.168.50.10',
   teacherPort: 3000,
   hmacSecret: secret,
-    version: '5.8.5',
+    version: '5.8.6',
 });
 
 assert.match(script, /\$envPath = "\$destDir\\\.env"/);

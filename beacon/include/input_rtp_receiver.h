@@ -12,7 +12,8 @@ enum class InputEventType : uint8_t {
     MouseDown = 2,
     MouseUp = 3,
     Scroll = 4,
-    KeyState = 5
+    KeyState = 5,
+    Heartbeat = 6
 };
 
 struct InputRTPEvent {
@@ -42,12 +43,19 @@ public:
 
 private:
     void ReceiveLoop();
+    void ProcessEvent(const InputRTPEvent& event);
 
     std::string multicast_ip_;
     int port_;
     std::atomic<bool> running_{false};
     std::atomic<uintptr_t> socket_fd_{0};
     std::thread receive_thread_;
+
+    // Anti-Packet-Loss & State Reconciliation tracking
+    bool has_last_seq_{false};
+    uint16_t last_seq_{0};
+    uint8_t last_button_flags_{0};
+    uint8_t last_modifier_flags_{0};
 };
 
 } // namespace GridSight

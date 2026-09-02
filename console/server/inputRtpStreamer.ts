@@ -7,6 +7,7 @@ export enum InputEventType {
   MouseUp = 3,
   Scroll = 4,
   KeyState = 5,
+  Heartbeat = 6,
 }
 
 export interface InputEventData {
@@ -25,6 +26,8 @@ export interface InputRtpStreamerOptions {
   port?: number;
   localIp?: string;
   ssrc?: number;
+  redundantCount?: number; // Number of duplicate sends for discrete events (default 2)
+  heartbeatIntervalMs?: number; // Period in ms for state heartbeat (default 1000ms)
 }
 
 export class TeacherInputRtpStreamer {
@@ -35,12 +38,27 @@ export class TeacherInputRtpStreamer {
   private multicastIp: string;
   private port: number;
   private localIp?: string;
+  private redundantCount: number;
+  private heartbeatIntervalMs: number;
+  private heartbeatTimer: NodeJS.Timeout | null = null;
+
+  private lastState: InputEventData = {
+    eventType: InputEventType.Heartbeat,
+    normX: 0,
+    normY: 0,
+    buttonFlags: 0,
+    modifierFlags: 0,
+    scrollDelta: 0,
+    keyCode: 0,
+  };
 
   constructor(options: InputRtpStreamerOptions = {}) {
     this.multicastIp = options.multicastIp || process.env.INPUT_MULTICAST_IP || '239.255.42.100';
     this.port = options.port || (process.env.INPUT_PORT ? parseInt(process.env.INPUT_PORT, 10) : 9002);
     this.localIp = options.localIp;
     this.ssrc = options.ssrc || (Math.floor(Math.random() * 0xffffffff) >>> 0);
+    this.redundantCount = options.redundantCount ?? 2;
+    this.heartbeatIntervalMs = options.heartbeatIntervalMs ?? 1000;
   }
 
   public start(): boolean {
@@ -61,7 +79,8 @@ export class TeacherInputRtpStreamer {
       });
 
       this.isStreaming = true;
-      logger.info(`[InputRTP] Input RTP Streamer active on multicast ${this.multicastIp}:${this.port} (SSRC=${this.ssrc})`);
+      this.startHeartbeatTimer();
+      logger.info(`[InputRTP] Input RTP Streamer active on multicast ${this.multicastIp}:${this.port} (SSRC=${this.ssrc}, RedundantCount=${this.redundantCount}, Heartbeat=${this.heartbeatIntervalMs}ms)`);
       return true;
     } catch (err) {
       logger.error(`[InputRTP] Failed to start Input RTP Streamer: ${err}`);
@@ -74,6 +93,7 @@ export class TeacherInputRtpStreamer {
   public stop(): void {
     if (!this.isStreaming) return;
     this.isStreaming = false;
+    this.stopHeartbeatTimer();
     if (this.socket) {
       try {
         this.socket.close();
@@ -87,7 +107,23 @@ export class TeacherInputRtpStreamer {
     return this.isStreaming && !!this.socket;
   }
 
-  public createRtpPacket(event: InputEventData): Buffer {
+  private startHeartbeatTimer(): void {
+    this.stopHeartbeatTimer();
+    this.heartbeatTimer = setInterval(() => {
+      if (this.isStreaming) {
+        this.sendHeartbeat();
+      }
+    }, this.heartbeatIntervalMs);
+  }
+
+  private stopHeartbeatTimer(): void {
+    if (this.heartbeatTimer) {
+      clearInterval(this.heartbeatTimer);
+      this.heartbeatTimer = null;
+    }
+  }
+
+  public createRtpPacket(event: InputEventData, customSeq?: number): Buffer {
     const packet = Buffer.alloc(12 + 21);
 
     // RTP Header (12 bytes)
@@ -96,8 +132,11 @@ export class TeacherInputRtpStreamer {
     // Byte 1: M=0, PT=98 => 0x62
     packet.writeUInt8(0x62, 1);
     // Byte 2-3: Sequence number
-    packet.writeUInt16BE(this.sequenceNumber & 0xffff, 2);
-    this.sequenceNumber = (this.sequenceNumber + 1) & 0xffff;
+    const seq = customSeq !== undefined ? customSeq : this.sequenceNumber;
+    packet.writeUInt16BE(seq & 0xffff, 2);
+    if (customSeq === undefined) {
+      this.sequenceNumber = (this.sequenceNumber + 1) & 0xffff;
+    }
 
     // Byte 4-7: Timestamp (RTP timestamp in 90kHz ticks based on event time)
     const nowMs = event.timestampMs ?? Date.now();
@@ -134,17 +173,54 @@ export class TeacherInputRtpStreamer {
       return false;
     }
 
+    // Update last known state for heartbeats
+    if (event.normX !== undefined) this.lastState.normX = event.normX;
+    if (event.normY !== undefined) this.lastState.normY = event.normY;
+    if (event.buttonFlags !== undefined) this.lastState.buttonFlags = event.buttonFlags;
+    if (event.modifierFlags !== undefined) this.lastState.modifierFlags = event.modifierFlags;
+
+    const isDiscreteCritical =
+      event.eventType === InputEventType.MouseDown ||
+      event.eventType === InputEventType.MouseUp ||
+      event.eventType === InputEventType.KeyState;
+
+    const sendCount = isDiscreteCritical ? Math.max(1, this.redundantCount) : 1;
+
     try {
-      const packet = this.createRtpPacket(event);
-      this.socket.send(packet, 0, packet.length, this.port, this.multicastIp, (err) => {
-        if (err) {
-          logger.warn(`[InputRTP] Error sending packet: ${err.message}`);
-        }
-      });
+      // Allocate sequence number for this event
+      const seq = this.sequenceNumber;
+      this.sequenceNumber = (this.sequenceNumber + 1) & 0xffff;
+
+      const packet = this.createRtpPacket(event, seq);
+
+      for (let i = 0; i < sendCount; i++) {
+        this.socket.send(packet, 0, packet.length, this.port, this.multicastIp, (err) => {
+          if (err) {
+            logger.warn(`[InputRTP] Error sending packet: ${err.message}`);
+          }
+        });
+      }
       return true;
     } catch (err) {
       logger.warn(`[InputRTP] Exception sending input event packet: ${err}`);
       return false;
     }
+  }
+
+  public sendHeartbeat(): boolean {
+    if (!this.isStreaming || !this.socket) return false;
+
+    const heartbeatEvent: InputEventData = {
+      eventType: InputEventType.Heartbeat,
+      normX: this.lastState.normX,
+      normY: this.lastState.normY,
+      buttonFlags: this.lastState.buttonFlags,
+      modifierFlags: this.lastState.modifierFlags,
+      scrollDelta: 0,
+      keyCode: 0,
+      timestampMs: Date.now(),
+    };
+
+    return this.sendEvent(heartbeatEvent);
   }
 }

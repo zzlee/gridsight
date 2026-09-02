@@ -197,6 +197,40 @@ void InputRTPReceiver::Stop() {
     }
 }
 
+void InputRTPReceiver::ProcessEvent(const InputRTPEvent& event) {
+    // 1. Sequence Tracking & Redundant Deduplication
+    if (has_last_seq_) {
+        if (event.sequence == last_seq_) {
+            // Deduplicated redundant packet received
+            return;
+        }
+
+        uint16_t expected_seq = static_cast<uint16_t>(last_seq_ + 1);
+        if (event.sequence != expected_seq) {
+            uint16_t gap = static_cast<uint16_t>(event.sequence - expected_seq);
+            Utils::Log("WARN", "⚠️ [Input RTP Drop] Sequence gap detected! Expected: " +
+                std::to_string(expected_seq) + ", Received: " + std::to_string(event.sequence) +
+                " (Lost: " + std::to_string(gap) + " packets)");
+        }
+    }
+
+    has_last_seq_ = true;
+    last_seq_ = event.sequence;
+
+    // 2. State Reconciliation for Button and Modifier Flags
+    if (last_button_flags_ != event.button_flags) {
+        Utils::Log("INFO", "🔄 [Input RTP State Reconciled] Button flags updated from 0x" +
+            std::to_string(last_button_flags_) + " -> 0x" + std::to_string(event.button_flags));
+        last_button_flags_ = event.button_flags;
+    }
+
+    if (last_modifier_flags_ != event.modifier_flags) {
+        Utils::Log("INFO", "🔄 [Input RTP State Reconciled] Modifier flags updated from 0x" +
+            std::to_string(last_modifier_flags_) + " -> 0x" + std::to_string(event.modifier_flags));
+        last_modifier_flags_ = event.modifier_flags;
+    }
+}
+
 void InputRTPReceiver::ReceiveLoop() {
     SOCKET sock = (SOCKET)socket_fd_.load();
     if (sock == INVALID_SOCKET || sock == 0) return;
@@ -212,6 +246,7 @@ void InputRTPReceiver::ReceiveLoop() {
         if (bytes > 0) {
             InputRTPEvent event;
             if (ParseInputRTPPacket(buffer.data(), static_cast<size_t>(bytes), event)) {
+                ProcessEvent(event);
                 packet_count++;
                 if (packet_count <= 10 || packet_count % 100 == 0) {
                     Utils::Log("INFO", "🖱️ [Input RTP] Received event #" + std::to_string(packet_count) +

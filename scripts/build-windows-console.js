@@ -56,6 +56,14 @@ if (fs.existsSync(agentSrc)) {
   fs.copyFileSync(agentSrc, path.resolve(beaconDest, 'gs-agent.exe'));
 }
 
+// Copy GridSightMouseOverlay.exe if present
+const overlaySrc = path.resolve(rootDir, 'bin/GridSightMouseOverlay.exe');
+if (fs.existsSync(overlaySrc)) {
+  const binDest = path.resolve(stagingDir, 'bin');
+  if (!fs.existsSync(binDest)) fs.mkdirSync(binDest, { recursive: true });
+  fs.copyFileSync(overlaySrc, path.resolve(binDest, 'GridSightMouseOverlay.exe'));
+}
+
 // Create staging package.json for pkg
 const stagingPackageJson = {
   name: 'gridsight-console',
@@ -68,6 +76,7 @@ const stagingPackageJson = {
       'dist/**/*',
       'tools/**/*',
       'beacon/**/*',
+      'bin/**/*',
     ],
   },
 };

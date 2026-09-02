@@ -61,7 +61,10 @@ export class TeacherInputRtpStreamer {
     this.heartbeatIntervalMs = options.heartbeatIntervalMs ?? 1000;
   }
 
-  public start(): boolean {
+  public start(options?: { localIp?: string; multicastIp?: string; port?: number }): boolean {
+    if (options?.localIp) this.localIp = options.localIp;
+    if (options?.multicastIp) this.multicastIp = options.multicastIp;
+    if (options?.port) this.port = options.port;
     if (this.isStreaming) return true;
 
     try {
@@ -69,9 +72,11 @@ export class TeacherInputRtpStreamer {
       this.socket.bind(() => {
         if (!this.socket) return;
         try {
-          this.socket.setMulticastTTL(2);
+          this.socket.setMulticastTTL(16);
+          this.socket.setBroadcast(true);
           if (this.localIp && this.localIp !== '127.0.0.1') {
             this.socket.setMulticastInterface(this.localIp);
+            logger.info(`[InputRTP] Bound multicast outbound interface to ${this.localIp}`);
           }
         } catch (err) {
           logger.warn(`[InputRTP] Setting multicast interface options failed: ${err}`);
@@ -192,6 +197,10 @@ export class TeacherInputRtpStreamer {
       this.sequenceNumber = (this.sequenceNumber + 1) & 0xffff;
 
       const packet = this.createRtpPacket(event, seq);
+
+      if (seq < 5 || isDiscreteCritical || event.eventType === InputEventType.Scroll) {
+        logger.info(`[InputRTP] Dispatched event #${seq} to ${this.multicastIp}:${this.port} (type=${event.eventType}, pos=(${event.normX},${event.normY}), btn=${event.buttonFlags}, mod=${event.modifierFlags})`);
+      }
 
       for (let i = 0; i < sendCount; i++) {
         this.socket.send(packet, 0, packet.length, this.port, this.multicastIp, (err) => {

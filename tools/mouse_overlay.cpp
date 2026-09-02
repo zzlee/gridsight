@@ -95,6 +95,7 @@ static void EmitInputEvent(int type, int screen_px_x, int screen_px_y, int16_t s
     if (len > 0) {
         DWORD written = 0;
         WriteFile(g_stdout_handle, buf, (DWORD)len, &written, NULL);
+        FlushFileBuffers(g_stdout_handle);
     }
 }
 
@@ -365,14 +366,22 @@ LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) {
 
 int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE, LPSTR lpCmdLine, int) {
     g_stdout_handle = GetStdHandle(STD_OUTPUT_HANDLE);
+    if (!g_stdout_handle || g_stdout_handle == INVALID_HANDLE_VALUE) {
+        AttachConsole(ATTACH_PARENT_PROCESS);
+        g_stdout_handle = GetStdHandle(STD_OUTPUT_HANDLE);
+    }
     if (g_stdout_handle != NULL && g_stdout_handle != INVALID_HANDLE_VALUE) {
-        DWORD fileType = GetFileType(g_stdout_handle);
-        if (fileType == FILE_TYPE_PIPE || fileType == FILE_TYPE_CHAR || fileType == FILE_TYPE_DISK) {
-            g_emit_events = true;
-        }
+        g_emit_events = true;
     }
     if (lpCmdLine && strstr(lpCmdLine, "--emit-events")) {
         g_emit_events = true;
+    }
+
+    if (g_stdout_handle && g_stdout_handle != INVALID_HANDLE_VALUE) {
+        char init_msg[] = "READY GridSightMouseOverlay\n";
+        DWORD wr = 0;
+        WriteFile(g_stdout_handle, init_msg, (DWORD)strlen(init_msg), &wr, NULL);
+        FlushFileBuffers(g_stdout_handle);
     }
 
     GdiplusStartupInput gdiplusStartupInput;
@@ -423,7 +432,14 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE, LPSTR lpCmdLine, int) {
 
     RenderAndCommit();
 
-    g_hook = SetWindowsHookEx(WH_MOUSE_LL, MouseHookProc, hInstance, 0);
+    g_hook = SetWindowsHookEx(WH_MOUSE_LL, MouseHookProc, GetModuleHandle(NULL), 0);
+    if (!g_hook) {
+        char err_msg[64];
+        snprintf(err_msg, sizeof(err_msg), "ERR HookFailed %lu\n", GetLastError());
+        DWORD wr = 0;
+        WriteFile(g_stdout_handle, err_msg, (DWORD)strlen(err_msg), &wr, NULL);
+        FlushFileBuffers(g_stdout_handle);
+    }
 
     MSG msg;
     while (GetMessage(&msg, NULL, 0, 0)) {

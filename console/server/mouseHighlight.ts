@@ -21,11 +21,15 @@ import { type InputEventData, InputEventType } from './inputRtpStreamer.js';
 export type MouseInputEventListener = (event: InputEventData) => void;
 
 export function findOverlayBinary(): string | null {
+  const currentDir = typeof __dirname !== 'undefined' ? __dirname : path.dirname(process.argv[1] || '.');
   const candidates = [
     path.join(process.cwd(), 'bin', 'GridSightMouseOverlay.exe'),
     path.join(process.cwd(), 'bin', 'gs-mouse-overlay.exe'),
     path.join(path.dirname(process.execPath), 'bin', 'GridSightMouseOverlay.exe'),
     path.join(path.dirname(process.execPath), 'GridSightMouseOverlay.exe'),
+    path.join(path.dirname(process.execPath), '..', 'bin', 'GridSightMouseOverlay.exe'),
+    path.join(currentDir, '..', 'bin', 'GridSightMouseOverlay.exe'),
+    path.join(currentDir, 'bin', 'GridSightMouseOverlay.exe'),
     path.join(os.tmpdir(), 'GridSightMouseOverlay.exe'),
   ];
   for (const p of candidates) {
@@ -90,13 +94,36 @@ export class MouseHighlightOverlay {
         this.stdoutBuffer = '';
         this.process = spawn(bundledExe, ['--emit-events'], { stdio: ['ignore', 'pipe', 'ignore'] });
 
+        this.process.on('error', (err) => {
+          logger.error(`[MouseHighlight] Native overlay process error: ${err.message}`);
+        });
+
+        this.process.on('close', (code) => {
+          logger.info(`[MouseHighlight] Native overlay process exited with code ${code}`);
+          this.process = null;
+        });
+
+        let receivedFirst = false;
         this.process.stdout?.on('data', (data: Buffer) => {
           this.stdoutBuffer += data.toString('utf-8');
           const lines = this.stdoutBuffer.split(/\r?\n/);
           this.stdoutBuffer = lines.pop() ?? '';
           for (const line of lines) {
+            const trimmed = line.trim();
+            if (trimmed.startsWith('READY')) {
+              logger.info(`[MouseHighlight] Overlay daemon confirmed ready: ${trimmed}`);
+              continue;
+            }
+            if (trimmed.startsWith('ERR')) {
+              logger.warn(`[MouseHighlight] Overlay error: ${trimmed}`);
+              continue;
+            }
             const ev = parseEventLine(line);
             if (ev) {
+              if (!receivedFirst) {
+                receivedFirst = true;
+                logger.info('[MouseHighlight] Live mouse hook events streaming from native overlay.');
+              }
               for (const listener of this.eventListeners) {
                 try {
                   listener(ev);

@@ -116,6 +116,20 @@ if (fs.existsSync(overlaySrc)) {
   console.log('      ✅ Standalone GridSightMouseOverlay.exe bundled into bin/.');
 }
 
+// Staging In-Pipeline Screen Capture & Mouse Compositor (Option A)
+const captureSrc = path.resolve(rootDir, 'bin/GridSightScreenCapture.exe');
+if (!fs.existsSync(captureSrc)) {
+  try {
+    const binDir = path.dirname(captureSrc);
+    if (!fs.existsSync(binDir)) fs.mkdirSync(binDir, { recursive: true });
+    execSync(`x86_64-w64-mingw32-g++ -O3 -std=c++17 -mwindows -static -static-libgcc -static-libstdc++ "${path.resolve(rootDir, 'tools/screen_capture.cpp')}" -ld3d11 -ldxgi -lgdi32 -lgdiplus -luser32 -lwinmm -o "${captureSrc}"`, { stdio: 'inherit' });
+  } catch {}
+}
+if (fs.existsSync(captureSrc)) {
+  fs.copyFileSync(captureSrc, path.resolve(portableDir, 'bin/GridSightScreenCapture.exe'));
+  console.log('      ✅ In-Pipeline Screen Capture Engine (GridSightScreenCapture.exe) bundled into bin/.');
+}
+
 // 5. Copy Agent & Tools
 console.log('[4/5] 📂 Staging gs-agent.exe & tools...');
 const agentSrc = path.resolve(rootDir, 'beacon/gs-agent.exe');

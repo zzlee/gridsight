@@ -84,8 +84,26 @@ const isLocalIp = (ip: string): boolean => {
 
 const FATAL_RE = /(error|fatal|unable|failed|invalid|could not|out of range)/i;
 
+function findScreenCaptureBinary(): string | null {
+  if (os.platform() !== 'win32') return null;
+  const candidates = [
+    path.resolve(process.cwd(), 'bin/GridSightScreenCapture.exe'),
+    path.resolve(__dirname, '../../bin/GridSightScreenCapture.exe'),
+    path.resolve(__dirname, '../bin/GridSightScreenCapture.exe'),
+    path.resolve(__dirname, 'bin/GridSightScreenCapture.exe'),
+    path.resolve(__dirname, 'GridSightScreenCapture.exe'),
+  ];
+  for (const p of candidates) {
+    try {
+      if (fs.existsSync(p)) return p;
+    } catch {}
+  }
+  return null;
+}
+
 export class TeacherBroadcastStreamer {
   private process: ChildProcess | null = null;
+  private captureProcess: ChildProcess | null = null;
   private isStreaming = false;
   private killTimers = new Set<NodeJS.Timeout>();
   private currentSourceType: string = 'screen';
@@ -188,11 +206,85 @@ export class TeacherBroadcastStreamer {
       // to decode 1080p60 in software). Auto-fit width to preserve aspect ratio.
       appendScale();
     } else if (platform === 'win32') {
-      // macOS is not a supported platform (see docs/roadmap.md)
-      // Option 1: Console-side composed capture with authentic mouse cursor icon, halo & click effects
-      logger.info('[Broadcast] Using Option 1: Console-side composed capture with authentic mouse cursor icon, halo & click effects');
-      inputArgs = ['-f', 'gdigrab', '-draw_mouse', '0', '-framerate', String(fps), '-i', 'desktop'];
-      appendScale();
+      const captureBin = findScreenCaptureBinary();
+      let captureChild: ChildProcess | null = null;
+      let useCapturePipe = false;
+      let screenW = 1920;
+      let screenH = 1080;
+
+      if (captureBin) {
+        try {
+          logger.info(`[Broadcast] Spawning Option A (In-pipeline GPU screen capturer & mouse compositor): ${captureBin}`);
+          captureChild = spawn(captureBin, ['--fps', String(fps)], {
+            stdio: ['ignore', 'pipe', 'pipe'],
+          });
+
+          // Wait up to 2.5s for READY handshake from stderr
+          const readyInfo = await new Promise<{ w: number; h: number; method: string } | null>((resolve) => {
+            let buf = '';
+            const timer = setTimeout(() => resolve(null), 2500);
+
+            captureChild?.stderr?.on('data', (chunk: Buffer) => {
+              buf += chunk.toString('utf-8');
+              const lines = buf.split(/\r?\n/);
+              for (const line of lines) {
+                const m = line.match(/^READY\s+(\d+)\s+(\d+)\s+(\d+)(?:\s+(\w+))?/);
+                if (m) {
+                  clearTimeout(timer);
+                  resolve({ w: parseInt(m[1], 10), h: parseInt(m[2], 10), method: m[4] || 'DXGI' });
+                  return;
+                }
+              }
+            });
+
+            captureChild?.on('error', () => {
+              clearTimeout(timer);
+              resolve(null);
+            });
+            captureChild?.on('exit', () => {
+              clearTimeout(timer);
+              resolve(null);
+            });
+          });
+
+          if (readyInfo && captureChild && captureChild.exitCode === null) {
+            screenW = readyInfo.w;
+            screenH = readyInfo.h;
+            useCapturePipe = true;
+            this.captureProcess = captureChild;
+            captureChild.on('exit', (code) => {
+              if (this.isStreaming) {
+                logger.warn(`[Broadcast] In-pipeline screen capturer exited (code: ${code})`);
+              }
+            });
+            logger.info(`[Broadcast] Screen capturer ready: ${readyInfo.method} ${screenW}x${screenH} @ ${fps}fps. Piping frames directly into FFmpeg stdin.`);
+          } else {
+            logger.warn('[Broadcast] In-pipeline screen capturer failed to signal READY, falling back to standard gdigrab.');
+            if (captureChild) {
+              try { captureChild.kill(); } catch {}
+              captureChild = null;
+            }
+          }
+        } catch (err) {
+          logger.warn(`[Broadcast] Error launching in-pipeline screen capturer: ${err}`);
+          captureChild = null;
+        }
+      }
+
+      if (useCapturePipe && this.captureProcess) {
+        inputArgs = [
+          '-f', 'rawvideo',
+          '-pixel_format', 'bgr0',
+          '-video_size', `${screenW}x${screenH}`,
+          '-framerate', String(fps),
+          '-i', '-',
+        ];
+        appendScale();
+      } else {
+        logger.info('[Broadcast] Using standard gdigrab desktop capture');
+        inputArgs = ['-f', 'gdigrab', '-draw_mouse', '1', '-framerate', String(fps), '-i', 'desktop'];
+        appendScale();
+      }
     } else {
       // Linux: omit -video_size so x11grab captures the full screen at native resolution
       const display = process.env.DISPLAY || ':0';
@@ -227,10 +319,15 @@ export class TeacherBroadcastStreamer {
 
     let child: ChildProcess;
     try {
-      child = spawn(ffmpegCmd, ffmpegArgs, { stdio: ['ignore', 'ignore', 'pipe'] });
+      const stdinSource = (this.captureProcess && this.captureProcess.stdout) ? this.captureProcess.stdout : 'ignore';
+      child = spawn(ffmpegCmd, ffmpegArgs, { stdio: [stdinSource, 'ignore', 'pipe'] });
     } catch (err: unknown) {
       const msg = err instanceof Error ? err.message : String(err);
       logger.error(`[Broadcast] Failed to spawn FFmpeg (${ffmpegCmd}):`, msg);
+      if (this.captureProcess) {
+        try { this.captureProcess.kill(); } catch {}
+        this.captureProcess = null;
+      }
       return { ok: false, error: `無法啟動 FFmpeg: ${msg}` };
     }
 
@@ -291,10 +388,14 @@ export class TeacherBroadcastStreamer {
         this.currentSourceType = 'screen';
         this.currentQuality = null;
       }
+      if (this.captureProcess) {
+        try { this.captureProcess.kill(); } catch {}
+        this.captureProcess = null;
+      }
       return { ok: false, error: reason };
     } 
 
-    if (sourceType === 'screen') {
+    if (sourceType === 'screen' && !this.captureProcess) {
       this.mouseOverlay.start();
     }
     this.inputRtpStreamer.start({
@@ -312,6 +413,13 @@ export class TeacherBroadcastStreamer {
     this.currentSourceType = 'screen';
     this.currentQuality = null;
     this.currentBitrateKbps = 0;
+
+    if (this.captureProcess) {
+      try {
+        this.captureProcess.kill('SIGTERM');
+      } catch {}
+      this.captureProcess = null;
+    }
 
     if (child && child.exitCode === null) {
       try {

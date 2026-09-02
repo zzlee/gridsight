@@ -71,6 +71,21 @@ if (fs.existsSync(overlaySrc)) {
   fs.copyFileSync(overlaySrc, path.resolve(binDest, 'GridSightMouseOverlay.exe'));
 }
 
+// Copy GridSightScreenCapture.exe if present
+const captureSrc = path.resolve(rootDir, 'bin/GridSightScreenCapture.exe');
+if (!fs.existsSync(captureSrc)) {
+  try {
+    const binDir = path.dirname(captureSrc);
+    if (!fs.existsSync(binDir)) fs.mkdirSync(binDir, { recursive: true });
+    execSync(`x86_64-w64-mingw32-g++ -O3 -std=c++17 -mwindows -static -static-libgcc -static-libstdc++ "${path.resolve(rootDir, 'tools/screen_capture.cpp')}" -ld3d11 -ldxgi -lgdi32 -lgdiplus -luser32 -lwinmm -o "${captureSrc}"`, { stdio: 'inherit' });
+  } catch {}
+}
+if (fs.existsSync(captureSrc)) {
+  const binDest = path.resolve(stagingDir, 'bin');
+  if (!fs.existsSync(binDest)) fs.mkdirSync(binDest, { recursive: true });
+  fs.copyFileSync(captureSrc, path.resolve(binDest, 'GridSightScreenCapture.exe'));
+}
+
 // Create staging package.json for pkg
 const stagingPackageJson = {
   name: 'gridsight-console',

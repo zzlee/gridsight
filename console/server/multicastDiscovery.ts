@@ -28,6 +28,7 @@ export interface DeviceSystemInfo {
 }
 
 export interface DiscoveredAgent {
+  id?: string;
   hostname: string;
   ip: string;
   mac: string;
@@ -38,6 +39,11 @@ export interface DiscoveredAgent {
   thumbnailBase64?: string;
   lastSeen: number;
 }
+
+const normalizeTargetKey = (raw: string) => {
+  if (!raw) return '';
+  return decodeURIComponent(raw).replace(/%3A/gi, ':').trim().toUpperCase();
+};
 
 export class MulticastDiscoveryService {
   private server: dgram.Socket | null = null;
@@ -50,6 +56,7 @@ export class MulticastDiscoveryService {
   private tokenAuth: TokenAuthority;
   private onDeviceDiscovered?: ((device: DiscoveredAgent) => void) | undefined;
   private activeDevices = new Map<string, DiscoveredAgent>(); // key: mac or ip
+  private deviceIndex = new Map<string, DiscoveredAgent>(); // O(1) secondary index by normalized mac, ip, hostname, id
   private listening = false;
   private joinedRoutes = 0;
   private lastError = '';
@@ -57,6 +64,40 @@ export class MulticastDiscoveryService {
   constructor(tokenAuth: TokenAuthority, onDeviceDiscovered?: ((device: DiscoveredAgent) => void) | undefined) {
     this.tokenAuth = tokenAuth;
     this.onDeviceDiscovered = onDeviceDiscovered;
+  }
+
+  private indexDevice(dev: DiscoveredAgent) {
+    if (dev.mac) {
+      const normMac = normalizeTargetKey(dev.mac);
+      if (normMac) this.deviceIndex.set(normMac, dev);
+      this.deviceIndex.set(dev.mac, dev);
+    }
+    if (dev.ip) {
+      this.deviceIndex.set(dev.ip, dev);
+    }
+    if (dev.hostname) {
+      this.deviceIndex.set(dev.hostname, dev);
+    }
+    if (dev.id) {
+      this.deviceIndex.set(dev.id, dev);
+    }
+  }
+
+  private unindexDevice(dev: DiscoveredAgent) {
+    if (dev.mac) {
+      const normMac = normalizeTargetKey(dev.mac);
+      if (normMac && this.deviceIndex.get(normMac) === dev) this.deviceIndex.delete(normMac);
+      if (this.deviceIndex.get(dev.mac) === dev) this.deviceIndex.delete(dev.mac);
+    }
+    if (dev.ip && this.deviceIndex.get(dev.ip) === dev) {
+      this.deviceIndex.delete(dev.ip);
+    }
+    if (dev.hostname && this.deviceIndex.get(dev.hostname) === dev) {
+      this.deviceIndex.delete(dev.hostname);
+    }
+    if (dev.id && this.deviceIndex.get(dev.id) === dev) {
+      this.deviceIndex.delete(dev.id);
+    }
   }
 
   start(selectedInterfaceIp?: string) {
@@ -147,7 +188,13 @@ export class MulticastDiscoveryService {
           };
 
           const isNew = !this.activeDevices.has(mac);
+          const oldDev = this.activeDevices.get(mac);
+          if (oldDev) {
+            this.unindexDevice(oldDev);
+          }
+
           this.activeDevices.set(mac, agent);
+          this.indexDevice(agent);
 
           if (isNew && this.onDeviceDiscovered) {
             this.onDeviceDiscovered(agent);
@@ -178,15 +225,39 @@ export class MulticastDiscoveryService {
         // Active within 6s (agent sends beacon every 1~2s)
         result.push(dev);
       } else {
+        this.unindexDevice(dev);
         this.activeDevices.delete(key);
       }
     }
     return result;
   }
 
+  findDevice(target: string): DiscoveredAgent | undefined {
+    if (!target) return undefined;
+    const now = Date.now();
+
+    // Check direct index first (normalized MAC, raw MAC, IP, Hostname, ID)
+    const normKey = normalizeTargetKey(target);
+    const candidate = this.deviceIndex.get(normKey) || this.deviceIndex.get(target);
+
+    if (candidate) {
+      if (now - candidate.lastSeen < 6000) {
+        return candidate;
+      } else {
+        this.unindexDevice(candidate);
+        this.activeDevices.delete(candidate.mac);
+        return undefined;
+      }
+    }
+
+    // Fallback if not found in index or for safety
+    return undefined;
+  }
+
   stop() {
     this.listening = false;
     this.joinedRoutes = 0;
+    this.deviceIndex.clear();
     if (this.server) {
       this.server.close();
       this.server = null;

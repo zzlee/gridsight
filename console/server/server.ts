@@ -262,9 +262,7 @@ wss.on('connection', (ws, req) => {
     // Resolve an explicit IP or hostname to its authenticated agent MAC. Never
     // fall back to an unrelated sole agent because that can disclose its stream.
     if (!agentSockets.has(mac)) {
-      const dev = discoveryService.getDevices().find(
-        (d) => d.mac === mac || d.ip === rawTarget || d.hostname === rawTarget || normalizeTarget(d.mac) === mac
-      );
+      const dev = discoveryService.findDevice(rawTarget) || discoveryService.findDevice(mac);
       if (dev) mac = normalizeTarget(dev.mac);
     }
     const agentWs = agentSockets.get(mac);
@@ -740,9 +738,7 @@ app.get('/api/record/student/status', requireTeacherAuth, (req, res) => {
   const rawTarget = (req.query.mac as string) || (req.query.target as string) || '';
   let mac = normalizeTarget(rawTarget);
   if (!activeStudentRecordings.has(mac)) {
-    const dev = discoveryService.getDevices().find(
-      (d) => d.mac === mac || d.ip === rawTarget || d.hostname === rawTarget || normalizeTarget(d.mac) === mac
-    );
+    const dev = discoveryService.findDevice(rawTarget) || discoveryService.findDevice(mac);
     if (dev) mac = normalizeTarget(dev.mac);
   }
 
@@ -769,9 +765,7 @@ app.post('/api/record/student/start', requireTeacherAuth, async (req, res) => {
   await ensureRecordingsDirectory();
   const rawTarget = (req.body?.mac as string) || (req.body?.target as string) || '';
   let mac = normalizeTarget(rawTarget);
-  const dev = discoveryService.getDevices().find(
-    (d) => d.mac === mac || d.ip === rawTarget || d.hostname === rawTarget || normalizeTarget(d.mac) === mac
-  );
+  const dev = discoveryService.findDevice(rawTarget) || discoveryService.findDevice(mac);
   if (dev) mac = normalizeTarget(dev.mac);
 
   const label = (req.body?.label as string) || (dev?.seatNo ? `Seat${dev.seatNo}` : (dev?.hostname || mac.replace(/[:]/g, '').slice(-4)));
@@ -847,9 +841,7 @@ app.post('/api/record/student/stop', requireTeacherAuth, async (req, res) => {
   const rawTarget = (req.body?.mac as string) || (req.body?.target as string) || '';
   let mac = normalizeTarget(rawTarget);
   if (!activeStudentRecordings.has(mac)) {
-    const dev = discoveryService.getDevices().find(
-      (d) => d.mac === mac || d.ip === rawTarget || d.hostname === rawTarget || normalizeTarget(d.mac) === mac
-    );
+    const dev = discoveryService.findDevice(rawTarget) || discoveryService.findDevice(mac);
     if (dev) mac = normalizeTarget(dev.mac);
   }
 
@@ -1267,7 +1259,7 @@ app.post(
     if (rawWin) {
       try {
         const winTitle = Buffer.from(rawWin, 'base64').toString('utf-8');
-        const dev = discoveryService.getDevices().find((d) => normalizeTarget(d.mac) === mac || d.ip === ip);
+        const dev = discoveryService.findDevice(mac) || discoveryService.findDevice(ip);
         if (dev && winTitle) {
           dev.activeWindow = winTitle;
         }
@@ -1293,9 +1285,7 @@ app.get(['/api/snapshot/:id', '/api/snapshot'], requireTeacherAuth, async (req, 
   const wantsHighRes = req.query.full === '1' || req.query.highres === '1';
 
   if (wantsHighRes) {
-    const dev = discoveryService.getDevices().find(
-      (d) => normalizeTarget(d.mac) === normalizedId || d.ip === rawId || d.hostname === rawId
-    );
+    const dev = discoveryService.findDevice(rawId) || discoveryService.findDevice(normalizedId);
     const targetMac = dev ? normalizeTarget(dev.mac) : normalizedId;
     const ws = agentSockets.get(targetMac);
     if (ws && ws.readyState === WebSocket.OPEN) {
@@ -1337,14 +1327,7 @@ app.get(['/api/agent/:id/logs', '/api/agent/logs'], requireTeacherAuth, async (r
   const rawId = req.params.id || (req.query.id as string) || (req.query.mac as string) || (req.query.ip as string) || '';
   const normalizedId = normalizeTarget(rawId);
 
-  const dev = discoveryService.getDevices().find(
-    (d) =>
-      normalizeTarget(d.mac) === normalizedId ||
-      d.ip === rawId ||
-      d.hostname === rawId ||
-      d.id === rawId ||
-      d.mac === rawId
-  );
+  const dev = discoveryService.findDevice(rawId) || discoveryService.findDevice(normalizedId);
 
   if (!dev || !dev.ip) {
     return res.status(404).json({

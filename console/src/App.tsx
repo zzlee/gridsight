@@ -370,6 +370,9 @@ export const App: React.FC = () => {
       const updatedSeats = [...prev.seats];
       const remainingPool: StudentDevice[] = [];
 
+      // Pre-compute occupied coordinates once before iterating through unassigned devices
+      const occupied = new Set(updatedSeats.map((s) => `${s.gridX},${s.gridY}`));
+
       unassignedDevices.forEach((dev) => {
         // 1. Find the first empty coordinate or first offline dummy slot
         let targetIdx = updatedSeats.findIndex((s) => s.status === 'offline' && s.id.startsWith('PC-Slot-'));
@@ -389,7 +392,6 @@ export const App: React.FC = () => {
           };
         } else {
           // If all current seats are occupied, find next open grid coordinate
-          const occupied = new Set(updatedSeats.map((s) => `${s.gridX},${s.gridY}`));
           let placed = false;
           for (let r = 0; r < prev.rows; r++) {
             for (let c = 0; c < prev.cols; c++) {

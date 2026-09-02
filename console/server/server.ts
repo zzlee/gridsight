@@ -33,7 +33,7 @@ const APP_VERSION: string = (() => {
       if (pkg.version) return pkg.version;
     } catch { /* ignore */ }
   }
-  return '5.8.4'; // fallback
+  return '5.8.5'; // fallback
 })();
 
 const app = express();

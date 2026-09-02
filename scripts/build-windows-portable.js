@@ -104,6 +104,13 @@ await setupFfmpegExe();
 
 // Staging Standalone Native Mouse Overlay
 const overlaySrc = path.resolve(rootDir, 'bin/GridSightMouseOverlay.exe');
+if (!fs.existsSync(overlaySrc)) {
+  try {
+    const binDir = path.dirname(overlaySrc);
+    if (!fs.existsSync(binDir)) fs.mkdirSync(binDir, { recursive: true });
+    execSync(`x86_64-w64-mingw32-g++ -O2 -mwindows -static -static-libgcc -static-libstdc++ "${path.resolve(rootDir, 'tools/mouse_overlay.cpp')}" -luser32 -o "${overlaySrc}"`, { stdio: 'inherit' });
+  } catch {}
+}
 if (fs.existsSync(overlaySrc)) {
   fs.copyFileSync(overlaySrc, path.resolve(portableDir, 'bin/GridSightMouseOverlay.exe'));
   console.log('      ✅ Standalone GridSightMouseOverlay.exe bundled into bin/.');

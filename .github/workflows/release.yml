@@ -24,16 +24,19 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y mingw-w64 cmake make
 
-      - name: Build gs-agent.exe
-        working-directory: beacon
+      - name: Build gs-agent.exe & GridSightMouseOverlay.exe
         run: |
-          make clean all CXX=x86_64-w64-mingw32-g++
+          make -C beacon clean all CXX=x86_64-w64-mingw32-g++
+          mkdir -p bin
+          x86_64-w64-mingw32-g++ -O2 -mwindows -static -static-libgcc -static-libstdc++ tools/mouse_overlay.cpp -luser32 -o bin/GridSightMouseOverlay.exe
 
-      - name: Upload Agent Artifact
+      - name: Upload Native Artifacts
         uses: actions/upload-artifact@v4
         with:
-          name: gs-agent
-          path: beacon/gs-agent.exe
+          name: native-windows-binaries
+          path: |
+            beacon/gs-agent.exe
+            bin/GridSightMouseOverlay.exe
 
   build-console:
     name: Build Standalone Teacher Console (gs-console.exe)
@@ -53,11 +56,10 @@ jobs:
             console/package.json
             console/server/package.json
 
-      - name: Download Built Agent Binary
+      - name: Download Built Native Binaries
         uses: actions/download-artifact@v4
         with:
-          name: gs-agent
-          path: beacon
+          name: native-windows-binaries
 
       - name: Install Dependencies
         run: |

@@ -7,7 +7,7 @@
 ## 📑 知識庫目錄導覽
 
 1. **[系統完整開發歷程與技術演進全紀錄 (Development History)](development-history.md)**
-   - 記錄從 v1.0 至 v5.8.4 的架構選型、效能突破、踩坑經驗與完整版本演進圖。
+   - 記錄從 v1.0 至 v5.8.8 的架構選型、效能突破、踩坑經驗與完整版本演進圖。
 2. **[系統架構與設計規格 (Architecture)](../architecture.md)**
    - 深入探討三大影像傳輸模式、DXGI 擷取、IGMP Snooping 多播與 WebCodecs GPU 硬體解碼管線。
 3. **[通訊協定規範書 (Protocol Spec)](../protocol_spec.md)**

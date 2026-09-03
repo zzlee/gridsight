@@ -563,7 +563,7 @@ export const FocusModal: React.FC<FocusModalProps> = ({ device, onClose }) => {
               </div>
             )}
           </div>
-          <div className="text-sky-400 font-medium">按需 OpenH264 WebSocket 串流中 (單機約 2~4 Mbps)</div>
+          <div className="text-sky-400 font-medium">按需 Media Foundation H.264 WebSocket 串流中 (單機約 2~4 Mbps)</div>
         </div>
 
         {/* Student Failure Log Modal */}

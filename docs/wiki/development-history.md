@@ -11,9 +11,9 @@ timeline
     title GridSight 版本演進里程碑
     section 奠定架構 (v1.0 ~ v2.0)
         v1.0 : 70人還原卡環境痛點分析 : 確立 C++ 原生 Agent + Web Console 架構 : 定案三大傳輸模式指標
-        v2.0 : DXGI 螢幕擷取與 OpenH264 編碼 : RAM 動態 Token 鑑權與 UDP 多播探索
+        v2.0 : DXGI 螢幕擷取與 MFT H.264 編碼 : RAM 動態 Token 鑑權與 UDP 多播探索
     section 效能突破 (v3.0 ~ v4.0)
-        v3.0 : 雙層動態 JPEG 加速 (WIC ~0.4ms + Turbo SIMD) : WebCodecs GPU 硬體解碼播放器落地 (<50ms)
+        v3.0 : GDI+ Bilinear JPEG 縮圖加速 (~0.4ms) : WebCodecs GPU 硬體解碼播放器落地 (<50ms)
         v4.0 : 矩陣畫布自訂 (走道/講台/障礙物) : 800ms 熔斷輪詢與多選框選批次管理
     section 極簡部署 (v5.0 ~ v5.2)
         v5.0 : 學生端 1 秒極速加入 (/join + Win+R) : 純 HTTP 剪貼簿相容性機制
@@ -49,11 +49,11 @@ timeline
 
 ## ⚡ 第二階段：效能突破與全鏈路實現 (v3.0 ~ v4.0)
 
-### 2.1 雙層動態 JPEG 加速管線 (Tier 1 WIC + Tier 2 Turbo SIMD)
+### 2.1 GDI+ 縮圖 JPEG 加速管線 (Bilinear SIMD + 靜態幀快取)
 - **問題**：早期使用純軟體壓縮 JPEG，70 台頻繁請求導致學生端 CPU 佔用上升。
 - **突破**：
-  - **Tier 1 (WIC)**：呼叫 Windows 原生 `IWICImagingFactory` 與 `IWICBitmapEncoder`，利用系統底層硬體指令壓縮，耗時壓低至 **~0.4ms / 幀**，且保持 **0 KB 額外依賴**。
-  - **Tier 2 (Turbo SIMD)**：內建 Fast-DCT 定點數演算法作為熱備援降級機制。
+  - **GDI+ Bilinear 編碼**：以 Windows 原生 `Gdiplus::Bitmap` + Bilinear 插值完成縮圖縮放與 JPEG 品質參數編碼，耗時壓低至 **~0.4ms / 幀**，且保持 **0 KB 額外依賴**。早期自製 Fast-DCT 定點數引擎因產生條紋偽影（Striping Ringing），已於 `0e535df` 替換為 GDI+ Bilinear SIMD 編碼器。
+  - **靜態幀快取**：內建 64-bit FNV-1a 取樣雜湊（`ComputeFastFrameHash` + thread-local JPEG 緩衝），桌面未變化時直接回傳快取幀，完全跳過縮放/編碼管線。
 
 ### 2.2 前端 WebCodecs GPU 硬體解碼播放器
 - **突破**：捨棄傳統 JSMpeg 或純 WebAssembly 軟解，全面引入現代瀏覽器 **WebCodecs API (`VideoDecoder`)**，直接將 C++ 學生端推來的 H.264 NALU 送交 GPU 解碼並渲染至 Canvas，解碼延遲壓至 **< 5ms**。
@@ -143,7 +143,7 @@ timeline
 | :--- | :--- | :--- | :--- |
 | **v1.0** | 2026-08 | 專案初始化 | DXGI 擷取、RFC 6455 WebSocket、IGMP Snooping 多播設計 |
 | **v2.0** | 2026-08 | `beacon/`, `console/` | 基礎三模式打通、動態 Token 記憶體鑑權 |
-| **v3.0** | 2026-08 | `encoder.cpp`, `WebCodecsPlayer` | Windows WIC 雙層動態 JPEG 加速、WebCodecs GPU 硬體解碼 |
+| **v3.0** | 2026-08 | `encoder.cpp`, `WebCodecsPlayer` | GDI+ Bilinear JPEG 縮圖加速、WebCodecs GPU 硬體解碼 |
 | **v4.0** | 2026-08 | `GridCanvas.tsx`, `server.ts` | 走道/講台/障礙物矩陣佈局、800ms 熔斷機制、多選框選批次操作 |
 | **v5.0** | 2026-08 | `/join`, `install-agent.ps1` | 學生端 1 秒極速加入、純 HTTP 剪貼簿相容機制 |
 | **v5.2** | 2026-08 | `scripts/build-windows-portable.js` | 官方簽名綠色便攜包（100% 零 Defender 誤報）、單檔 `gs-console.exe` |
@@ -165,6 +165,7 @@ timeline
 | **v5.8.5** | 2026-09 | `mouse_overlay.cpp`, `inputRtpStreamer.ts`, `ubuntu_agent_debugger.py` | 教師端無頭低階掛鉤 (Headless Hook)、純淨桌面視訊擷取、Input RTP 即時多播流 (Port 9002)、學生端平滑滑鼠特效合成、CI/CD 全面靜態編譯零 GCC DLL 依賴 |
 | **v5.8.6** | 2026-09 | `screen_capture.cpp`, `broadcastStreamer.ts` | 擷取管線硬體合成 (OBS 模式)：DXGI GPU 零拷貝截圖、視訊幀記憶體內烙印真實游標/光圈波紋/滾輪氣泡、教師端純淨零干擾、0ms 幀精準同步、完全支援原生錄影、靜音關閉 Input RTP |
 | **v5.8.7** | 2026-09 | `broadcastStreamer.ts`, `server.ts`, `TeacherRecordModal.tsx`, `FocusModal.tsx` | 原生管線雙軌錄影：徹底廢棄 Chrome JS API；教師端 DXGI GPU + 完整滑鼠特效同步錄製；學生焦點畫面 30 FPS H.264 原生二進位串流無損直出 MP4（0% 額外 CPU 損耗、Fragmented MP4 斷電防壞檔、內建歷史錄影管理） |
+| **v5.8.8** | 2026-09 | `server.ts`, `broadcastStreamer.ts`, `inputRtpStreamer.ts`, `multicastDiscovery.ts` | 伺服器 TypeScript 嚴格型別全面清理（`tsc --noEmit` 零錯誤：`exactOptionalPropertyTypes` / `noUncheckedIndexedAccess` / 測試檔納入型別檢查）；效能批次優化（TokenAuthority 非同步 I/O、快照快取單一迭代器 eviction、O(1) 設備索引對照表、Auto-Assign occupied set 提升） |
 
 ---
 

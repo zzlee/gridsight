@@ -11,7 +11,7 @@
 - **[x] [P1] 焦點 30 FPS 單機監看閉環 (WebSocket H.264 + WebCodecs GPU 硬體解碼)**：C++ 學生端實作 RFC 6455 WebSocket 伺服器與 NALU 打包推流；前端實作 WebCodecs API 硬體解碼播放器。
 - **[x] [P2] 教師全體廣播串流閉環 (FFmpeg RTP Multicast + 學生端接收渲染)**：前端廣播控制對接後端 FFmpeg RTP 多播推流；學生端實作 IGMP 多播接收與全螢幕置頂渲染。
 - **[x] [P3] 安全鑑權閉環與系統健壯性優化 (Security & Resilience)**：落實動態 Token 攔截鑑權、組播網卡綁定與自動重連驗證。
-- **[x] [Perf] 雙層動態 JPEG 加速管線 (WIC + Turbo SIMD Auto-Fallback)**：整合 Windows WIC 硬體/系統 SIMD 加速作為 Tier 1，無縫自動降級至 Turbo SIMD / Fast-DCT 引擎作為 Tier 2。
+- **[x] [Perf] GDI+ 單引擎 JPEG 縮圖管線 (Bilinear SIMD + 靜態幀快取)**：以 Windows GDI+ Bilinear SIMD 縮放 + JPEG 編碼為單一引擎（取代早期自製 DCT 以消除條紋偽影），輔以 64-bit FNV 靜態幀雜湊快取跳過重複幀。
 
 ---
 
@@ -38,8 +38,8 @@ graph TD
         P3_1[HTTP / WS 動態 Token 嚴格鑑權] --> P3_2[多播網卡綁定與全鏈路測試]
     end
 
-    subgraph Perf[Perf: 雙層動態 JPEG 加速]
-        Perf_1[Tier 1: Windows WIC 原生加速 ~0.4ms] -->|失敗/跨平台自動降級| Perf_2[Tier 2: Turbo SIMD / Fast-DCT ~1.8ms]
+    subgraph Perf[Perf: GDI+ 縮圖編碼管線]
+        Perf_1[GDI+ Bilinear SIMD JPEG 編碼 ~0.4ms] --> Perf_2[64-bit FNV 靜態幀快取 跳過重複幀]
     end
 
     P0 --> P1 --> P2 --> P3 --> Perf
@@ -69,8 +69,8 @@ graph TD
 - [x] **Task 3.2**：加入多播網卡選項 (`IP_MULTICAST_TTL`) 與跨平台 Socket 兼容，完成前端 Vite Build、後端 TypeScript 編譯與 C++ Agent 構建驗收。
 
 ### 效能強化：雙層動態 JPEG 編碼加速管線
-- [x] **Perf 1**：在 `beacon/src/encoder.cpp` 整合 Windows WIC (`IWICImagingFactory` / `IWICBitmapEncoder`) 作為第一優先級硬體/系統 SIMD 編碼器（~0.4ms / 幀，0 KB 外部依賴）。
-- [x] **Perf 2**：實作執行期自動探測與熱降級機制，若 WIC 不可用或處於非 Windows 環境，無縫切換至 Turbo SIMD / Fast-DCT 定點數編碼引擎。
+- [x] **Perf 1**：在 `beacon/src/encoder.cpp` 以 Windows GDI+ (`Gdiplus::Bitmap` + Bilinear 插值) 完成縮圖縮放與 JPEG 品質參數編碼（~0.4ms / 幀，0 外部依賴）。早期自製 DCT 引擎因產生條紋偽影 (Striping Ringing) 已於 `0e535df` 替換為 GDI+ Bilinear SIMD 編碼器。
+- [x] **Perf 2**：實作 64-bit FNV-1a 取樣雜湊靜態幀快取 (`ComputeFastFrameHash` + thread-local JPEG 緩衝)，桌面畫面未變化時直接回傳快取幀，完全跳過縮放/編碼管線以節省 CPU。
 
 ### 階段 4：課堂管理、出站中繼與離題智慧監控 (v5.0 ~ v5.7)
 - [x] **Task 4.1 出站架構全面轉型**：學生端改為出站 Snapshot Push 與反向 WebSocket，學生端零入站開放埠。

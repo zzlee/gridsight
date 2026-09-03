@@ -238,5 +238,5 @@ sequenceDiagram
 2. **多網卡宣告與環境適應**：
    - 學生端預設以主要網卡 `Utils::GetSystemNetworkInfo()` 回傳 IP 進行廣播。若學生機具備虛擬網卡 (如 Docker, VMware)，需確保優先選用真實物理 LAN 網卡。
 
-3. **直接 WebSocket 備援連線**：
-   - `ws://<STUDENT_IP>:8081/stream` 需學生端防火牆放行 TCP 8081 入站。預設運作時優先使用出站反向連線 `/ws/agent`。
+3. **全出站通訊（無入站埠）**：
+   - v5.8.0 起已移除學生端傳統入站埠 `8080 / 8081`。焦點串流一律使用學生端出站反向 WebSocket `/ws/agent`，學生端零入站開埠，無需任何防火牆入站放行。

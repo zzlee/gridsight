@@ -18,7 +18,7 @@
   - 座位表一鍵 JSON 匯出/匯入與多班級切換
 - ⚡ **三大影像傳輸模式 (Three Transmission Modes)**
   1. **全班常態監控**：480×270 @ 1 FPS，出站 Snapshot HTTP Push + 伺服器快取 (附熔斷器)，全班僅佔 1.7% 頻寬 (~17 Mbps)
-  2. **焦點單機調閱**：720p/1080p @ 30 FPS，按需 OpenH264 + 反向 WebSocket 中繼，WebCodecs GPU 硬體解碼 (<50ms 延遲)
+  2. **焦點單機調閱**：720p/1080p @ 30 FPS，按需 Media Foundation H.264 + 反向 WebSocket 中繼，WebCodecs GPU 硬體解碼 (<50ms 延遲)
   3. **教師全體廣播**：H.264 + UDP Multicast (RTP)，內建 True Alpha 原生滑鼠光圈與點擊波紋特效，支援三檔品質快速切換（高 1080p30/8M、中 720p30/4M、低 480p15/1.5M）
 - 🔒 **輕量無感部署與安全鑑權 (Zero-Maintenance & Security)**
   - **雲端熱拉取**：PowerShell 單行指令下載至 `%TEMP%` 於 Session 1 執行，避開 Session 0 隔離，還原卡零殘留
@@ -33,7 +33,7 @@
 | 傳輸場景 | 解析度 / 幀率 | 編碼與傳輸協定 | 全班頻寬負載與效能指標 |
 | :--- | :--- | :--- | :--- |
 | **全班 70 台常態監控** | 480×270 @ 1 FPS | WebP/JPEG + HTTP Pull | 約 17 Mbps (佔 1GbE 頻寬 1.7%)，教師 CPU 解碼 < 15% |
-| **單機/焦點實時監看** | 720p/1080p @ 30 FPS | H.264 (OpenH264) + WebSocket | 單機 2~4 Mbps，WebCodecs GPU 硬解延遲 < 50ms |
+| **單機/焦點實時監看** | 720p/1080p @ 30 FPS | H.264 (Media Foundation MFT) + WebSocket | 單機 2~4 Mbps，WebCodecs GPU 硬解延遲 < 50ms |
 | **教師畫面全體廣播** | 高 1080p30 / 中 720p30 / 低 480p15 | H.264 + UDP Multicast (RTP) | 三檔品質細選（8/4/1.5 Mbps），IGMP Snooping 硬體複製零延遲 |
 
 ---
@@ -56,8 +56,8 @@
 | [學生 Session 1 執行 gs-agent.exe (無UI背景)]|  | [學生 Session 1 執行 gs-agent.exe (無UI背景)]│ |    |
 |  ├─ 啟動發送 UDP Multicast 主動宣告 (Beacon) |  |  ├─ 啟動發送 UDP Multicast 主動宣告 (Beacon) │ |    |
 |  ├─ (模式1) Native HTTP Server /snapshot 回傳|  |  ├─ (模式1) Native HTTP Server /snapshot 回傳 │ |    |
-|  ├─ (模式2) 按需啟動 OpenH264 WS 串流推流 ───┼──┼─ (模式2) [雙擊選中時] 啟動 30FPS 推流 ───────┘ │    |
-|  └─ (模式3) D3D11 / SDL2 全螢幕置頂廣播接收  |  |  └─ (模式3) D3D11 / SDL2 全螢幕置頂廣播接收 ◀─────────┘    |
+|  ├─ (模式2) 按需啟動 MFT H.264 WS 串流推流 ──┼──┼─ (模式2) [雙擊選中時] 啟動 30FPS 推流 ───────┘ │    |
+|  └─ (模式3) Win32 GDI 全螢幕置頂廣播接收     |  |  └─ (模式3) Win32 GDI 全螢幕置頂廣播接收 ◀────────────┘    |
 +──────────────────────────────────────────────+  +───────────────────────────────────────────────+
 ```
 

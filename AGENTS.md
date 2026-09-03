@@ -11,7 +11,7 @@ GridSight 專為 70 台具備還原卡之 Windows 電腦教室打造，兼顧極
 ### 模組架構
 - **`beacon/`（學生端代理 - `gs-agent.exe`）**：
   - Windows x64 原生 C++ 撰寫，MinGW-w64 靜態編譯（無依賴、`-mwindows` 背景無痕執行）。
-  - 支援 DXGI 螢幕擷取、OpenH264 編碼、原生 HTTP Snapshot 伺服器、WebSocket 串流推送、UDP RTP 多播接收。
+  - 支援 DXGI 螢幕擷取、Media Foundation H.264 硬體編碼（軟體降級）、原生 HTTP Snapshot 伺服器、WebSocket 串流推送、UDP RTP 多播接收。
 - **`console/`（教師端管理介面 - `gs-console`）**：
   - 前端：React 18 + Vite + TailwindCSS（支援座位拖曳排版、走道/講台設定、WebCodecs GPU 硬體解碼播放器）。
   - 後端：Node.js Express + WebSocket Relay + UDP 多播探索服務（Port 3000）。
@@ -180,8 +180,8 @@ powershell -WindowStyle Hidden -c "irm http://<教師IP>:3000/install-agent.ps1|
    - （`scripts/build-windows-console.js` 動態讀取 `console/package.json`，無需手動改）
 2. 建立 Git Tag 並推送：
    ```bash
-   git tag -a v5.8.7 -m "Release v5.8.7: ..."
-   git push origin v5.8.7
+   git tag -a v5.8.8 -m "Release v5.8.8: ..."
+   git push origin v5.8.8
    ```
 3. GitHub Actions (`.github/workflows/release.yml`) 會自動執行：
    - 交叉編譯產出 `gs-agent.exe`

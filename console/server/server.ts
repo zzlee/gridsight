@@ -17,6 +17,7 @@ import { promptSelectNic } from './nicSelector.js';
 import { openBrowser } from './browserLauncher.js';
 import { buildInstallAgentScript } from './installerScript.js';
 import { createZipFromDirectory } from './zipPacker.js';
+import { listAudioInputDevices } from './audioDevices.js';
 import type { ClassroomLayout, StudentDevice } from './types.js';
 
 interface StudentRecordingSession {
@@ -45,7 +46,7 @@ const APP_VERSION: string = (() => {
       if (pkg.version) return pkg.version;
     } catch { /* ignore */ }
   }
-  return '5.8.9'; // fallback
+  return '5.8.10'; // fallback
 })();
 
 const app = express();
@@ -1244,6 +1245,17 @@ app.get('/api/record/status', requireTeacherAuth, (req, res) => {
   });
 });
 
+app.get('/api/record/audio-devices', requireTeacherAuth, async (_req, res) => {
+  try {
+    const devices = await listAudioInputDevices();
+    res.json({ ok: true, devices });
+  } catch (err: unknown) {
+    const msg = err instanceof Error ? err.message : String(err);
+    logger.warn('[Record] Failed to list audio devices:', msg);
+    res.status(500).json({ error: `無法取得音訊裝置: ${msg}` });
+  }
+});
+
 app.post('/api/record/start', requireTeacherAuth, async (req, res) => {
   await ensureRecordingsDirectory();
   const now = new Date();
@@ -1251,13 +1263,14 @@ app.post('/api/record/start', requireTeacherAuth, async (req, res) => {
   const timestamp = `${now.getFullYear()}-${pad(now.getMonth() + 1)}-${pad(now.getDate())}_${pad(now.getHours())}-${pad(now.getMinutes())}-${pad(now.getSeconds())}`;
   const filename = `GridSight_Record_${timestamp}.mp4`;
   const recordFile = path.join(RECORDINGS_DIR, filename);
+  const audioDevice = typeof req.body?.audioDevice === 'string' ? req.body.audioDevice : 'default';
 
   if (broadcastStreamer.isActive()) {
     const status = broadcastStreamer.getRecordingStatus();
     if (status.isRecording) {
       return res.json({ status: 'recording', alreadyRecording: true, ...status });
     }
-    const ok = await broadcastStreamer.toggleRecordingOnActiveStream(true, RECORDINGS_DIR);
+    const ok = await broadcastStreamer.toggleRecordingOnActiveStream(true, RECORDINGS_DIR, audioDevice);
     if (!ok) {
       return res.status(500).json({ error: '無法為當前廣播啟用同步錄製' });
     }
@@ -1270,6 +1283,7 @@ app.post('/api/record/start', requireTeacherAuth, async (req, res) => {
     quality: req.body?.quality || 'high',
     recordOnly: true,
     recordFile,
+    audioDevice,
     localIp: activeTeacherIp,
   });
   if (!result.ok) {

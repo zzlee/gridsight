@@ -5,6 +5,7 @@ import path from 'path';
 import { logger } from './logger.js';
 import { MouseHighlightOverlay } from './mouseHighlight.js';
 import { TeacherInputRtpStreamer } from './inputRtpStreamer.js';
+import { listAudioInputDevices } from './audioDevices.js';
 
 export const findFfmpegBinary = (): string => {
   if (os.platform() === 'win32') {
@@ -57,6 +58,8 @@ export interface StreamerOptions {
   recordFile?: string;
   /** If true, records screen locally without sending RTP multicast packets */
   recordOnly?: boolean;
+  /** Audio input device to record (e.g. 'none', 'default', or physical device name) */
+  audioDevice?: string;
 }
 
 export interface StreamStartResult {
@@ -124,6 +127,7 @@ export class TeacherBroadcastStreamer {
   private currentRecordFile: string | null = null;
   private recordingStartTime: number | null = null;
   private lastSavedRecording: { filename: string; fullPath: string; durationSeconds: number; sizeBytes: number } | null = null;
+  private currentAudioDevice: string = 'none';
   private relayMac: string | null = null;
 
   constructor() {
@@ -182,11 +186,12 @@ export class TeacherBroadcastStreamer {
       startTime: this.recordingStartTime,
       durationSeconds: this.recordingStartTime ? Math.floor((Date.now() - this.recordingStartTime) / 1000) : 0,
       fileSizeBytes,
+      audioDevice: this.currentAudioDevice,
       lastSavedRecording: this.lastSavedRecording,
     };
   }
 
-  async toggleRecordingOnActiveStream(enable: boolean, recordingsDir?: string): Promise<boolean> {
+  async toggleRecordingOnActiveStream(enable: boolean, recordingsDir?: string, audioDevice?: string): Promise<boolean> {
     if (!this.isActive()) return false;
     if (this.isRecordOnly && !enable) {
       this.stopStream();
@@ -199,6 +204,7 @@ export class TeacherBroadcastStreamer {
       quality: this.currentQuality || 'high',
       bitrateKbps: this.currentBitrateKbps,
       record: enable,
+      audioDevice: audioDevice || this.currentAudioDevice || 'none',
       ...(enable && recordingsDir
         ? { recordFile: path.join(recordingsDir, `GridSight_Record_${new Date().toISOString().replace(/[:.]/g, '-').slice(0, 19)}.mp4`) }
         : {}),
@@ -391,6 +397,35 @@ export class TeacherBroadcastStreamer {
     const rtpUrl = `rtp://${multicastIp}:${port}?pkt_size=1316&ttl=2${localaddr ? `&localaddr=${localaddr}` : ''}`;
     let outputArgs: string[] = [];
 
+    let audioArgs: string[] = [];
+    const shouldRecordAudio = (this.isRecording || this.isRecordOnly) && options.audioDevice && options.audioDevice !== 'none';
+    if (shouldRecordAudio) {
+      const requestedDev = options.audioDevice!;
+      if (platform === 'win32') {
+        let devName = requestedDev;
+        if (devName === 'default') {
+          const devs = await listAudioInputDevices();
+          const firstReal = devs.find((d) => d.id !== 'none' && d.id !== 'default');
+          if (firstReal) devName = firstReal.id;
+        }
+        if (devName && devName !== 'none' && devName !== 'default') {
+          audioArgs = ['-f', 'dshow', '-i', `audio=${devName}`];
+          this.currentAudioDevice = devName;
+          logger.info(`[Broadcast/Record] Attached DirectShow audio source: ${devName}`);
+        } else {
+          logger.warn('[Broadcast/Record] No physical audio device available on host, continuing with video only');
+          this.currentAudioDevice = 'none';
+        }
+      } else {
+        const devName = requestedDev === 'default' ? 'default' : requestedDev;
+        audioArgs = ['-f', 'pulse', '-i', devName];
+        this.currentAudioDevice = devName;
+        logger.info(`[Broadcast/Record] Attached Linux audio source: ${devName}`);
+      }
+    } else {
+      this.currentAudioDevice = 'none';
+    }
+
     if (sourceType === 'student-relay') {
       if (this.isRecording && this.currentRecordFile) {
         const cleanPath = this.currentRecordFile.replace(/\\/g, '/');
@@ -410,7 +445,7 @@ export class TeacherBroadcastStreamer {
       }
     } else if (this.isRecordOnly && this.currentRecordFile) {
       const cleanPath = this.currentRecordFile.replace(/\\/g, '/');
-      outputArgs = [
+      const baseVideoArgs = [
         '-c:v', 'libx264',
         '-preset', 'ultrafast',
         '-tune', 'zerolatency',
@@ -424,14 +459,34 @@ export class TeacherBroadcastStreamer {
         '-slices', '1',
         '-bf', '0',
         '-flags', '+low_delay+global_header',
-        '-f', 'mp4',
-        '-movflags', '+frag_keyframe+empty_moov+default_base_moof',
-        cleanPath
       ];
+
+      if (audioArgs.length > 0) {
+        outputArgs = [
+          '-map', '0:v:0',
+          '-map', '1:a:0?',
+          ...baseVideoArgs,
+          '-c:a', 'aac',
+          '-b:a', '128k',
+          '-ar', '44100',
+          '-af', 'aresample=async=1000',
+          '-f', 'mp4',
+          '-movflags', '+frag_keyframe+empty_moov+default_base_moof',
+          cleanPath
+        ];
+      } else {
+        outputArgs = [
+          '-map', '0:v:0',
+          ...baseVideoArgs,
+          '-an',
+          '-f', 'mp4',
+          '-movflags', '+frag_keyframe+empty_moov+default_base_moof',
+          cleanPath
+        ];
+      }
     } else if (this.isRecording && this.currentRecordFile) {
       const cleanPath = this.currentRecordFile.replace(/\\/g, '/');
-      const teeTarget = `[f=rtp]${rtpUrl}|[f=mp4:movflags=+frag_keyframe+empty_moov+default_base_moof]'${cleanPath}'`;
-      outputArgs = [
+      const baseVideoArgs = [
         '-c:v', 'libx264',
         '-preset', 'ultrafast',
         '-tune', 'zerolatency',
@@ -446,12 +501,35 @@ export class TeacherBroadcastStreamer {
         '-bf', '0',
         '-flags', '+low_delay+global_header',
         '-x264-params', 'repeat-headers=1:sliced-threads=0:force-cfr=1',
-        '-f', 'tee',
-        '-map', '0:v',
-        teeTarget
       ];
+
+      if (audioArgs.length > 0) {
+        // Option 2-A: Video to RTP (select=v, 100% muted to students), Video+Audio to MP4 (select=v\,a)
+        const teeTarget = `[f=rtp:select=v]${rtpUrl}|[f=mp4:movflags=+frag_keyframe+empty_moov+default_base_moof:select=v\\,a]'${cleanPath}'`;
+        outputArgs = [
+          '-map', '0:v:0',
+          '-map', '1:a:0?',
+          ...baseVideoArgs,
+          '-c:a', 'aac',
+          '-b:a', '128k',
+          '-ar', '44100',
+          '-af', 'aresample=async=1000',
+          '-f', 'tee',
+          teeTarget
+        ];
+      } else {
+        const teeTarget = `[f=rtp]${rtpUrl}|[f=mp4:movflags=+frag_keyframe+empty_moov+default_base_moof]'${cleanPath}'`;
+        outputArgs = [
+          '-map', '0:v:0',
+          ...baseVideoArgs,
+          '-an',
+          '-f', 'tee',
+          teeTarget
+        ];
+      }
     } else {
       outputArgs = [
+        '-map', '0:v:0',
         '-c:v', 'libx264',
         '-preset', 'ultrafast',
         '-tune', 'zerolatency',
@@ -466,6 +544,7 @@ export class TeacherBroadcastStreamer {
         '-bf', '0',
         '-flags', '+low_delay+global_header',
         '-x264-params', 'repeat-headers=1:sliced-threads=0:force-cfr=1',
+        '-an',
         '-f', 'rtp',
         rtpUrl
       ];
@@ -473,6 +552,7 @@ export class TeacherBroadcastStreamer {
 
     const ffmpegArgs = [
       ...inputArgs,
+      ...audioArgs,
       ...mediaConstraints,
       ...outputArgs
     ];

@@ -13,6 +13,7 @@ import {
   RefreshCw,
   Play,
   Radio,
+  Mic,
 } from 'lucide-react';
 import { AuthService } from '../../services/authService';
 
@@ -39,6 +40,7 @@ interface ServerRecordStatus {
   startTime: number | null;
   durationSeconds: number;
   fileSizeBytes: number;
+  audioDevice?: string | null;
 }
 
 export const TeacherRecordModal: React.FC<TeacherRecordModalProps> = ({
@@ -56,6 +58,7 @@ export const TeacherRecordModal: React.FC<TeacherRecordModalProps> = ({
     startTime: null,
     durationSeconds: 0,
     fileSizeBytes: 0,
+    audioDevice: null,
   });
   const [recordingsList, setRecordingsList] = useState<RecordingFile[]>([]);
   const [loading, setLoading] = useState(false);
@@ -63,6 +66,15 @@ export const TeacherRecordModal: React.FC<TeacherRecordModalProps> = ({
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
   const [toastMessage, setToastMessage] = useState<string | null>(null);
   const [previewVideo, setPreviewVideo] = useState<string | null>(null);
+
+  const [audioDevices, setAudioDevices] = useState<Array<{ id: string; name: string }>>([
+    { id: 'none', name: '🔇 不錄製聲音（純視訊）' },
+    { id: 'default', name: '🎤 系統預設音訊裝置 (Default)' },
+  ]);
+  const [selectedAudioDevice, setSelectedAudioDevice] = useState<string>(() => {
+    return localStorage.getItem('gridsight_record_audio_device') || 'default';
+  });
+  const [audioLoading, setAudioLoading] = useState(false);
 
   const [autoRecordBroadcast, setAutoRecordBroadcast] = useState<boolean>(() => {
     return localStorage.getItem('gridsight_auto_record_broadcast') === 'true';
@@ -123,6 +135,27 @@ export const TeacherRecordModal: React.FC<TeacherRecordModalProps> = ({
     };
   }, [isOpen, status.isRecording]);
 
+  const fetchAudioDevices = async () => {
+    setAudioLoading(true);
+    try {
+      const res = await AuthService.fetchWithAuth('/api/record/audio-devices');
+      if (res.ok) {
+        const data = await res.json();
+        if (data.devices && Array.isArray(data.devices)) {
+          setAudioDevices(data.devices);
+        }
+      }
+    } catch {} finally {
+      setAudioLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    if (isOpen) {
+      fetchAudioDevices();
+    }
+  }, [isOpen]);
+
   useEffect(() => {
     if (isOpen && activeTab === 'FILES') {
       fetchRecordingsList();
@@ -141,12 +174,15 @@ export const TeacherRecordModal: React.FC<TeacherRecordModalProps> = ({
       const res = await AuthService.fetchWithAuth('/api/record/start', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ quality: 'high' }),
+        body: JSON.stringify({
+          quality: 'high',
+          audioDevice: selectedAudioDevice,
+        }),
       });
       if (res.ok) {
         const data = await res.json();
         setStatus(data);
-        showToast('🎬 伺服器原生螢幕錄影已啟動 (DXGI + 滑鼠特效)');
+        showToast('🎬 伺服器原生螢幕錄影已啟動 (DXGI + 完整影音)');
       } else {
         const err = await res.json();
         setErrorMsg(err.error || '啟動錄影失敗');
@@ -216,6 +252,12 @@ export const TeacherRecordModal: React.FC<TeacherRecordModalProps> = ({
             {status.fileSizeBytes > 0 && (
               <span className="text-[11px] font-mono text-slate-400">
                 ({(status.fileSizeBytes / (1024 * 1024)).toFixed(1)} MB)
+              </span>
+            )}
+            {status.audioDevice && status.audioDevice !== 'none' && (
+              <span className="text-[11px] font-mono text-emerald-400 flex items-center space-x-1" title={`錄音來源: ${status.audioDevice}`}>
+                <Mic className="w-3 h-3" />
+                <span>錄音中</span>
               </span>
             )}
           </div>
@@ -328,6 +370,12 @@ export const TeacherRecordModal: React.FC<TeacherRecordModalProps> = ({
                           <span className="text-slate-200 truncate max-w-[280px]">{status.filename}</span>
                         </div>
                         <div className="flex justify-between">
+                          <span className="text-slate-400">錄音來源裝置：</span>
+                          <span className="text-slate-200 truncate max-w-[280px]">
+                            {status.audioDevice && status.audioDevice !== 'none' ? `🎙️ ${status.audioDevice}` : '🔇 純視訊（未錄音）'}
+                          </span>
+                        </div>
+                        <div className="flex justify-between">
                           <span className="text-slate-400">即時檔案大小：</span>
                           <span className="text-emerald-400 font-bold">
                             {(status.fileSizeBytes / (1024 * 1024)).toFixed(2)} MB
@@ -358,6 +406,43 @@ export const TeacherRecordModal: React.FC<TeacherRecordModalProps> = ({
                             ? '點擊下方按鈕即可同步錄下全體廣播串流（0% 額外效能損耗，內建完整滑鼠特效）。'
                             : '以服務端 DXGI GPU 原生管線在後台錄製教師畫面，老師本機螢幕乾淨無任何遮擋。'}
                         </p>
+                      </div>
+
+                      {/* Audio Device Selection (Option 1-A) */}
+                      <div className="text-left p-3.5 bg-slate-900 border border-slate-700/80 rounded-lg space-y-2 max-w-md mx-auto">
+                        <div className="flex items-center justify-between">
+                          <label className="text-xs font-semibold text-slate-200 flex items-center space-x-1.5">
+                            <Mic className="w-3.5 h-3.5 text-sky-400" />
+                            <span>聲音來源裝置（僅存檔，不走多播廣播）</span>
+                          </label>
+                          <button
+                            type="button"
+                            onClick={fetchAudioDevices}
+                            disabled={audioLoading}
+                            className="text-[11px] text-sky-400 hover:text-sky-300 flex items-center space-x-1 transition-colors"
+                            title="重新偵測音效卡與麥克風"
+                          >
+                            <RefreshCw className={`w-3 h-3 ${audioLoading ? 'animate-spin' : ''}`} />
+                            <span>重新偵測</span>
+                          </button>
+                        </div>
+                        <select
+                          value={selectedAudioDevice}
+                          onChange={(e) => {
+                            setSelectedAudioDevice(e.target.value);
+                            localStorage.setItem('gridsight_record_audio_device', e.target.value);
+                          }}
+                          className="w-full bg-slate-950 border border-slate-700 rounded-lg px-2.5 py-1.5 text-xs text-slate-200 focus:outline-none focus:border-sky-500 cursor-pointer"
+                        >
+                          {audioDevices.map((dev) => (
+                            <option key={dev.id} value={dev.id}>
+                              {dev.name}
+                            </option>
+                          ))}
+                        </select>
+                        <div className="text-[11px] text-slate-400 leading-relaxed">
+                          💡 選擇「立體聲混音 (Stereo Mix)」可錄入電腦播放的音樂；選擇「麥克風」可錄入老師講課聲音；選「不錄製」則為純畫面。
+                        </div>
                       </div>
 
                       <button
@@ -397,6 +482,7 @@ export const TeacherRecordModal: React.FC<TeacherRecordModalProps> = ({
                         <span>核心管線規格</span>
                       </div>
                       <p>• 影像格式：H.264 MP4 (Fragmented MP4，中斷不壞檔)</p>
+                      <p>• 聲音編碼：AAC 128kbps 立體聲 (僅寫入本機 MP4，RTP 多播廣播嚴格過濾靜音)</p>
                       <p>• 滑鼠合成：原生 Windows 游標 + 停頓光環 + 點擊波紋 + 滾輪氣泡 (0ms 幀同步)</p>
                       <p>• 儲存目錄：本機 <code>data/recordings/</code>，任何裝置皆可線上下載</p>
                     </div>

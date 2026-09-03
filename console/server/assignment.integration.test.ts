@@ -76,7 +76,7 @@ try {
   const activeData = await activeResp.json() as { active: boolean; session: { submissions: Array<{ mac: string; filename: string }> } };
   assert.equal(activeData.active, true);
   assert.equal(activeData.session.submissions.length, 1);
-  assert.equal(activeData.session.submissions[0].mac.toLowerCase(), mac.toLowerCase());
+  assert.equal(activeData.session.submissions[0]!.mac.toLowerCase(), mac.toLowerCase());
 
   // 5. Download ZIP archive
   const zipResp = await fetch(`${baseHttp}/api/assignments/${assignmentId}/download-zip`, { headers: auth });

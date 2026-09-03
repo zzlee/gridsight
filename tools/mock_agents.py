@@ -15,7 +15,7 @@ import struct
 import sys
 import time
 from pathlib import Path
-from typing import Dict, List
+from typing import List
 
 # Read version from root package.json (single source of truth)
 def _read_version() -> str:

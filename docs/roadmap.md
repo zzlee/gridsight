@@ -78,8 +78,18 @@ graph TD
 - [x] **Task 4.3 檔案/網址分發與失敗重試**：支援單播/全班無痕網址開啟與檔案下載，附帶失敗重試機制。
 - [x] **Task 4.4 遠端電源管理**：支援 30 秒倒數關機視窗與教師/學生雙向撤銷關機 (`CANCEL_SHUTDOWN`)。
 
-### 階段 5：廣播多檔位品質、True Alpha 滑鼠特效與即時除錯 (v5.8.0 ~ v5.8.4)
+### 階段 5：廣播多檔位品質、True Alpha 滑鼠特效與即時除錯 (v5.8.0 ~ v5.8.8)
 - [x] **Task 5.1 廣播品質三檔選擇**：高 (1080p/8M)、中 (720p/4M)、低 (480p/1.5M) 一鍵即時切換。
-- [x] **Task 5.2 獨立原生滑鼠特效**：Win32 `UpdateLayeredWindow` True Alpha 32-bit ARGB 逐像素混合、GDI+ 真實 Windows 游標圖示與左右鍵/滾輪微光動態。
+- [x] **Task 5.2 獨立原生滑鼠特效與管線硬體合成**：Win32 True Alpha 32-bit ARGB 游標特效；v5.8.6 推進為 OBS 模式 DXGI 幀記憶體內硬體烙印，達成 0ms 幀精準同步與純淨教師畫面。
 - [x] **Task 5.3 流量統計整合 (Traffic HUD)**：頂部導航列即時聚合縮圖輪詢與多播廣播頻寬。
 - [x] **Task 5.4 Ubuntu 即時解碼除錯 Agent**：`tools/ubuntu_agent_debugger.py` 支援 Linux 環境下即時 `ffplay` 廣播播放與事件日誌除錯。
+- [x] **Task 5.5 雙軌原生服務端錄影 (v5.8.7)**：廢除 Chrome MediaRecorder API；教師端 DXGI 廣播同步 MP4 錄製，學生焦點 30 FPS H.264 串流直接封裝（Stream Copy 0% CPU 損耗）。
+- [x] **Task 5.6 伺服器安全性硬化與效能重構 (v5.8.8)**：未鑑權 WebSocket 畸形 URL 防崩潰、Per-IP PIN 登入防爆破鎖定、CORS 白名單收斂、O(1) 設備索引表。
+
+### 階段 6：效能進階與邊緣端運算強化 (未來目標)
+- [ ] **Task 6.1 學生端 H.264 解碼「GPU 硬解優先 + CPU 軟解無縫降級」雙層管線**：
+  - 現行 `rtp_receiver.cpp` 呼叫微軟 `CLSID_CMSH264DecoderMFT` 預設以 CPU 軟解運行，確保所有機種 100% 開箱即用。
+  - 未來規劃引入與 `encoder.cpp` 同等的 `MFTEnumEx` 雙層探測機制：優先啟用 GPU 硬體加速（Intel QuickSync / NVIDIA NVDEC / AMD VCN，D3D11VA）達到 0% CPU 解碼；若硬解不可用或環境缺少 GPU，自動無縫回退至 CPU 軟體解碼。
+- [ ] **Task 6.2 學生端檔案分發與作業收取**：利用現有 HTTP / WebSocket 通道實作免安裝學生機無痕檔案推送與批次作業繳交。
+- [ ] **Task 6.3 全班螢幕黑屏與鍵鼠鎖定**：課堂專注模式，一鍵廣播黑屏畫面並攔截鍵盤滑鼠操作。
+- [ ] **Task 6.4 AI 離題行為輔助分析**：在邊緣端或教師端整合輕量文字與行為特徵分析，產出課堂專注度視覺化報表。

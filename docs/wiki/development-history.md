@@ -171,6 +171,9 @@ timeline
 
 ## 🔮 未來展望 (Future Roadmap)
 
+- [ ] **學生端 H.264 解碼「GPU 硬解優先 + CPU 軟解無縫降級」雙層管線 (Hardware MFT D3D11VA + Software Fallback)**：
+  - **現況機制**：目前學生端接收教師 RTP 廣播畫面時（`rtp_receiver.cpp`），呼叫 Windows Media Foundation 內建之 `CLSID_CMSH264DecoderMFT`。因未綁定 `IMFDXGIDeviceManager`，底層以 CPU SIMD (SSE2/AVX) 軟體解碼運作，確保無獨顯、老舊內顯或虛擬機環境皆具備 100% 開箱即用相容性。
+  - **未來目標**：引進與編碼端（`encoder.cpp`）相同的 `MFTEnumEx` 雙層探測機制：優先啟用 GPU 硬體加速解碼（Intel QuickSync / NVIDIA NVDEC / AMD VCN），達成 0% CPU 解碼負載；若機器無硬解支援、初始化失敗或運行於虛擬環境，自動無痛降級至現行 CPU 軟體解碼，並針對 Windows N 版組件缺失提供明確指引日誌。
 - [ ] **學生端檔案分發與作業收取 (File Distribution & Collection)**：利用現有 HTTP/WebSocket 通道實作無痕檔案推送與批次繳交。
 - [ ] **全班螢幕黑屏/禁網鎖定 (Screen & Input Lockout)**：提供課堂專注模式，一鍵廣播黑屏畫面並攔截鍵盤滑鼠操作。
 - [ ] **AI 離題行為輔助分析 (AI Behavioral Insights)**：在邊緣端或教師端整合輕量文字與行為特徵分析，提供課堂專注度視覺化報表。

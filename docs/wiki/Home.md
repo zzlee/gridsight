@@ -7,7 +7,7 @@
 ## 📑 知識庫目錄導覽
 
 1. **[系統完整開發歷程與技術演進全紀錄 (Development History)](development-history.md)**
-   - 記錄從 v1.0 至 v5.8.8 的架構選型、效能突破、踩坑經驗與完整版本演進圖。
+   - 記錄從 v1.0 至 v5.8.9 的架構選型、效能突破、踩坑經驗與完整版本演進圖。
 2. **[系統架構與設計規格 (Architecture)](../architecture.md)**
    - 深入探討三大影像傳輸模式、DXGI 擷取、IGMP Snooping 多播與 WebCodecs GPU 硬體解碼管線。
 3. **[通訊協定規範書 (Protocol Spec)](../protocol_spec.md)**
@@ -22,3 +22,5 @@
    - 連接埠規範、佈局持久化原則、跨平台相容性與開發防呆準則。
 8. **[前端畫布 Viewport Culling 與渲染效能改進計畫 (Viewport Culling Plan)](viewport-culling-optimization-plan.md)**
    - 詳細分析 70~100 台規模下的 DOM 節點虛擬化、React.memo 記憶化與 60 FPS 平移優化策略。
+9. **[課堂作業批次收取與自動歸檔指南 (Classroom Assignment Dropbox Guide)](classroom-assignment-dropbox.md)**
+   - 詳述免開瀏覽器之 Windows 原生 C++ 拖曳視窗、座號自動歸檔、重複繳交最新版覆蓋機制與零依賴純 Node.js ZIP 打包下載流程。

@@ -7,6 +7,8 @@
 
 **GridSight** 專為 70 台具備還原卡之 Windows 電腦教室打造，兼顧「實體座位自由排版」、「全班畫面低負載輪詢」、「單機 30 FPS 焦點調閱」與「教師畫面全體廣播」四大核心功能。
 
+> 💡 **第一次使用？請直接參閱：[📖 GridSight 全功能無腦使用手冊 (Zero-Brain User Manual)](docs/wiki/user-manual.md)**，包含全系統 14 大功能的「3 步驟防呆操作」與快速鍵總覽！
+
 ---
 
 ## 🌟 系統特色 (Core Highlights)

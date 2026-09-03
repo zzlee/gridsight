@@ -246,7 +246,7 @@ export const FocusModal: React.FC<FocusModalProps> = ({ device, onClose }) => {
         const errData = await resp.json().catch(() => ({}));
         setLogError(errData.message || errData.error || `無法抓取學生端日誌 (HTTP ${resp.status})`);
       }
-    } catch (err: any) {
+    } catch (err: unknown) {
       console.warn('[FocusModal] Fetch logs error:', err);
       setLogError('連線失敗：目標學生機可能離線或網路被防火牆阻擋。');
     } finally {

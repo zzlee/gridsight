@@ -172,8 +172,13 @@ const lockedAgents = new Set<string>(); // normalized lowercase MAC addresses
 let lastLockMessage = '請看講台專心聽課';
 
 // Normalizes MAC addresses and targets by decoding URL characters and standardizing case
+const normalizeCache = new Map<string, string>();
 const normalizeTarget = (raw: string) => {
   if (!raw) return '';
+
+  const cached = normalizeCache.get(raw);
+  if (cached !== undefined) return cached;
+
   let decoded = raw;
   try {
     decoded = decodeURIComponent(raw);
@@ -184,7 +189,15 @@ const normalizeTarget = (raw: string) => {
     // Fall back to the raw input instead.
     decoded = raw;
   }
-  return decoded.replace(/%3A/gi, ':').trim().toUpperCase();
+
+  const result = decoded.replace(/%3A/gi, ':').trim().toUpperCase();
+
+  // Bound the cache size to prevent memory leaks from unbounded target requests
+  if (normalizeCache.size < 10000) {
+    normalizeCache.set(raw, result);
+  }
+
+  return result;
 };
 
 const pruneSnapshotCache = (now = Date.now()) => {

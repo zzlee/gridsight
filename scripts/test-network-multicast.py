@@ -1,6 +1,5 @@
 #!/usr/bin/env python3
 import socket
-import struct
 import time
 import json
 

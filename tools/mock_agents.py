@@ -33,7 +33,7 @@ APP_VERSION = _read_version()
 
 # Try importing PIL for realistic synthetic thumbnail generation; fallback to raw JPEG if not available
 try:
-    from PIL import Image, ImageDraw, ImageFont
+    from PIL import Image, ImageDraw
     HAS_PIL = True
 except ImportError:
     HAS_PIL = False

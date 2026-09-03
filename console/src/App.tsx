@@ -867,6 +867,7 @@ export const App: React.FC = () => {
         selectedCount={selectedSeats.length}
         totalOnlineCount={totalOnlineCount}
         activeAssignment={activeAssignment}
+        allDevices={layout.seats.filter((s) => s.status === 'online').concat(unassignedDevices)}
         onRefresh={async () => {
           try {
             const resp = await AuthService.fetchWithAuth('/api/assignments/active');

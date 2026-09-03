@@ -55,6 +55,16 @@ public:
     static void CancelShutdown();
     static void ShutdownSystem();
 
+    static void LockScreen(const std::string& message = "");
+    static void UnlockScreen();
+    static bool IsScreenLocked();
+    static void SetShowcaseToast(bool active);
+    static bool IsShowcaseActive();
+
+    static void ShowAssignmentDropZone(const std::string& id, const std::string& title, const std::string& allowed_exts = "", int max_size_mb = 50, const std::string& upload_url = "", const std::string& token = "");
+    static void HideAssignmentDropZone();
+    static bool IsAssignmentActive();
+
     static std::string HMACSHA256Hex(const std::string& key, const std::string& data);
     static bool VerifyHMACSHA256(const std::string& key, const std::string& data, const std::string& expected_hex);
 };

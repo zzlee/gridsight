@@ -40,8 +40,10 @@ export interface StreamerOptions {
   fps?: number;
   bitrateKbps?: number;
   localIp?: string;
-  /** 'screen' captures the teacher display (default); 'file'/'url' stream a media source via RTP for test purposes. */
-  sourceType?: 'screen' | 'file' | 'url';
+  /** 'screen' captures the teacher display (default); 'file'/'url' stream a media source via RTP for test purposes; 'student-relay' relays a student's H.264 stream to the whole class. */
+  sourceType?: 'screen' | 'file' | 'url' | 'student-relay';
+  /** When sourceType is 'student-relay', the MAC address of the showcased student */
+  relayMac?: string;
   /** Convenience three-level quality preset for the screen broadcast. When set,
    *  it overrides fps / bitrateKbps / scale unless those are provided explicitly. */
   quality?: BroadcastQuality;
@@ -122,10 +124,11 @@ export class TeacherBroadcastStreamer {
   private currentRecordFile: string | null = null;
   private recordingStartTime: number | null = null;
   private lastSavedRecording: { filename: string; fullPath: string; durationSeconds: number; sizeBytes: number } | null = null;
+  private relayMac: string | null = null;
 
   constructor() {
     this.mouseOverlay.onInputEvent((event) => {
-      if (this.isStreaming) {
+      if (this.isStreaming && this.currentSourceType !== 'student-relay') {
         this.inputRtpStreamer.sendEvent(event);
       }
     });
@@ -137,6 +140,19 @@ export class TeacherBroadcastStreamer {
 
   getInputRtpStreamer(): TeacherInputRtpStreamer {
     return this.inputRtpStreamer;
+  }
+
+  getRelayStudent(): string | null {
+    return this.isStreaming && this.currentSourceType === 'student-relay' ? this.relayMac : null;
+  }
+
+  isRelayingStudent(mac: string): boolean {
+    return this.isStreaming && this.currentSourceType === 'student-relay' && this.relayMac?.toLowerCase() === mac.toLowerCase();
+  }
+
+  feedRelayData(data: Buffer): boolean {
+    if (!this.process || !this.process.stdin || this.process.stdin.destroyed) return false;
+    return this.process.stdin.write(data);
   }
 
   getMode(): string | null {
@@ -261,7 +277,12 @@ export class TeacherBroadcastStreamer {
       if (scale > 0) mediaConstraints.push('-vf', `scale=-2:${scale}`);
     };
 
-    if (sourceType === 'file' || sourceType === 'url') {
+    if (sourceType === 'student-relay') {
+      this.relayMac = options.relayMac?.toLowerCase() || null;
+      logger.info(`[Broadcast] Starting student screen relay for MAC: ${this.relayMac}`);
+      inputArgs = ['-r', String(fps), '-f', 'h264', '-i', '-'];
+      mediaConstraints = [];
+    } else if (sourceType === 'file' || sourceType === 'url') {
       // Media broadcast test: stream a local file or remote URL over the same
       // RTP multicast group the student agents subscribe to, looped until stop.
       if (sourceType === 'file' && !fs.existsSync(mediaSource)) {
@@ -370,7 +391,24 @@ export class TeacherBroadcastStreamer {
     const rtpUrl = `rtp://${multicastIp}:${port}?pkt_size=1316&ttl=2${localaddr ? `&localaddr=${localaddr}` : ''}`;
     let outputArgs: string[] = [];
 
-    if (this.isRecordOnly && this.currentRecordFile) {
+    if (sourceType === 'student-relay') {
+      if (this.isRecording && this.currentRecordFile) {
+        const cleanPath = this.currentRecordFile.replace(/\\/g, '/');
+        const teeTarget = `[f=rtp:flags=+global_header]${rtpUrl}|[f=mp4:movflags=+frag_keyframe+empty_moov+default_base_moof]'${cleanPath}'`;
+        outputArgs = [
+          '-c:v', 'copy',
+          '-f', 'tee',
+          '-map', '0:v',
+          teeTarget
+        ];
+      } else {
+        outputArgs = [
+          '-c:v', 'copy',
+          '-f', 'rtp',
+          rtpUrl
+        ];
+      }
+    } else if (this.isRecordOnly && this.currentRecordFile) {
       const cleanPath = this.currentRecordFile.replace(/\\/g, '/');
       outputArgs = [
         '-c:v', 'libx264',
@@ -444,7 +482,9 @@ export class TeacherBroadcastStreamer {
 
     let child: ChildProcess;
     try {
-      const stdinSource = (this.captureProcess && this.captureProcess.stdout) ? this.captureProcess.stdout : 'ignore';
+      const stdinSource = (sourceType === 'student-relay')
+        ? 'pipe'
+        : ((this.captureProcess && this.captureProcess.stdout) ? this.captureProcess.stdout : 'ignore');
       child = spawn(ffmpegCmd, ffmpegArgs, { stdio: [stdinSource, 'ignore', 'pipe'] });
     } catch (err: unknown) {
       const msg = err instanceof Error ? err.message : String(err);
@@ -537,6 +577,7 @@ export class TeacherBroadcastStreamer {
     this.isStreaming = false;
     this.currentSourceType = 'screen';
     this.currentQuality = null;
+    this.relayMac = null;
     if (this.isRecording && this.currentRecordFile) {
       const durationSeconds = this.recordingStartTime ? Math.floor((Date.now() - this.recordingStartTime) / 1000) : 0;
       let sizeBytes = 0;

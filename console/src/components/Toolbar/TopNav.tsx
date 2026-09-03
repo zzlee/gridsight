@@ -1,5 +1,4 @@
-import React from 'react';
-import { AppMode, ClassroomLayout } from '../../types';
+import { AppMode, ClassroomLayout, ActiveAssignment } from '../../types';
 import { TrafficStats } from '../../services/pollingManager';
 import { useState, useEffect, useRef } from 'react';
 import { AuthService } from '../../services/authService';
@@ -19,6 +18,7 @@ import {
   Square,
   Globe,
   FolderUp,
+  FolderDown,
   Clapperboard,
   ChevronDown,
   Power,
@@ -48,6 +48,9 @@ interface TopNavProps {
   onOpenBroadcastTest?: () => void;
   onOpenTeacherRecord?: () => void;
   onOpenShutdown?: () => void;
+  onOpenLockScreen?: () => void;
+  onOpenAssignment?: () => void;
+  activeAssignment?: ActiveAssignment | null;
   offTaskCount?: number;
   unassignedCount?: number;
   onLock: () => void;
@@ -70,6 +73,9 @@ export const TopNav: React.FC<TopNavProps> = ({
   onOpenBroadcastTest,
   onOpenTeacherRecord,
   onOpenShutdown,
+  onOpenLockScreen,
+  onOpenAssignment,
+  activeAssignment,
   offTaskCount = 0,
   unassignedCount = 0,
   onLock,
@@ -88,13 +94,26 @@ export const TopNav: React.FC<TopNavProps> = ({
   const [qualityMenuOpen, setQualityMenuOpen] = useState(false);
   const qualityMenuRef = useRef<HTMLDivElement>(null);
 
-  // Check broadcast status periodically
+  // States for student screen lock and showcase
+  const [lockedCount, setLockedCount] = useState<number>(0);
+  const [showcaseStudent, setShowcaseStudent] = useState<{ active: boolean; studentName: string | null; studentMac: string | null }>({
+    active: false,
+    studentName: null,
+    studentMac: null,
+  });
+
+  // Check broadcast and system statuses periodically
   useEffect(() => {
     const checkBroadcastStatus = async () => {
       try {
-        const resp = await AuthService.fetchWithAuth('/api/broadcast/status');
-        if (resp.ok) {
-          const data = await resp.json();
+        const [bResp, screenResp, showcaseResp] = await Promise.all([
+          AuthService.fetchWithAuth('/api/broadcast/status'),
+          AuthService.fetchWithAuth('/api/screen/status'),
+          AuthService.fetchWithAuth('/api/broadcast/showcase/status'),
+        ]);
+
+        if (bResp.ok) {
+          const data = await bResp.json();
           const active = !!data.active;
           setIsBroadcasting(active);
           setIsServerRecording(!!data.recording?.isRecording);
@@ -102,6 +121,20 @@ export const TopNav: React.FC<TopNavProps> = ({
             setBroadcastQuality(data.quality);
           }
           setBroadcastBitrateKbps(active ? (data.bitrateKbps || QUALITY_PRESETS[(data.quality || 'medium') as BroadcastQuality]?.bitrateKbps || 4000) : 0);
+        }
+
+        if (screenResp.ok) {
+          const sdata = await screenResp.json();
+          setLockedCount(sdata.lockedCount || 0);
+        }
+
+        if (showcaseResp.ok) {
+          const scdata = await showcaseResp.json();
+          setShowcaseStudent({
+            active: !!scdata.active,
+            studentName: scdata.studentName,
+            studentMac: scdata.studentMac,
+          });
         }
       } catch {}
     };
@@ -316,6 +349,23 @@ export const TopNav: React.FC<TopNavProps> = ({
               </button>
             </div>
 
+            {/* Active Student Showcase Relay Indicator */}
+            {showcaseStudent.active && (
+              <button
+                onClick={async () => {
+                  try {
+                    await AuthService.fetchWithAuth('/api/broadcast/showcase/stop', { method: 'POST' });
+                    setShowcaseStudent({ active: false, studentName: null, studentMac: null });
+                  } catch {}
+                }}
+                className="flex items-center space-x-1.5 px-3 py-1.5 rounded-lg bg-purple-600 hover:bg-purple-700 text-white text-xs font-semibold shadow-lg shadow-purple-950/50 animate-pulse transition active:scale-95"
+                title="目前正在向全班轉播該學生的示範操作，點擊立即停止轉播"
+              >
+                <Radio className="w-3.5 h-3.5 text-purple-200" />
+                <span>轉播中: {showcaseStudent.studentName || '學生機'} [停止]</span>
+              </button>
+            )}
+
             {/* Broadcast Test Button (media file/URL -> RTP multicast) */}
             {onOpenBroadcastTest && (
               <button
@@ -325,6 +375,46 @@ export const TopNav: React.FC<TopNavProps> = ({
               >
                 <Clapperboard className="w-3.5 h-3.5 text-fuchsia-400" />
                 <span>廣播測試</span>
+              </button>
+            )}
+
+            {/* Screen Curtain & Input Lockout Button (Feature 1) */}
+            {onOpenLockScreen && (
+              <button
+                onClick={onOpenLockScreen}
+                className={`flex items-center space-x-1.5 px-3 py-1.5 rounded-lg border text-xs font-semibold transition-all shadow-sm active:scale-95 ${
+                  lockedCount > 0
+                    ? 'bg-amber-500/20 text-amber-300 border-amber-500/50 hover:bg-amber-500/30 animate-pulse shadow-md shadow-amber-950/60'
+                    : 'bg-slate-900 hover:bg-slate-800 text-slate-300 border-slate-800 hover:border-slate-700'
+                }`}
+                title={lockedCount > 0 ? `目前有 ${lockedCount} 台學生機被鎖定，點擊解鎖或管理` : '鎖定全班或選定學生螢幕與鍵鼠'}
+              >
+                <Lock className={`w-3.5 h-3.5 ${lockedCount > 0 ? 'text-amber-400' : 'text-slate-400'}`} />
+                <span>{lockedCount > 0 ? `螢幕鎖定 (${lockedCount})` : '黑屏鎖定'}</span>
+              </button>
+            )}
+
+            {/* Assignment Dropbox Collection Button (Feature 2) */}
+            {onOpenAssignment && (
+              <button
+                onClick={onOpenAssignment}
+                className={`flex items-center space-x-1.5 px-3 py-1.5 rounded-lg border text-xs font-semibold transition-all shadow-sm active:scale-95 ${
+                  activeAssignment?.active
+                    ? 'bg-emerald-500/20 text-emerald-300 border-emerald-500/50 hover:bg-emerald-500/30 animate-pulse shadow-md shadow-emerald-950/60'
+                    : 'bg-slate-900 hover:bg-slate-800 text-slate-300 border-slate-800 hover:border-slate-700'
+                }`}
+                title={
+                  activeAssignment?.active
+                    ? `作業收取進行中：「${activeAssignment.title}」(${activeAssignment.submissions.length} 件已繳)，點擊管理或下載 ZIP`
+                    : '發起課堂作業批次收取，學生直接拖曳繳交'
+                }
+              >
+                <FolderDown className={`w-3.5 h-3.5 ${activeAssignment?.active ? 'text-emerald-400' : 'text-slate-400'}`} />
+                <span>
+                  {activeAssignment?.active
+                    ? `收取中 (${activeAssignment.submissions.length})`
+                    : '收取作業'}
+                </span>
               </button>
             )}
 

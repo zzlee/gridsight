@@ -131,7 +131,7 @@ sequenceDiagram
 ```json
 {
   "type": "BEACON",
-  "version": "5.8.8",
+  "version": "5.8.9",
   "hostname": "PC-01",
   "ip": "192.168.1.101",
   "mac": "00:1A:2B:3C:4D:01",
@@ -139,7 +139,7 @@ sequenceDiagram
   "timestamp": 1723812345678,
   "active_window": "Visual Studio Code - main.cpp",
   "specs": {
-    "agent_version": "5.8.8",
+    "agent_version": "5.8.9",
     "os": "Windows 11 Pro 64-bit",
     "uptime": 3600,
     "cpu": {
@@ -203,6 +203,12 @@ sequenceDiagram
     - `{"action": "SHARE_FILE", "url": "http://<TEACHER_IP>:3000/api/share/download/<fileId>/<filename>", "filename": "lesson1.pdf", "fileSize": 1048576}`
     - `{"action": "SHUTDOWN", "timeout": 30}`：通知學生端開啟 30 秒置頂倒數視窗並執行關機。
     - `{"action": "CANCEL_SHUTDOWN"}`：通知學生端即刻銷毀倒數視窗並中止關機流程。
+    - `{"action": "LOCK_SCREEN", "message": "請看講台專心聽課"}`：通知學生端顯示置頂深藍黑屏視窗（金色大鎖圖示與提示字樣），並啟動低階鍵鼠鉤子攔截 Win 鍵、Alt+Tab、Alt+F4 等操作。
+    - `{"action": "UNLOCK_SCREEN"}`：通知學生端銷毀黑屏鎖定視窗並卸載鍵鼠攔截鉤子，恢復本機操作。
+    - `{"action": "SHOWCASE_START"}`：通知學生端當前正向全班轉播其畫面，於本機右下角顯示微光 Toast 提示（`💡 您的螢幕正在全班轉播展示中`），並在接收 RTP 廣播時自動抑制彈出全螢幕，防止畫面遞迴迴圈。
+    - `{"action": "SHOWCASE_STOP"}`：通知學生端停止轉播，隱藏右下角 Toast 提示。
+    - `{"action": "COLLECT_ASSIGNMENT", "id": "as-123", "title": "課堂作業", "allowedExts": "cpp,py", "maxSizeMb": 50, "uploadUrl": "http://<TEACHER_IP>:3000/api/assignments/upload"}`：通知學生端彈出原生 Win32 懸浮拖曳繳交視窗，支援拖曳桌面檔案即刻上傳與防呆校驗。
+    - `{"action": "STOP_ASSIGNMENT"}`：通知學生端隱藏/銷毀拖曳繳交視窗。
       - `url`：教師端檔案下載端點（學生端以此發起 HTTP GET 下載，無需鑑權）。
       - `filename`：伺服器端已消毒之檔名（`path.basename` + 非法字元取代為 `_`），學生端存檔時據此避免目錄攻擊。
       - `fileSize`：檔案大小（位元組），供學生端校驗下載完整性（目前學生端實作尚未消費此欄位，僅供保留/未來驗證用）。
@@ -233,6 +239,25 @@ sequenceDiagram
 ### 3.8 電源管理 API (Power Management)
 - **`POST /api/power/shutdown`**：發送關機指令給指定機台或全班。Body: `{"targets": ["ALL"], "timeout": 30}`。
 - **`POST /api/power/cancel-shutdown`**：發送撤銷關機指令給指定機台或全班。Body: `{"targets": ["ALL"]}`。
+
+### 3.9 學生螢幕黑屏與鍵鼠鎖定 API (Screen Lockout)
+- **`POST /api/screen/lock`**：發送黑屏鎖定指令。Body: `{"targets": ["ALL"] | string[], "message": "請看講台專心聽課"}`。重連學生將自動補發鎖定。
+- **`POST /api/screen/unlock`**：發送解除黑屏鎖定指令。Body: `{"targets": ["ALL"] | string[]}`。
+- **`GET /api/screen/status`**：查詢當前鎖定機台數量與清單 `{ "lockedCount": 0, "lockedMacs": [], "defaultMessage": "..." }`。
+
+### 3.10 學生畫面示範轉播 API (Student Showcase Broadcast)
+- **`POST /api/broadcast/showcase/start`**：發起學生畫面全班轉播。Body: `{"mac": "AA:BB:CC:DD:EE:01", "record": false}`。伺服器以零拷貝管線 (`-c:v copy`) 將學生 30 FPS H.264 串流直推至全班 RTP 多播群組。
+- **`POST /api/broadcast/showcase/stop`**：停止學生畫面轉播並通知該示範學生恢復本機狀態。
+- **`GET /api/broadcast/showcase/status`**：查詢當前是否處於學生示範轉播中 `{ "active": true, "studentMac": "...", "studentName": "..." }`。
+
+### 3.11 課堂作業批次收取與自動歸檔 API (Assignment Dropbox)
+- **`POST /api/assignments/start`**：發起作業收取。Body: `{"title": "作業名稱", "allowedExts": ["cpp", "py"], "maxSizeMb": 50, "targets": "all" | string[]}`。
+- **`POST /api/assignments/stop`**：停止作業收取並關閉學生端懸浮拖曳視窗。
+- **`POST /api/assignments/remind`**：向所有尚未繳交之在線學生再次發送催繳提醒。
+- **`GET /api/assignments/active`**：查詢進行中作業資訊與繳交進度、繳交名冊。
+- **`GET /api/assignments/list`**：列出歷史作業收取紀錄。
+- **`POST /api/assignments/upload`**：學生端二進位上傳端點。自動歸檔儲存為 `data/assignments/<ID>/[座號]_[主機名]_[原檔名]`，重複繳交自動覆蓋更新（保持最新版）。
+- **`GET /api/assignments/:id/download-zip`**：純 Node.js 零依賴即時將該作業全部檔案打包為標準 ZIP 串流供教師下載帶走。
 
 ---
 

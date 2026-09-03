@@ -1076,7 +1076,7 @@ void RTPReceiver::ReceiveLoop() {
         last_packet_time = now;
         Utils::UpdateHeartbeat("rtp-packet");
 
-        if (!overlay_active_) {
+        if (!overlay_active_ && !Utils::IsShowcaseActive()) {
             CreateFullScreenOverlayWindow();
         }
 

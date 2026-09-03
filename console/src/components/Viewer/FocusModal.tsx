@@ -26,6 +26,9 @@ import {
   Pause,
   Play,
   Clock,
+  Radio,
+  Lock,
+  Unlock,
 } from 'lucide-react';
 
 interface FocusModalProps {
@@ -58,6 +61,10 @@ export const FocusModal: React.FC<FocusModalProps> = ({ device, onClose }) => {
   const [studentRecordingLoading, setStudentRecordingLoading] = useState(false);
   const studentRecordTimerRef = useRef<number | null>(null);
 
+  // Student Showcase Relay & Screen Lockout states (Features 1 & 3)
+  const [isShowcasing, setIsShowcasing] = useState(false);
+  const [isDeviceLocked, setIsDeviceLocked] = useState(!!device?.isLocked);
+
   // Sync fullscreen state with browser events (e.g. Esc key)
   useEffect(() => {
     const handleFullscreenChange = () => {
@@ -67,14 +74,19 @@ export const FocusModal: React.FC<FocusModalProps> = ({ device, onClose }) => {
     return () => document.removeEventListener('fullscreenchange', handleFullscreenChange);
   }, []);
 
-  // Check student recording status and stream connection timeout on device change
+  // Check student recording, showcase status, and stream connection timeout on device change
   useEffect(() => {
     setIsStreamTimeout(false);
+    setIsDeviceLocked(!!device?.isLocked);
     const timer = setTimeout(() => {
       setIsStreamTimeout(true);
     }, 3000);
 
-    if (device?.mac) {
+    const checkDeviceStatuses = () => {
+      if (!device?.mac) return;
+      const normMac = device.mac.toLowerCase();
+
+      // Check recording status
       AuthService.fetchWithAuth(`/api/record/student/status?mac=${encodeURIComponent(device.mac)}`)
         .then((r) => r.json())
         .then((data) => {
@@ -86,10 +98,22 @@ export const FocusModal: React.FC<FocusModalProps> = ({ device, onClose }) => {
           }
         })
         .catch(() => {});
-    }
+
+      // Check showcase relay status
+      AuthService.fetchWithAuth('/api/broadcast/showcase/status')
+        .then((r) => r.json())
+        .then((data) => {
+          setIsShowcasing(!!data.active && data.studentMac?.toLowerCase() === normMac);
+        })
+        .catch(() => {});
+    };
+
+    checkDeviceStatuses();
+    const pollInterval = setInterval(checkDeviceStatuses, 2500);
 
     return () => {
       clearTimeout(timer);
+      clearInterval(pollInterval);
       if (studentRecordTimerRef.current) {
         clearInterval(studentRecordTimerRef.current);
         studentRecordTimerRef.current = null;
@@ -306,6 +330,70 @@ export const FocusModal: React.FC<FocusModalProps> = ({ device, onClose }) => {
     }
   };
 
+  const handleToggleShowcase = async () => {
+    if (!device?.mac) return;
+    try {
+      if (isShowcasing) {
+        const resp = await AuthService.fetchWithAuth('/api/broadcast/showcase/stop', { method: 'POST' });
+        if (resp.ok) {
+          setIsShowcasing(false);
+          setToastMessage('⏹ 已停止全班轉播此學生畫面');
+          setTimeout(() => setToastMessage(null), 2500);
+        }
+      } else {
+        const resp = await AuthService.fetchWithAuth('/api/broadcast/showcase/start', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ mac: device.mac }),
+        });
+        const data = await resp.json();
+        if (resp.ok && data.ok) {
+          setIsShowcasing(true);
+          setToastMessage('📡 已啟動全班轉播此學生示範畫面！');
+          setTimeout(() => setToastMessage(null), 2500);
+        } else {
+          setToastMessage(`❌ 轉播啟動失敗: ${data.error || '未知錯誤'}`);
+          setTimeout(() => setToastMessage(null), 3000);
+        }
+      }
+    } catch {
+      setToastMessage('❌ 無法連線至伺服器');
+      setTimeout(() => setToastMessage(null), 3000);
+    }
+  };
+
+  const handleToggleLock = async () => {
+    if (!device?.mac) return;
+    try {
+      if (isDeviceLocked) {
+        const resp = await AuthService.fetchWithAuth('/api/screen/unlock', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ targets: [device.mac] }),
+        });
+        if (resp.ok) {
+          setIsDeviceLocked(false);
+          setToastMessage('🔓 已解除此學生機螢幕鎖定');
+          setTimeout(() => setToastMessage(null), 2500);
+        }
+      } else {
+        const resp = await AuthService.fetchWithAuth('/api/screen/lock', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ targets: [device.mac], message: '請看講台專心聽課' }),
+        });
+        if (resp.ok) {
+          setIsDeviceLocked(true);
+          setToastMessage('🔒 已鎖定此學生機螢幕與鍵鼠');
+          setTimeout(() => setToastMessage(null), 2500);
+        }
+      }
+    } catch {
+      setToastMessage('❌ 鎖定指令傳送失敗');
+      setTimeout(() => setToastMessage(null), 3000);
+    }
+  };
+
   return (
     <div className="fixed inset-0 z-50 bg-slate-950/85 backdrop-blur-md flex items-center justify-center p-4 select-none">
       <div
@@ -349,6 +437,34 @@ export const FocusModal: React.FC<FocusModalProps> = ({ device, onClose }) => {
             </div>
           </div>
           <div className="flex items-center space-x-2">
+            {/* Student Showcase Relay Button (Feature 3) */}
+            <button
+              onClick={handleToggleShowcase}
+              className={`p-1.5 rounded-lg border transition-all active:scale-95 flex items-center space-x-1 text-xs font-semibold px-2 ${
+                isShowcasing
+                  ? 'bg-purple-600 border-purple-500 text-white ring-2 ring-purple-500/50 shadow-lg animate-pulse'
+                  : 'bg-slate-800 border-slate-700 text-purple-400 hover:bg-purple-500/20 hover:border-purple-500/40'
+              }`}
+              title={isShowcasing ? '點擊停止全班轉播此學生畫面' : '轉播此學生畫面給全班 (示範操作)'}
+            >
+              <Radio className="w-4 h-4" />
+              <span>{isShowcasing ? '轉播中 (點此停止)' : '轉播給全班'}</span>
+            </button>
+
+            {/* Screen Curtain Lockout Button (Feature 1) */}
+            <button
+              onClick={handleToggleLock}
+              className={`p-1.5 rounded-lg border transition-all active:scale-95 flex items-center space-x-1 text-xs font-semibold px-2 ${
+                isDeviceLocked
+                  ? 'bg-amber-600 border-amber-500 text-white ring-2 ring-amber-500/50 shadow-lg animate-pulse'
+                  : 'bg-slate-800 border-slate-700 text-amber-400 hover:bg-amber-500/20 hover:border-amber-500/40'
+              }`}
+              title={isDeviceLocked ? '點擊解除此學生機螢幕鎖定' : '黑屏鎖定此機螢幕與鍵鼠'}
+            >
+              {isDeviceLocked ? <Unlock className="w-4 h-4" /> : <Lock className="w-4 h-4" />}
+              <span>{isDeviceLocked ? '已鎖定 (點此解鎖)' : '黑屏鎖定'}</span>
+            </button>
+
             {/* Fetch Student Agent Log Button */}
             <button
               onClick={handleFetchLogs}

@@ -2,7 +2,7 @@ CXX ?= x86_64-w64-mingw32-g++
 HOST_CXX ?= g++
 
 # Read version from root package.json (single source of truth)
-AGENT_VERSION := $(shell node -e "try{console.log(require('../package.json').version)}catch(e){console.log('5.8.8')}" 2>/dev/null || echo 5.8.8)
+AGENT_VERSION := $(shell node -e "try{console.log(require('../package.json').version)}catch(e){console.log('5.8.9')}" 2>/dev/null || echo 5.8.9)
 
 ifeq ($(findstring mingw,$(CXX)),mingw)
     CXXFLAGS = -std=c++17 -O3 -Wall -Iinclude -mwindows -D_WIN32_WINNT=0x0602 -finput-charset=UTF-8 -fwide-exec-charset=UTF-16LE -DAGENT_VERSION='"$(AGENT_VERSION)"'

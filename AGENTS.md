@@ -205,3 +205,51 @@ powershell -WindowStyle Hidden -c "irm http://<教師IP>:3000/install-agent.ps1|
    - 游標圖示需透過 GDI+ `Bitmap::FromHICON` 繪製以完整填充 Alpha 通道（傳統 GDI `DrawIconEx` 會將 Alpha 寫為 0 導致游標在 DWM 下隱形）。
 6. **Linux / CI 編譯相容性**：
    - `beacon/src/utils.cpp` 中由跨平台共用函式訪問之全域/原子變數（如 `g_shutdown_cancelled`），絕不可置於 `#ifdef _WIN32` 內，以確保 Linux 原生單元測試（`make test-capture`）編譯無阻。
+
+---
+
+## 🔒 10. 學生螢幕黑屏鎖定與示範轉播 (Screen Lock & Showcase Relay)
+
+### 10.1 螢幕黑屏與鍵鼠鎖定 (Feature 1)
+- **視覺呈現 (1-A)**：Slate-950（`#0B1120`）深藍全螢幕置頂視窗（`WS_EX_TOPMOST | WS_EX_TOOLWINDOW`），中央 GDI 繪製金色大鎖圖示 🔒，並渲染教師指定之提示字樣（如「請看講台專心聽課」）。
+- **底層輸入攔截**：註冊 Windows 低階鍵盤鉤子（`WH_KEYBOARD_LL`）與滑鼠事件攔截，遮蔽 Win 鍵、Alt+Tab、Alt+Esc、Ctrl+Esc、Alt+F4 及滑鼠點擊。
+- **全維度控制 (2-A)**：
+  - 頂部導航列：支援「🔒 鎖定全班 / 🔓 解鎖全班」。
+  - 畫布座位卡片：卡片懸浮與右鍵選單支援「鎖定此機 / 解鎖此機」，鎖定時卡片邊框呈現琥珀金標記（`border-amber-500` 與 `🔒 鎖定` 標籤）。
+  - 批次框選列：支援框選多台後一鍵「🔒 批次鎖定 / 🔓 批次解鎖」。
+  - 焦點視窗（`FocusModal`）：頂部提供黑屏鎖定快捷切換。
+- **重連防繞過機制**：教師端後端持久維護 `lockedAgents: Set<string>`，若學生重新開機或重啟 Agent，WebSocket 握手後伺服器自動補發 `LOCK_SCREEN` 指令，徹底杜絕學生重啟繞過管制的手段。
+
+### 10.2 學生畫面示範轉播全班 (Feature 3)
+- **零拷貝極速中繼管線**：
+  - 示範學生機以 DXGI + MFT 硬體編碼將 30 FPS H.264 串流透過反向 WebSocket 推送至教師端 Node.js。
+  - 後端 `broadcastStreamer.ts` 啟用 `sourceType: 'student-relay'`，將收到的二進位 NALU 串流直接寫入 FFmpeg `stdin`，並以 `-c:v copy` 直推 UDP RTP 多播（`239.255.42.100:9000`），達到 **0% 伺服器額外 CPU 負擔**；若啟用錄影則以 `tee` 格式同步錄製至 MP4。
+- **防鏡像遞迴與學生無干擾設計 (3-A)**：
+  - 示範學生電腦右下角顯示半透明微光提示（`💡 您的螢幕正在全班轉播展示中`，`WS_EX_NOACTIVATE` 確保不搶奪鍵盤打字焦點）。
+  - 學生端 `rtp_receiver.cpp` 於多播接收處檢查 `Utils::IsShowcaseActive()`，**本機正被轉播時強制抑制彈出全螢幕，杜絕畫面鏡像遞迴閉環**。
+- **雙入口啟動 (4-A)**：
+  - 畫布座位卡片懸浮快捷鍵支援「📡 轉播此學生畫面給全班」。
+  - 焦點監看視窗（`FocusModal`）頂部整合「📡 轉播給全班 / ⏹ 停止轉播」切換按鈕。
+  - 頂部導航列動態顯示「📡 轉播中: [學生名] [停止]」狀態燈。
+
+---
+
+## 📁 11. 課堂作業批次收取與自動歸檔 (Classroom Assignment Dropbox)
+
+### 11.1 學生端 Windows 原生拖曳視窗 (Feature 2 / 1-B)
+- **原生拖曳上傳 (1-B)**：
+  - 學生端 C++ 原生視窗（`GridSightAssignmentDropZone`，`WS_POPUP | WS_CAPTION | WS_SYSMENU | WS_EX_TOPMOST`），呼叫 `DragAcceptFiles(hwnd, TRUE)` 攔截 `WM_DROPFILES`。
+  - 學生直接從 Windows 檔案總管或桌面將作業檔案拖入視窗即可上傳，完全無需開啟瀏覽器。
+  - 視窗內建防呆副檔名校驗（如限制 `.cpp, .py, .zip`）與單檔大小上限檢查，上傳成功時發出系統提示音（`MessageBeep`）並顯示檔名與大小。
+- **自動覆蓋更新最新版 (2-A)**：
+  - 伺服器端標準化路徑：`data/assignments/<作業ID>/[座號]_[電腦名稱]_[原檔名]`。
+  - 同位學生若重複拖曳上傳，系統自動覆蓋舊檔並更新繳交時間與檔案大小，確保教師收到的始終為學生最新版本。
+
+### 11.2 教師端全維度管理與零依賴 ZIP 打包 (3-A)
+- **即時繳交回饋**：
+  - 畫布座位卡片：已繳交之學生卡片頂部即時顯示綠色 `📁 已繳` 徽章，滑鼠懸浮可預覽繳交檔名與檔案大小。
+  - 頂部導航列：動態顯示琥珀綠色脈衝按鈕 `📁 收取中: [作業名稱] (已繳數/總數)`。
+  - 懸浮框選操作列（`MonitorBatchToolbar`）：支援針對選定學生發起作業收取。
+- **一鍵催繳與全班打包**：
+  - 一鍵催繳：向所有連線中且「尚未繳交」之學生機再次發送 `COLLECT_ASSIGNMENT` 彈窗。
+  - 零依賴全班 ZIP 打包（[`zipPacker.ts`](file:///home/zzlee/gridsight/console/server/zipPacker.ts)）：純 Node.js 原生實作 deflate 與 CRC32 封包，點擊「下載全班作業打包」直接透過 HTTP 串流下載包含所有學生作業的 ZIP 壓縮檔，隨身碟一鍵帶走。

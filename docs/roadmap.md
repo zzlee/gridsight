@@ -85,11 +85,11 @@ graph TD
 - [x] **Task 5.4 Ubuntu 即時解碼除錯 Agent**：`tools/ubuntu_agent_debugger.py` 支援 Linux 環境下即時 `ffplay` 廣播播放與事件日誌除錯。
 - [x] **Task 5.5 雙軌原生服務端錄影 (v5.8.7)**：廢除 Chrome MediaRecorder API；教師端 DXGI 廣播同步 MP4 錄製，學生焦點 30 FPS H.264 串流直接封裝（Stream Copy 0% CPU 損耗）。
 - [x] **Task 5.6 伺服器安全性硬化與效能重構 (v5.8.8)**：未鑑權 WebSocket 畸形 URL 防崩潰、Per-IP PIN 登入防爆破鎖定、CORS 白名單收斂、O(1) 設備索引表。
+- [x] **Task 5.7 課堂專注黑屏鎖定與示範畫面轉播 (v5.8.9)**：全班/選定學生深藍黑屏與低階鍵鼠攔截鎖定；學生示範畫面 30 FPS 零拷貝 RTP 直推全班。
+- [x] **Task 5.8 免外網課堂作業收取與自動歸檔 (v5.8.9)**：學生端 Windows 原生 C++ 拖曳視窗（免開瀏覽器）；自動覆蓋最新版歸檔；零依賴全班 ZIP 打包下載。
 
 ### 階段 6：效能進階與邊緣端運算強化 (未來目標)
 - [ ] **Task 6.1 學生端 H.264 解碼「GPU 硬解優先 + CPU 軟解無縫降級」雙層管線**：
   - 現行 `rtp_receiver.cpp` 呼叫微軟 `CLSID_CMSH264DecoderMFT` 預設以 CPU 軟解運行，確保所有機種 100% 開箱即用。
   - 未來規劃引入與 `encoder.cpp` 同等的 `MFTEnumEx` 雙層探測機制：優先啟用 GPU 硬體加速（Intel QuickSync / NVIDIA NVDEC / AMD VCN，D3D11VA）達到 0% CPU 解碼；若硬解不可用或環境缺少 GPU，自動無縫回退至 CPU 軟體解碼。
-- [ ] **Task 6.2 學生端檔案分發與作業收取**：利用現有 HTTP / WebSocket 通道實作免安裝學生機無痕檔案推送與批次作業繳交。
-- [ ] **Task 6.3 全班螢幕黑屏與鍵鼠鎖定**：課堂專注模式，一鍵廣播黑屏畫面並攔截鍵盤滑鼠操作。
-- [ ] **Task 6.4 AI 離題行為輔助分析**：在邊緣端或教師端整合輕量文字與行為特徵分析，產出課堂專注度視覺化報表。
+- [ ] **Task 6.2 AI 離題行為輔助分析**：在邊緣端或教師端整合輕量文字與行為特徵分析，產出課堂專注度視覺化報表。

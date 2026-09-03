@@ -12,6 +12,7 @@ export interface DiscoveredAgent {
   specs?: DeviceSystemInfo;
   thumbnailBase64?: string;
   lastSeen?: number;
+  isLocked?: boolean;
 }
 
 export interface DeviceSystemInfo {
@@ -56,8 +57,36 @@ export interface StudentDevice {
   thumbnailUrl?: string;
   activeWindow?: string;
   isOffTask?: boolean;
+  isLocked?: boolean;
+  hasSubmitted?: boolean;
+  submissionInfo?: {
+    filename: string;
+    size: number;
+    submittedAt: number;
+  };
   selected?: boolean;
   specs?: DeviceSystemInfo;
+}
+
+export interface AssignmentSubmissionItem {
+  mac: string;
+  ip: string;
+  hostname: string;
+  seatNo: string;
+  filename: string;
+  size: number;
+  submittedAt: number;
+  filePath: string;
+}
+
+export interface ActiveAssignment {
+  id: string;
+  title: string;
+  allowedExts: string[];
+  maxSizeMb: number;
+  createdAt: number;
+  active: boolean;
+  submissions: AssignmentSubmissionItem[];
 }
 
 export interface GridAisle {

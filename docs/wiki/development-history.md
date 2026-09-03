@@ -166,6 +166,7 @@ timeline
 | **v5.8.6** | 2026-09 | `screen_capture.cpp`, `broadcastStreamer.ts` | 擷取管線硬體合成 (OBS 模式)：DXGI GPU 零拷貝截圖、視訊幀記憶體內烙印真實游標/光圈波紋/滾輪氣泡、教師端純淨零干擾、0ms 幀精準同步、完全支援原生錄影、靜音關閉 Input RTP |
 | **v5.8.7** | 2026-09 | `broadcastStreamer.ts`, `server.ts`, `TeacherRecordModal.tsx`, `FocusModal.tsx` | 原生管線雙軌錄影：徹底廢棄 Chrome JS API；教師端 DXGI GPU + 完整滑鼠特效同步錄製；學生焦點畫面 30 FPS H.264 原生二進位串流無損直出 MP4（0% 額外 CPU 損耗、Fragmented MP4 斷電防壞檔、內建歷史錄影管理） |
 | **v5.8.8** | 2026-09 | `server.ts`, `broadcastStreamer.ts`, `inputRtpStreamer.ts`, `multicastDiscovery.ts` | 伺服器 TypeScript 嚴格型別全面清理（`tsc --noEmit` 零錯誤：`exactOptionalPropertyTypes` / `noUncheckedIndexedAccess` / 測試檔納入型別檢查）；效能批次優化（TokenAuthority 非同步 I/O、快照快取單一迭代器 eviction、O(1) 設備索引對照表、Auto-Assign occupied set 提升） |
+| **v5.8.9** | 2026-09 | `beacon/`, `server.ts`, `zipPacker.ts`, `AssignmentModal.tsx`, `LockScreenModal.tsx` | 課堂三大進階功能實作：(1) 螢幕黑屏置頂與低階鍵鼠攔截鎖定（防重連繞過）；(2) 學生畫面示範轉播全班（30 FPS 零拷貝直推 RTP、防鏡像遞迴抑制）；(3) 免外網作業批次收取箱（學生端 C++ 原生拖曳視窗、自動覆蓋最新版歸檔、零外部依賴純 Node.js ZIP 打包串流下載、全維度座位卡片狀態與即時名冊） |
 
 ---
 

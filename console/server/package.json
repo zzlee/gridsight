@@ -1,12 +1,12 @@
 {
   "name": "gridsight-teacher-server",
-  "version": "5.8.8",
+  "version": "5.8.9",
   "private": true,
   "type": "module",
   "scripts": {
     "start": "tsx server.ts",
     "typecheck": "tsc --noEmit",
-    "test": "npx tsx logger.test.ts && npx tsx browserLauncher.test.ts && npx tsx tokenAuthority.test.ts && npx tsx auth.test.ts && npx tsx mouseHighlight.test.ts && npx tsx inputRtpStreamer.test.ts && npx tsx installerScript.test.ts && npx tsx security.integration.test.ts && npx tsx share.integration.test.ts"
+    "test": "npx tsx logger.test.ts && npx tsx browserLauncher.test.ts && npx tsx tokenAuthority.test.ts && npx tsx auth.test.ts && npx tsx mouseHighlight.test.ts && npx tsx inputRtpStreamer.test.ts && npx tsx installerScript.test.ts && npx tsx security.integration.test.ts && npx tsx share.integration.test.ts && npx tsx lockAndShowcase.integration.test.ts && npx tsx zipPacker.test.ts && npx tsx assignment.integration.test.ts"
   },
   "dependencies": {
     "cors": "^2.8.5",

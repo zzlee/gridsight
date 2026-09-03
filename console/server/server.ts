@@ -16,6 +16,7 @@ import { logger } from './logger.js';
 import { promptSelectNic } from './nicSelector.js';
 import { openBrowser } from './browserLauncher.js';
 import { buildInstallAgentScript } from './installerScript.js';
+import { createZipFromDirectory } from './zipPacker.js';
 import type { ClassroomLayout, StudentDevice } from './types.js';
 
 interface StudentRecordingSession {
@@ -44,7 +45,7 @@ const APP_VERSION: string = (() => {
       if (pkg.version) return pkg.version;
     } catch { /* ignore */ }
   }
-  return '5.8.8'; // fallback
+  return '5.8.9'; // fallback
 })();
 
 const app = express();
@@ -165,6 +166,10 @@ const viewerSockets = new Map<string, Set<WebSocket>>();
 const pendingLogRequests = new Map<string, (logs: string) => void>();
 const pendingHighResRequests = new Map<string, (b64Image: string) => void>();
 
+// State for student screen lockout (Feature 1)
+const lockedAgents = new Set<string>(); // normalized lowercase MAC addresses
+let lastLockMessage = '請看講台專心聽課';
+
 // Normalizes MAC addresses and targets by decoding URL characters and standardizing case
 const normalizeTarget = (raw: string) => {
   if (!raw) return '';
@@ -245,6 +250,14 @@ wss.on('connection', (ws, req) => {
     agentSockets.set(mac, ws);
     logger.info(`[WS Relay] Authenticated student agent registered outbound: ${mac}`);
 
+    // Auto-relock if this agent was marked as locked
+    if (lockedAgents.has(mac.toLowerCase())) {
+      try {
+        ws.send(JSON.stringify({ action: 'LOCK_SCREEN', message: lastLockMessage }));
+        logger.info(`[ScreenLock] Auto-re-locked student ${mac} upon reconnect`);
+      } catch {}
+    }
+
     let frameCount = 0;
     let totalBytes = 0;
 
@@ -264,6 +277,11 @@ wss.on('connection', (ws, req) => {
           try {
             rec.process.stdin.write(data);
           } catch {}
+        }
+
+        // Forward H.264 video NALU frames directly to broadcast relay if this student is being showcased!
+        if (broadcastStreamer.isRelayingStudent(mac)) {
+          broadcastStreamer.feedRelayData(data as Buffer);
         }
 
         // Forward H.264 video NALU frames directly to active teacher viewers
@@ -487,6 +505,17 @@ const ensureRecordingsDirectory = async () => {
   }
 };
 
+const defaultAssignmentsDir = path.join(defaultDataDir, 'assignments');
+const ASSIGNMENTS_DIR = process.env.ASSIGNMENTS_DIR || defaultAssignmentsDir;
+
+const ensureAssignmentsDirectory = async () => {
+  try {
+    await fs.promises.mkdir(ASSIGNMENTS_DIR, { recursive: true });
+  } catch (err) {
+    logger.warn(`[Assignments] Failed to create assignments directory ${ASSIGNMENTS_DIR}: ${err}`);
+  }
+};
+
 const DEFAULT_OFFTASK_KEYWORDS = [
   'YouTube', 'Bilibili', 'Roblox', 'Minecraft', 'Steam',
   'Discord', 'Twitch', '抖音', 'Tiktok', '巴哈姆特',
@@ -628,23 +657,71 @@ app.post('/api/layout', requireTeacherAuth, async (req, res) => {
   }
 });
 
+interface AssignmentSubmission {
+  mac: string;
+  ip: string;
+  hostname: string;
+  seatNo: string;
+  filename: string;
+  size: number;
+  submittedAt: number;
+  filePath: string;
+}
+
+interface AssignmentSession {
+  id: string;
+  title: string;
+  allowedExts: string[];
+  maxSizeMb: number;
+  createdAt: number;
+  active: boolean;
+  submissions: Map<string, AssignmentSubmission>;
+}
+
+const assignmentSessions = new Map<string, AssignmentSession>();
+let activeAssignmentId: string | null = null;
+
 app.get('/api/agents', requireTeacherAuth, (req, res) => {
+  const rawDevices = discoveryService.getDevices();
+  const activeSession = activeAssignmentId ? assignmentSessions.get(activeAssignmentId) : null;
+  const agents = rawDevices.map((d) => {
+    const sub = (activeSession && d.mac) ? activeSession.submissions.get(d.mac.toLowerCase()) : undefined;
+    return {
+      ...d,
+      isLocked: d.mac ? lockedAgents.has(d.mac.toLowerCase()) : false,
+      hasSubmitted: !!sub,
+      submissionInfo: sub ? { filename: sub.filename, size: sub.size, submittedAt: sub.submittedAt } : undefined,
+    };
+  });
   res.json({
-    agents: discoveryService.getDevices(),
-    count: discoveryService.getDevices().length,
+    agents,
+    count: agents.length,
   });
 });
 
 app.get('/api/devices', requireTeacherAuth, (req, res) => {
+  const rawDevices = discoveryService.getDevices();
+  const activeSession = activeAssignmentId ? assignmentSessions.get(activeAssignmentId) : null;
+  const devices = rawDevices.map((d) => {
+    const sub = (activeSession && d.mac) ? activeSession.submissions.get(d.mac.toLowerCase()) : undefined;
+    return {
+      ...d,
+      isLocked: d.mac ? lockedAgents.has(d.mac.toLowerCase()) : false,
+      hasSubmitted: !!sub,
+      submissionInfo: sub ? { filename: sub.filename, size: sub.size, submittedAt: sub.submittedAt } : undefined,
+    };
+  });
   res.json({
-    devices: discoveryService.getDevices(),
-    count: discoveryService.getDevices().length,
+    devices,
+    count: devices.length,
   });
 });
 
-const notifyStopBroadcast = () => {
-  logger.info(`[Broadcast] Broadcasting STOP_BROADCAST to all ${agentSockets.size} agents`);
+const notifyStopBroadcast = (excludeMac?: string) => {
+  logger.info(`[Broadcast] Broadcasting STOP_BROADCAST to agents (total sockets: ${agentSockets.size})`);
+  const normExclude = excludeMac?.toLowerCase();
   agentSockets.forEach((ws, mac) => {
+    if (normExclude && mac.toLowerCase() === normExclude) return;
     if (ws.readyState === WebSocket.OPEN) {
       try {
         ws.send(JSON.stringify({ action: 'STOP_BROADCAST' }));
@@ -682,9 +759,470 @@ app.post('/api/broadcast/start', requireTeacherAuth, async (req, res) => {
 });
 
 app.post('/api/broadcast/stop', requireTeacherAuth, (req, res) => {
+  const relayMac = broadcastStreamer.getRelayStudent();
+  if (relayMac) {
+    const norm = relayMac.toLowerCase();
+    const showcaseWs = agentSockets.get(norm) || Array.from(agentSockets.entries()).find(([k]) => k.toLowerCase() === norm)?.[1];
+    if (showcaseWs && showcaseWs.readyState === WebSocket.OPEN) {
+      try {
+        showcaseWs.send(JSON.stringify({ action: 'SHOWCASE_STOP' }));
+        if (!viewerSockets.get(norm)?.size) {
+          showcaseWs.send(JSON.stringify({ action: 'STOP_STREAM' }));
+        }
+      } catch {}
+    }
+  }
   broadcastStreamer.stopStream();
   notifyStopBroadcast();
   res.json({ status: 'stopped', active: false });
+});
+
+// === Student Showcase Broadcast Routes (Feature 3) ===
+app.post('/api/broadcast/showcase/start', requireTeacherAuth, async (req, res) => {
+  const targetMac = req.body?.mac;
+  if (!targetMac || typeof targetMac !== 'string') {
+    return res.status(400).json({ error: '請提供欲轉播的學生 MAC 地址' });
+  }
+  const normMac = targetMac.toLowerCase();
+  const targetDevice = discoveryService.findDevice(normMac);
+  if (!targetDevice) {
+    return res.status(404).json({ error: '找不到該學生設備' });
+  }
+
+  // Stop existing broadcast or stream if running
+  if (broadcastStreamer.isActive()) {
+    const prevRelay = broadcastStreamer.getRelayStudent();
+    if (prevRelay) {
+      const prevWs = agentSockets.get(prevRelay.toLowerCase()) || Array.from(agentSockets.entries()).find(([k]) => k.toLowerCase() === prevRelay.toLowerCase())?.[1];
+      try { prevWs?.send(JSON.stringify({ action: 'SHOWCASE_STOP' })); } catch {}
+    }
+    broadcastStreamer.stopStream();
+  }
+
+  await ensureRecordingsDirectory();
+  const shouldRecord = req.body?.record === true || req.body?.record === 'true';
+  let recordFile: string | undefined;
+  if (shouldRecord) {
+    const now = new Date();
+    const pad = (n: number) => String(n).padStart(2, '0');
+    const timestamp = `${now.getFullYear()}-${pad(now.getMonth() + 1)}-${pad(now.getDate())}_${pad(now.getHours())}-${pad(now.getMinutes())}-${pad(now.getSeconds())}`;
+    const safeName = (targetDevice.hostname || targetDevice.ip || 'Student').replace(/[^a-zA-Z0-9_-]/g, '_');
+    recordFile = path.join(RECORDINGS_DIR, `GridSight_Showcase_${safeName}_${timestamp}.mp4`);
+  }
+
+  // 1. Instruct showcase student to start 30 FPS stream and show showcase toast
+  const showcaseWs = agentSockets.get(normMac) || Array.from(agentSockets.entries()).find(([k]) => k.toLowerCase() === normMac)?.[1];
+  if (showcaseWs && showcaseWs.readyState === WebSocket.OPEN) {
+    try {
+      showcaseWs.send(JSON.stringify({ action: 'SHOWCASE_START' }));
+      showcaseWs.send(JSON.stringify({ action: 'START_STREAM', fps: 30, bitrate: 2500, showcase: true }));
+    } catch (err) {
+      return res.status(500).json({ error: `無法向學生機發送轉播信令: ${err}` });
+    }
+  } else {
+    return res.status(400).json({ error: '該學生 Agent 尚未連線，無法發起轉播' });
+  }
+
+  // 2. Start broadcast streamer in student-relay mode
+  const result = await broadcastStreamer.startStream({
+    sourceType: 'student-relay',
+    relayMac: normMac,
+    fps: 30,
+    bitrateKbps: 3000,
+    localIp: activeTeacherIp,
+    record: shouldRecord,
+    ...(recordFile ? { recordFile } : {}),
+  });
+
+  if (!result.ok) {
+    try { showcaseWs.send(JSON.stringify({ action: 'SHOWCASE_STOP' })); } catch {}
+    return res.status(500).json({ error: result.error || '啟動學生畫面轉播失敗' });
+  }
+
+  logger.info(`[Broadcast] Showcase broadcast live for student ${targetDevice.hostname} (${normMac})`);
+  res.json({
+    ok: true,
+    status: 'showcase_streaming',
+    studentMac: normMac,
+    studentName: targetDevice.hostname || targetDevice.ip,
+    recording: broadcastStreamer.getRecordingStatus().isRecording,
+  });
+});
+
+app.post('/api/broadcast/showcase/stop', requireTeacherAuth, (req, res) => {
+  const relayMac = broadcastStreamer.getRelayStudent();
+  if (relayMac) {
+    const norm = relayMac.toLowerCase();
+    const showcaseWs = agentSockets.get(norm) || Array.from(agentSockets.entries()).find(([k]) => k.toLowerCase() === norm)?.[1];
+    if (showcaseWs && showcaseWs.readyState === WebSocket.OPEN) {
+      try {
+        showcaseWs.send(JSON.stringify({ action: 'SHOWCASE_STOP' }));
+        if (!viewerSockets.get(norm)?.size) {
+          showcaseWs.send(JSON.stringify({ action: 'STOP_STREAM' }));
+        }
+      } catch {}
+    }
+  }
+  broadcastStreamer.stopStream();
+  notifyStopBroadcast();
+  res.json({ ok: true, status: 'stopped' });
+});
+
+app.get('/api/broadcast/showcase/status', requireTeacherAuth, (req, res) => {
+  const relayMac = broadcastStreamer.getRelayStudent();
+  const isRelay = Boolean(relayMac && broadcastStreamer.isActive());
+  let studentName: string | null = null;
+  if (relayMac) {
+    const dev = discoveryService.findDevice(relayMac.toLowerCase());
+    studentName = dev?.hostname || dev?.ip || relayMac;
+  }
+  res.json({
+    active: isRelay,
+    studentMac: isRelay ? relayMac : null,
+    studentName: isRelay ? studentName : null,
+  });
+});
+
+// === Student Screen Lockout Routes (Feature 1) ===
+app.post('/api/screen/lock', requireTeacherAuth, (req, res) => {
+  const targets = req.body?.targets;
+  const message = typeof req.body?.message === 'string' && req.body.message.trim() ? req.body.message.trim() : '請看講台專心聽課';
+  lastLockMessage = message;
+  let lockedCount = 0;
+
+  if (!targets || targets === 'all') {
+    agentSockets.forEach((ws, mac) => {
+      lockedAgents.add(mac.toLowerCase());
+      if (ws.readyState === WebSocket.OPEN) {
+        try {
+          ws.send(JSON.stringify({ action: 'LOCK_SCREEN', message }));
+          lockedCount++;
+        } catch {}
+      }
+    });
+    discoveryService.getDevices().forEach((dev) => {
+      if (dev.mac) lockedAgents.add(dev.mac.toLowerCase());
+    });
+  } else if (Array.isArray(targets)) {
+    for (const t of targets) {
+      const norm = String(t).toLowerCase();
+      lockedAgents.add(norm);
+      const ws = agentSockets.get(norm) || Array.from(agentSockets.entries()).find(([k]) => k.toLowerCase() === norm)?.[1];
+      if (ws && ws.readyState === WebSocket.OPEN) {
+        try {
+          ws.send(JSON.stringify({ action: 'LOCK_SCREEN', message }));
+          lockedCount++;
+        } catch {}
+      }
+    }
+  }
+
+  logger.info(`[ScreenLock] Locked ${lockedCount} active agents (tracked locked: ${lockedAgents.size})`);
+  res.json({ ok: true, lockedCount, totalLocked: lockedAgents.size });
+});
+
+app.post('/api/screen/unlock', requireTeacherAuth, (req, res) => {
+  const targets = req.body?.targets;
+  let unlockedCount = 0;
+
+  if (!targets || targets === 'all') {
+    agentSockets.forEach((ws) => {
+      if (ws.readyState === WebSocket.OPEN) {
+        try {
+          ws.send(JSON.stringify({ action: 'UNLOCK_SCREEN' }));
+          unlockedCount++;
+        } catch {}
+      }
+    });
+    lockedAgents.clear();
+  } else if (Array.isArray(targets)) {
+    for (const t of targets) {
+      const norm = String(t).toLowerCase();
+      lockedAgents.delete(norm);
+      const ws = agentSockets.get(norm) || Array.from(agentSockets.entries()).find(([k]) => k.toLowerCase() === norm)?.[1];
+      if (ws && ws.readyState === WebSocket.OPEN) {
+        try {
+          ws.send(JSON.stringify({ action: 'UNLOCK_SCREEN' }));
+          unlockedCount++;
+        } catch {}
+      }
+    }
+  }
+
+  logger.info(`[ScreenLock] Unlocked ${unlockedCount} agents (remaining locked: ${lockedAgents.size})`);
+  res.json({ ok: true, unlockedCount, remainingLocked: lockedAgents.size });
+});
+
+app.get('/api/screen/status', requireTeacherAuth, (req, res) => {
+  res.json({
+    lockedCount: lockedAgents.size,
+    lockedMacs: Array.from(lockedAgents),
+    defaultMessage: lastLockMessage,
+  });
+});
+
+// === Assignment Dropbox Collection Routes (Feature 2) ===
+app.post('/api/assignments/start', requireTeacherAuth, async (req, res) => {
+  await ensureAssignmentsDirectory();
+  const title = typeof req.body?.title === 'string' && req.body.title.trim() ? req.body.title.trim() : '課堂作業';
+  const allowedExts = Array.isArray(req.body?.allowedExts)
+    ? req.body.allowedExts.map((e: string) => String(e).trim().toLowerCase().replace(/^\./, '')).filter(Boolean)
+    : [];
+  const maxSizeMb = typeof req.body?.maxSizeMb === 'number' && req.body.maxSizeMb > 0 ? req.body.maxSizeMb : 50;
+  const targets = req.body?.targets;
+
+  const id = `as-${Date.now().toString(36)}-${Math.random().toString(36).substring(2, 6)}`;
+  const sessionDir = path.join(ASSIGNMENTS_DIR, id);
+  await fs.promises.mkdir(sessionDir, { recursive: true });
+
+  const session: AssignmentSession = {
+    id,
+    title,
+    allowedExts,
+    maxSizeMb,
+    createdAt: Date.now(),
+    active: true,
+    submissions: new Map(),
+  };
+  assignmentSessions.set(id, session);
+  activeAssignmentId = id;
+
+  const hostIp = activeTeacherIp && activeTeacherIp !== '127.0.0.1' ? activeTeacherIp : '127.0.0.1';
+  const uploadUrl = `http://${hostIp}:${PORT}/api/assignments/upload`;
+
+  const payload = JSON.stringify({
+    action: 'COLLECT_ASSIGNMENT',
+    id,
+    title,
+    allowedExts: allowedExts.join(','),
+    maxSizeMb,
+    uploadUrl,
+  });
+
+  let count = 0;
+  if (!targets || targets === 'all' || (Array.isArray(targets) && (targets.length === 0 || targets.includes('ALL')))) {
+    agentSockets.forEach((ws) => {
+      if (ws.readyState === WebSocket.OPEN) {
+        try { ws.send(payload); count++; } catch {}
+      }
+    });
+  } else if (Array.isArray(targets)) {
+    for (const t of targets) {
+      const norm = normalizeTarget(String(t));
+      const ws = agentSockets.get(norm) || Array.from(agentSockets.entries()).find(([k]) => k.toLowerCase() === norm)?.[1];
+      if (ws && ws.readyState === WebSocket.OPEN) {
+        try { ws.send(payload); count++; } catch {}
+      }
+    }
+  }
+
+  logger.info(`[Assignments] Started assignment collection "${title}" (id: ${id}), broadcast to ${count} agents`);
+  res.json({
+    ok: true,
+    session: {
+      id,
+      title,
+      allowedExts,
+      maxSizeMb,
+      createdAt: session.createdAt,
+      active: true,
+      submissionsCount: 0,
+    },
+    targetCount: count,
+  });
+});
+
+app.post('/api/assignments/stop', requireTeacherAuth, (req, res) => {
+  if (activeAssignmentId) {
+    const session = assignmentSessions.get(activeAssignmentId);
+    if (session) session.active = false;
+    activeAssignmentId = null;
+  }
+  const payload = JSON.stringify({ action: 'STOP_ASSIGNMENT' });
+  let count = 0;
+  agentSockets.forEach((ws) => {
+    if (ws.readyState === WebSocket.OPEN) {
+      try { ws.send(payload); count++; } catch {}
+    }
+  });
+  logger.info(`[Assignments] Stopped active assignment collection, notified ${count} agents`);
+  res.json({ ok: true, count });
+});
+
+app.post('/api/assignments/remind', requireTeacherAuth, (req, res) => {
+  if (!activeAssignmentId) {
+    return res.status(400).json({ error: '目前沒有進行中的作業收取' });
+  }
+  const session = assignmentSessions.get(activeAssignmentId);
+  if (!session || !session.active) {
+    return res.status(400).json({ error: '目前沒有進行中的作業收取' });
+  }
+
+  const hostIp = activeTeacherIp && activeTeacherIp !== '127.0.0.1' ? activeTeacherIp : '127.0.0.1';
+  const uploadUrl = `http://${hostIp}:${PORT}/api/assignments/upload`;
+
+  const payload = JSON.stringify({
+    action: 'COLLECT_ASSIGNMENT',
+    id: session.id,
+    title: session.title,
+    allowedExts: session.allowedExts.join(','),
+    maxSizeMb: session.maxSizeMb,
+    uploadUrl,
+  });
+
+  let remindedCount = 0;
+  agentSockets.forEach((ws, mac) => {
+    if (!session.submissions.has(mac.toLowerCase())) {
+      if (ws.readyState === WebSocket.OPEN) {
+        try { ws.send(payload); remindedCount++; } catch {}
+      }
+    }
+  });
+
+  logger.info(`[Assignments] Reminded ${remindedCount} unsubmitted agents for assignment "${session.title}"`);
+  res.json({ ok: true, remindedCount });
+});
+
+app.get('/api/assignments/active', requireTeacherAuth, (req, res) => {
+  if (!activeAssignmentId) {
+    return res.json({ active: false });
+  }
+  const session = assignmentSessions.get(activeAssignmentId);
+  if (!session || !session.active) {
+    return res.json({ active: false });
+  }
+  res.json({
+    active: true,
+    session: {
+      id: session.id,
+      title: session.title,
+      allowedExts: session.allowedExts,
+      maxSizeMb: session.maxSizeMb,
+      createdAt: session.createdAt,
+      active: session.active,
+      submissions: Array.from(session.submissions.values()),
+    },
+  });
+});
+
+app.get('/api/assignments/list', requireTeacherAuth, (req, res) => {
+  const list = Array.from(assignmentSessions.values()).map((s) => ({
+    id: s.id,
+    title: s.title,
+    allowedExts: s.allowedExts,
+    maxSizeMb: s.maxSizeMb,
+    createdAt: s.createdAt,
+    active: s.active,
+    submissionsCount: s.submissions.size,
+  }));
+  res.json({ list });
+});
+
+app.post(
+  '/api/assignments/upload',
+  express.raw({ type: ['application/octet-stream', '*/*'], limit: '100mb' }),
+  async (req, res) => {
+    await ensureAssignmentsDirectory();
+    const rawMac = (req.headers['x-agent-mac'] as string) || '';
+    const ip = (req.headers['x-agent-ip'] as string) || req.ip?.replace(/^.*:/, '') || '';
+    const rawAssignmentId = (req.headers['x-assignment-id'] as string) || (req.query.id as string) || activeAssignmentId || '';
+    const rawFilenameB64 = (req.headers['x-filename'] as string) || '';
+    const mac = normalizeTarget(rawMac);
+
+    let filename = 'submission.bin';
+    if (rawFilenameB64) {
+      try {
+        filename = Buffer.from(rawFilenameB64, 'base64').toString('utf8');
+      } catch {
+        filename = rawFilenameB64;
+      }
+    }
+
+    const session = assignmentSessions.get(rawAssignmentId) || (activeAssignmentId ? assignmentSessions.get(activeAssignmentId) : null);
+    if (!session) {
+      return res.status(404).json({ error: '找不到指定的作業收取作業' });
+    }
+
+    // Verify allowed extension
+    if (session.allowedExts.length > 0) {
+      const dotIdx = filename.lastIndexOf('.');
+      const ext = dotIdx >= 0 ? filename.substring(dotIdx + 1).toLowerCase() : '';
+      if (!session.allowedExts.includes(ext) && !session.allowedExts.includes('*')) {
+        return res.status(400).json({ error: `檔案副檔名不符 (僅限: ${session.allowedExts.join(', ')})` });
+      }
+    }
+
+    const buffer = req.body as Buffer;
+    if (!buffer || buffer.length === 0) {
+      return res.status(400).json({ error: '上傳檔案為空' });
+    }
+
+    // Look up student seat number and hostname
+    const dev = discoveryService.findDevice(mac) || discoveryService.findDevice(ip);
+    const hostname = dev?.hostname || 'Unknown';
+    let seatNo = '未排座';
+    if (cachedLayout && dev) {
+      const s = cachedLayout.seats.find((seat) => (dev.mac && seat.mac === dev.mac) || (dev.ip && seat.ip === dev.ip));
+      if (s) seatNo = s.seatNo || `${s.gridY + 1}-${s.gridX + 1}`;
+    }
+
+    const safeFilename = path.basename(filename).replace(/[/\\?%*:|"<>]/g, '_');
+    const safeHostname = hostname.replace(/[/\\?%*:|"<>]/g, '_');
+    const safeSeatNo = seatNo.replace(/[/\\?%*:|"<>]/g, '_');
+
+    // Standardized filename: [SeatNo]_[Hostname]_[Filename]
+    // Option 2-A: Overwrite existing file on re-upload
+    const targetFilename = `${safeSeatNo}_${safeHostname}_${safeFilename}`;
+    const assignmentDir = path.join(ASSIGNMENTS_DIR, session.id);
+    await fs.promises.mkdir(assignmentDir, { recursive: true });
+    const targetPath = path.join(assignmentDir, targetFilename);
+
+    await fs.promises.writeFile(targetPath, buffer);
+
+    const submission: AssignmentSubmission = {
+      mac,
+      ip,
+      hostname,
+      seatNo,
+      filename,
+      size: buffer.length,
+      submittedAt: Date.now(),
+      filePath: targetPath,
+    };
+    session.submissions.set(mac.toLowerCase(), submission);
+
+    logger.info(`[Assignments] Received submission from ${hostname} (${seatNo}): ${targetFilename} (${(buffer.length / 1024).toFixed(1)} KB)`);
+    res.json({
+      ok: true,
+      filename: targetFilename,
+      size: buffer.length,
+      submittedAt: submission.submittedAt,
+    });
+  }
+);
+
+app.get('/api/assignments/:id/download-zip', requireTeacherAuth, async (req, res) => {
+  const rawId = req.params.id;
+  if (!rawId) {
+    return res.status(400).json({ error: '缺少作業識別碼' });
+  }
+  const id: string = rawId;
+  const session = assignmentSessions.get(id);
+  const sessionDir = path.join(ASSIGNMENTS_DIR, id);
+
+  if (!fs.existsSync(sessionDir)) {
+    return res.status(404).json({ error: '找不到該作業資料夾' });
+  }
+
+  const title: string = session?.title || id || '課堂作業';
+  const safeTitle = title.replace(/[/\\?%*:|"<>]/g, '_');
+  const zipBuf = createZipFromDirectory(sessionDir);
+
+  res.setHeader('Content-Type', 'application/zip');
+  const encodedName = encodeURIComponent(`GridSight_作業_${safeTitle}.zip`);
+  res.setHeader('Content-Disposition', `attachment; filename="GridSight_Assignment.zip"; filename*=UTF-8''${encodedName}`);
+  res.setHeader('Content-Length', zipBuf.length);
+  res.send(zipBuf);
 });
 
 app.get('/api/broadcast/status', requireTeacherAuth, (req, res) => {

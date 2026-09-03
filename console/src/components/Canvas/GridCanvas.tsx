@@ -26,6 +26,8 @@ interface GridCanvasProps {
   onMoveSeat?: (id: string, newGridX: number, newGridY: number) => void;
   onAssignFromPool?: (deviceId: string, targetGridX: number, targetGridY: number) => void;
   filterOnlyOffTask?: boolean;
+  onShowcase?: (device: StudentDevice) => void;
+  onToggleLock?: (device: StudentDevice) => void;
   onEditObstacle?: (obstacle: GridObstacle) => void;
   onDeleteObstacle?: (id: string) => void;
 }
@@ -51,6 +53,8 @@ export const GridCanvas: React.FC<GridCanvasProps> = ({
   onMoveSeat,
   onAssignFromPool,
   filterOnlyOffTask = false,
+  onShowcase,
+  onToggleLock,
   onEditObstacle,
   onDeleteObstacle,
 }) => {
@@ -615,6 +619,8 @@ export const GridCanvas: React.FC<GridCanvasProps> = ({
                   onUnbind={onUnbindSeat}
                   onOpenSpecs={onOpenSpecs}
                   onEditSeat={onEditSeat}
+                  onShowcase={onShowcase}
+                  onToggleLock={onToggleLock}
                   onDragStart={handleCardDragStart}
                   onDragEnd={handleCardDragEnd}
                   onDragOver={handleCardDragOver}

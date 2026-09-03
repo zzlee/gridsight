@@ -1,4 +1,4 @@
-import React, { useState, useRef } from 'react';
+import React, { useState, useRef, useEffect } from 'react';
 import { StudentDevice, AppMode, GridAisle, GridObstacle } from './types';
 import { TopNav } from './components/Toolbar/TopNav';
 import { GridCanvas } from './components/Canvas/GridCanvas';
@@ -20,11 +20,16 @@ import { ShareFileModal } from './components/Toolbar/ShareFileModal';
 import { BroadcastTestModal } from './components/Toolbar/BroadcastTestModal';
 import { ShutdownModal } from './components/Toolbar/ShutdownModal';
 import { TeacherRecordModal } from './components/Toolbar/TeacherRecordModal';
+import { LockScreenModal } from './components/Toolbar/LockScreenModal';
+import { AssignmentModal } from './components/Toolbar/AssignmentModal';
+import { MonitorBatchToolbar } from './components/Toolbar/MonitorBatchToolbar';
 import { PollingManager } from './services/pollingManager';
 import { LayoutStorage } from './services/layoutStorage';
+import { AuthService } from './services/authService';
 import { useViewport } from './hooks/useViewport';
 import { useOffTaskAlerts } from './hooks/useOffTaskAlerts';
 import { useAgentDiscovery } from './hooks/useAgentDiscovery';
+import type { ActiveAssignment } from './types';
 
 const pollingManager = new PollingManager();
 
@@ -49,6 +54,9 @@ export const App: React.FC = () => {
   const [isBroadcastTestOpen, setIsBroadcastTestOpen] = useState(false);
   const [isShutdownOpen, setIsShutdownOpen] = useState(false);
   const [isTeacherRecordOpen, setIsTeacherRecordOpen] = useState(false);
+  const [isLockScreenOpen, setIsLockScreenOpen] = useState(false);
+  const [isAssignmentOpen, setIsAssignmentOpen] = useState(false);
+  const [activeAssignment, setActiveAssignment] = useState<ActiveAssignment | null>(null);
 
   // Viewport Zoom & Pan Persistence
   const { zoom, setZoom, pan, setPan, handleResetView } = useViewport();
@@ -87,6 +95,28 @@ export const App: React.FC = () => {
     setFocusDevice,
     setSpecsDevice,
   });
+
+  // Poll Active Assignment (Feature 2)
+  useEffect(() => {
+    let isMounted = true;
+    const fetchActiveAssignment = async () => {
+      try {
+        const resp = await AuthService.fetchWithAuth('/api/assignments/active');
+        if (resp.ok) {
+          const data = await resp.json();
+          if (isMounted) {
+            setActiveAssignment(data.active ? data.session : null);
+          }
+        }
+      } catch {}
+    };
+    fetchActiveAssignment();
+    const timer = setInterval(fetchActiveAssignment, 4000);
+    return () => {
+      isMounted = false;
+      clearInterval(timer);
+    };
+  }, []);
 
   const handleSelectStudent = (id: string, multi: boolean) => {
     setLayout((prev) => ({
@@ -542,6 +572,69 @@ export const App: React.FC = () => {
     }
   };
 
+  const handleShowcaseStudent = async (device: StudentDevice) => {
+    if (!device.mac) return;
+    try {
+      const resp = await AuthService.fetchWithAuth('/api/broadcast/showcase/start', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ mac: device.mac }),
+      });
+      const data = await resp.json();
+      if (!resp.ok || !data.ok) {
+        alert(data.error || '啟動學生畫面轉播失敗');
+      }
+    } catch (err) {
+      console.error('Failed to start showcase:', err);
+    }
+  };
+
+  const handleToggleLockStudent = async (device: StudentDevice) => {
+    if (!device.mac) return;
+    try {
+      if (device.isLocked) {
+        await AuthService.fetchWithAuth('/api/screen/unlock', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ targets: [device.mac] }),
+        });
+        setLayout((prev) => ({
+          ...prev,
+          seats: prev.seats.map((s) => (s.id === device.id ? { ...s, isLocked: false } : s)),
+        }));
+      } else {
+        await AuthService.fetchWithAuth('/api/screen/lock', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ targets: [device.mac], message: '請看講台專心聽課' }),
+        });
+        setLayout((prev) => ({
+          ...prev,
+          seats: prev.seats.map((s) => (s.id === device.id ? { ...s, isLocked: true } : s)),
+        }));
+      }
+    } catch (err) {
+      console.error('Failed to toggle lock:', err);
+    }
+  };
+
+  const handleBatchUnlock = async () => {
+    if (selectedTargets.length === 0) return;
+    try {
+      await AuthService.fetchWithAuth('/api/screen/unlock', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ targets: selectedTargets }),
+      });
+      setLayout((prev) => ({
+        ...prev,
+        seats: prev.seats.map((s) => (s.selected ? { ...s, isLocked: false } : s)),
+      }));
+    } catch (err) {
+      console.error('Batch unlock error:', err);
+    }
+  };
+
   // If user opens http://<IP>:3000/join, render dedicated student onboarding portal directly
   if (typeof window !== 'undefined' && (window.location.pathname.startsWith('/join') || window.location.pathname.startsWith('/connect') || window.location.pathname.startsWith('/student'))) {
     return <StudentConnectModal isOpen={true} isStandalonePage={true} onClose={() => {}} />;
@@ -569,6 +662,9 @@ export const App: React.FC = () => {
         onOpenBroadcastTest={() => setIsBroadcastTestOpen(true)}
         onOpenTeacherRecord={() => setIsTeacherRecordOpen(true)}
         onOpenShutdown={() => setIsShutdownOpen(true)}
+        onOpenLockScreen={() => setIsLockScreenOpen(true)}
+        onOpenAssignment={() => setIsAssignmentOpen(true)}
+        activeAssignment={activeAssignment}
         offTaskCount={offTaskDevices.length}
         unassignedCount={unassignedDevices.length}
         onLock={() => setIsLocked(true)}
@@ -593,6 +689,8 @@ export const App: React.FC = () => {
         onUnbindSeat={handleUnbindSeat}
         onOpenSpecs={setSpecsDevice}
         onEditSeat={(device) => setEditingSeat(device)}
+        onShowcase={handleShowcaseStudent}
+        onToggleLock={handleToggleLockStudent}
         onVisibleSeatsChange={(ids) => {
           visibleDeviceIdsRef.current = ids;
         }}
@@ -603,13 +701,29 @@ export const App: React.FC = () => {
         onDeleteObstacle={handleDeleteObstacle}
       />
 
-      {/* Multi-Selection Batch Action Floating Toolbar */}
+      {/* Multi-Selection Batch Action Floating Toolbar (Layout Edit Mode) */}
       {mode === 'EDIT_LAYOUT' && (
         <BatchActionToolbar
           selectedSeats={layout.seats.filter((s) => s.selected)}
           onReturnToPool={handleReturnToPool}
           onOpenBatchEdit={() => setIsBatchEditOpen(true)}
           onAutoRenumber={handleAutoRenumberSelected}
+          onClearSelection={handleClearSelection}
+          onSelectAll={handleSelectAll}
+          totalSeatsCount={layout.seats.length}
+        />
+      )}
+
+      {/* Multi-Selection Batch Action Floating Toolbar (Monitor Mode: Lock / Share / Shutdown) */}
+      {mode === 'MONITOR' && selectedSeats.length > 0 && (
+        <MonitorBatchToolbar
+          selectedSeats={selectedSeats}
+          onOpenLockModal={() => setIsLockScreenOpen(true)}
+          onBatchUnlock={handleBatchUnlock}
+          onOpenAssignment={() => setIsAssignmentOpen(true)}
+          onOpenShareUrl={() => setIsShareUrlOpen(true)}
+          onOpenShareFile={() => setIsShareFileOpen(true)}
+          onOpenShutdown={() => setIsShutdownOpen(true)}
           onClearSelection={handleClearSelection}
           onSelectAll={handleSelectAll}
           totalSeatsCount={layout.seats.length}
@@ -734,6 +848,34 @@ export const App: React.FC = () => {
       <BroadcastTestModal
         isOpen={isBroadcastTestOpen}
         onClose={() => setIsBroadcastTestOpen(false)}
+      />
+
+      {/* Screen Lockout Modal (Feature 1) */}
+      <LockScreenModal
+        isOpen={isLockScreenOpen}
+        onClose={() => setIsLockScreenOpen(false)}
+        selectedTargets={selectedTargets}
+        selectedCount={selectedSeats.length}
+        totalOnlineCount={totalOnlineCount}
+      />
+
+      {/* Assignment Dropbox Modal (Feature 2) */}
+      <AssignmentModal
+        isOpen={isAssignmentOpen}
+        onClose={() => setIsAssignmentOpen(false)}
+        selectedTargets={selectedTargets}
+        selectedCount={selectedSeats.length}
+        totalOnlineCount={totalOnlineCount}
+        activeAssignment={activeAssignment}
+        onRefresh={async () => {
+          try {
+            const resp = await AuthService.fetchWithAuth('/api/assignments/active');
+            if (resp.ok) {
+              const data = await resp.json();
+              setActiveAssignment(data.active ? data.session : null);
+            }
+          } catch {}
+        }}
       />
 
       {/* Broadcast Shutdown Modal */}

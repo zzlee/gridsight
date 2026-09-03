@@ -1204,4 +1204,857 @@ void Utils::CancelShutdown() {
 #endif
 }
 
+// === Screen Lockout and Showcase Toast States (Cross-platform) ===
+static std::atomic<bool> g_screen_locked(false);
+static std::mutex g_lock_mutex;
+static std::string g_lock_display_message = "請看講台專心聽課";
+static std::atomic<bool> g_showcase_toast_active(false);
+
+#ifdef _WIN32
+static HWND g_curtain_hwnd = NULL;
+static HHOOK g_keyboard_hook = NULL;
+static HWND g_showcase_hwnd = NULL;
+static std::thread g_curtain_thread;
+static std::thread g_showcase_thread;
+
+// Low-level keyboard hook to intercept Win, Alt+Tab, Alt+Esc, Ctrl+Esc, Alt+F4
+static LRESULT CALLBACK LowLevelKeyboardProc(int nCode, WPARAM wParam, LPARAM lParam) {
+    if (nCode == HC_ACTION && g_screen_locked.load()) {
+        KBDLLHOOKSTRUCT* pKbd = (KBDLLHOOKSTRUCT*)lParam;
+        if (pKbd) {
+            // Intercept Windows Keys (LWIN / RWIN)
+            if (pKbd->vkCode == VK_LWIN || pKbd->vkCode == VK_RWIN) return 1;
+            // Intercept Alt+Tab, Alt+Esc, Alt+F4
+            if (pKbd->flags & LLKHF_ALTDOWN) {
+                if (pKbd->vkCode == VK_TAB || pKbd->vkCode == VK_ESCAPE || pKbd->vkCode == VK_F4) return 1;
+            }
+            // Intercept Ctrl+Esc
+            if (pKbd->vkCode == VK_ESCAPE && (GetAsyncKeyState(VK_CONTROL) & 0x8000)) return 1;
+            // Intercept context menu key (VK_APPS)
+            if (pKbd->vkCode == VK_APPS) return 1;
+            // Swallow all keyboard input during lock
+            return 1;
+        }
+    }
+    return CallNextHookEx(g_keyboard_hook, nCode, wParam, lParam);
+}
+
+// Curtain Window Procedure
+static LRESULT CALLBACK CurtainWndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) {
+    switch (msg) {
+    case WM_CREATE: {
+        SetTimer(hwnd, 1, 500, NULL);
+        return 0;
+    }
+    case WM_TIMER: {
+        if (wParam == 1) {
+            if (!g_screen_locked.load()) {
+                KillTimer(hwnd, 1);
+                DestroyWindow(hwnd);
+                return 0;
+            }
+            SetWindowPos(hwnd, HWND_TOPMOST, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE | SWP_SHOWWINDOW);
+            if (GetForegroundWindow() != hwnd) {
+                SetForegroundWindow(hwnd);
+            }
+        }
+        return 0;
+    }
+    case WM_ACTIVATE:
+    case WM_KILLFOCUS: {
+        if (g_screen_locked.load()) {
+            SetWindowPos(hwnd, HWND_TOPMOST, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE);
+            SetForegroundWindow(hwnd);
+        }
+        return 0;
+    }
+    case WM_LBUTTONDOWN:
+    case WM_RBUTTONDOWN:
+    case WM_MBUTTONDOWN:
+    case WM_KEYDOWN:
+    case WM_SYSKEYDOWN:
+        return 0; // Swallow all inputs
+    case WM_PAINT: {
+        PAINTSTRUCT ps;
+        HDC hdc = BeginPaint(hwnd, &ps);
+
+        RECT rc;
+        GetClientRect(hwnd, &rc);
+        int client_w = rc.right - rc.left;
+        int client_h = rc.bottom - rc.top;
+
+        HDC memDC = CreateCompatibleDC(hdc);
+        HBITMAP memBitmap = CreateCompatibleBitmap(hdc, client_w, client_h);
+        HBITMAP oldBitmap = (HBITMAP)SelectObject(memDC, memBitmap);
+
+        // Dark sci-fi blue background (Slate-950: RGB 11, 17, 32)
+        HBRUSH bgBrush = CreateSolidBrush(RGB(11, 17, 32));
+        FillRect(memDC, &rc, bgBrush);
+        DeleteObject(bgBrush);
+
+        SetBkMode(memDC, TRANSPARENT);
+
+        int cx = client_w / 2;
+        int cy = client_h / 2;
+
+        // Draw stylized Golden Padlock Icon (Option 1-A)
+        int lock_w = 72;
+        int lock_h = 56;
+        int lock_x = cx - lock_w / 2;
+        int lock_y = cy - 130;
+
+        // Shackle (U-shape arch)
+        HPEN shacklePen = CreatePen(PS_SOLID, 8, RGB(250, 204, 21)); // Amber-400
+        HPEN oldPen = (HPEN)SelectObject(memDC, shacklePen);
+        HBRUSH nullBrush = (HBRUSH)GetStockObject(NULL_BRUSH);
+        HBRUSH oldBrush = (HBRUSH)SelectObject(memDC, nullBrush);
+        Arc(memDC, lock_x + 12, lock_y - 36, lock_x + lock_w - 12, lock_y + 28,
+            lock_x + lock_w - 12, lock_y, lock_x + 12, lock_y);
+
+        // Lock Body (Golden rounded box)
+        HBRUSH lockBrush = CreateSolidBrush(RGB(234, 179, 8)); // Amber-500
+        SelectObject(memDC, lockBrush);
+        HPEN borderPen = CreatePen(PS_SOLID, 2, RGB(253, 224, 71)); // Amber-300
+        SelectObject(memDC, borderPen);
+        RoundRect(memDC, lock_x, lock_y, lock_x + lock_w, lock_y + lock_h, 14, 14);
+
+        // Keyhole (Dark dot + slot)
+        HBRUSH keyholeBrush = CreateSolidBrush(RGB(15, 23, 42)); // Slate-900
+        SelectObject(memDC, keyholeBrush);
+        SelectObject(memDC, GetStockObject(NULL_PEN));
+        Ellipse(memDC, cx - 6, lock_y + 16, cx + 6, lock_y + 28);
+        RECT slotRc = { cx - 3, lock_y + 24, cx + 3, lock_y + 38 };
+        FillRect(memDC, &slotRc, keyholeBrush);
+
+        SelectObject(memDC, oldPen);
+        SelectObject(memDC, oldBrush);
+        DeleteObject(shacklePen);
+        DeleteObject(lockBrush);
+        DeleteObject(borderPen);
+        DeleteObject(keyholeBrush);
+
+        // Teacher Prompt Message (Large bold white)
+        SetTextColor(memDC, RGB(241, 245, 249)); // Slate-100
+        HFONT hMsgFont = CreateFontW(36, 0, 0, 0, FW_BOLD, FALSE, FALSE, FALSE, DEFAULT_CHARSET,
+                                     OUT_DEFAULT_PRECIS, CLIP_DEFAULT_PRECIS, DEFAULT_QUALITY,
+                                     DEFAULT_PITCH | FF_SWISS, L"Microsoft JhengHei");
+        if (!hMsgFont) hMsgFont = CreateFontW(36, 0, 0, 0, FW_BOLD, FALSE, FALSE, FALSE, DEFAULT_CHARSET,
+                                             OUT_DEFAULT_PRECIS, CLIP_DEFAULT_PRECIS, DEFAULT_QUALITY,
+                                             DEFAULT_PITCH | FF_SWISS, L"Segoe UI");
+        HFONT oldFont = (HFONT)SelectObject(memDC, hMsgFont);
+
+        std::string current_msg;
+        {
+            std::lock_guard<std::mutex> lock(g_lock_mutex);
+            current_msg = g_lock_display_message.empty() ? "請看講台專心聽課" : g_lock_display_message;
+        }
+        std::wstring wmsg;
+        int len = MultiByteToWideChar(CP_UTF8, 0, current_msg.c_str(), -1, NULL, 0);
+        if (len > 0) {
+            wmsg.resize(len - 1);
+            MultiByteToWideChar(CP_UTF8, 0, current_msg.c_str(), -1, &wmsg[0], len);
+        } else {
+            wmsg = L"請看講台專心聽課";
+        }
+
+        RECT msgRc = { 40, cy - 30, client_w - 40, cy + 40 };
+        DrawTextW(memDC, wmsg.c_str(), -1, &msgRc, DT_CENTER | DT_SINGLELINE);
+
+        // Subtitle: Mode Description
+        SetTextColor(memDC, RGB(148, 163, 184)); // Slate-400
+        HFONT hSubFont = CreateFontW(18, 0, 0, 0, FW_NORMAL, FALSE, FALSE, FALSE, DEFAULT_CHARSET,
+                                     OUT_DEFAULT_PRECIS, CLIP_DEFAULT_PRECIS, DEFAULT_QUALITY,
+                                     DEFAULT_PITCH | FF_SWISS, L"Microsoft JhengHei");
+        if (!hSubFont) hSubFont = CreateFontW(18, 0, 0, 0, FW_NORMAL, FALSE, FALSE, FALSE, DEFAULT_CHARSET,
+                                             OUT_DEFAULT_PRECIS, CLIP_DEFAULT_PRECIS, DEFAULT_QUALITY,
+                                             DEFAULT_PITCH | FF_SWISS, L"Segoe UI");
+        SelectObject(memDC, hSubFont);
+
+        RECT subRc = { 40, cy + 50, client_w - 40, cy + 80 };
+        const wchar_t* wsub = L"🔒 GridSight 課堂專注模式・螢幕與鍵盤滑鼠已鎖定";
+        DrawTextW(memDC, wsub, -1, &subRc, DT_CENTER | DT_SINGLELINE);
+
+        // Footer Hint
+        SetTextColor(memDC, RGB(100, 116, 139)); // Slate-500
+        HFONT hFootFont = CreateFontW(14, 0, 0, 0, FW_NORMAL, FALSE, FALSE, FALSE, DEFAULT_CHARSET,
+                                      OUT_DEFAULT_PRECIS, CLIP_DEFAULT_PRECIS, DEFAULT_QUALITY,
+                                      DEFAULT_PITCH | FF_SWISS, L"Segoe UI");
+        SelectObject(memDC, hFootFont);
+
+        RECT footRc = { 40, cy + 95, client_w - 40, cy + 125 };
+        const wchar_t* wfoot = L"請注意聽講，講解完畢後由教師端統一解除鎖定";
+        DrawTextW(memDC, wfoot, -1, &footRc, DT_CENTER | DT_SINGLELINE);
+
+        SelectObject(memDC, oldFont);
+        DeleteObject(hMsgFont);
+        DeleteObject(hSubFont);
+        DeleteObject(hFootFont);
+
+        BitBlt(hdc, 0, 0, client_w, client_h, memDC, 0, 0, SRCCOPY);
+        SelectObject(memDC, oldBitmap);
+        DeleteObject(memBitmap);
+        DeleteDC(memDC);
+
+        EndPaint(hwnd, &ps);
+        return 0;
+    }
+    case WM_DESTROY: {
+        KillTimer(hwnd, 1);
+        g_curtain_hwnd = NULL;
+        PostQuitMessage(0);
+        return 0;
+    }
+    }
+    return DefWindowProcW(hwnd, msg, wParam, lParam);
+}
+
+// Showcase Toast Window Procedure (Non-obstructive bottom-right card)
+static LRESULT CALLBACK ShowcaseWndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) {
+    switch (msg) {
+    case WM_PAINT: {
+        PAINTSTRUCT ps;
+        HDC hdc = BeginPaint(hwnd, &ps);
+
+        RECT rc;
+        GetClientRect(hwnd, &rc);
+        int w = rc.right - rc.left;
+        int h = rc.bottom - rc.top;
+
+        HDC memDC = CreateCompatibleDC(hdc);
+        HBITMAP memBitmap = CreateCompatibleBitmap(hdc, w, h);
+        HBITMAP oldBitmap = (HBITMAP)SelectObject(memDC, memBitmap);
+
+        // Dark card background (Slate-900)
+        HBRUSH cardBrush = CreateSolidBrush(RGB(15, 23, 42));
+        HPEN purpleBorder = CreatePen(PS_SOLID, 2, RGB(168, 85, 247)); // Purple-500
+        HBRUSH oldB = (HBRUSH)SelectObject(memDC, cardBrush);
+        HPEN oldP = (HPEN)SelectObject(memDC, purpleBorder);
+
+        RoundRect(memDC, 1, 1, w - 1, h - 1, 12, 12);
+
+        SetBkMode(memDC, TRANSPARENT);
+
+        // Title: Showcase Status
+        SetTextColor(memDC, RGB(243, 232, 255)); // Purple-100
+        HFONT hTitleFont = CreateFontW(16, 0, 0, 0, FW_BOLD, FALSE, FALSE, FALSE, DEFAULT_CHARSET,
+                                       OUT_DEFAULT_PRECIS, CLIP_DEFAULT_PRECIS, DEFAULT_QUALITY,
+                                       DEFAULT_PITCH | FF_SWISS, L"Microsoft JhengHei");
+        HFONT oldF = (HFONT)SelectObject(memDC, hTitleFont);
+        RECT tRc = { 16, 10, w - 16, 30 };
+        DrawTextW(memDC, L"💡 您的螢幕正在全班轉播展示中", -1, &tRc, DT_LEFT | DT_SINGLELINE);
+
+        // Subtitle: Continue operating
+        SetTextColor(memDC, RGB(192, 132, 252)); // Purple-400
+        HFONT hSubFont = CreateFontW(12, 0, 0, 0, FW_NORMAL, FALSE, FALSE, FALSE, DEFAULT_CHARSET,
+                                     OUT_DEFAULT_PRECIS, CLIP_DEFAULT_PRECIS, DEFAULT_QUALITY,
+                                     DEFAULT_PITCH | FF_SWISS, L"Microsoft JhengHei");
+        SelectObject(memDC, hSubFont);
+        RECT sRc = { 16, 31, w - 16, 48 };
+        DrawTextW(memDC, L"全體同學正觀看您的操作，請正常進行示範", -1, &sRc, DT_LEFT | DT_SINGLELINE);
+
+        SelectObject(memDC, oldF);
+        SelectObject(memDC, oldB);
+        SelectObject(memDC, oldP);
+        DeleteObject(cardBrush);
+        DeleteObject(purpleBorder);
+        DeleteObject(hTitleFont);
+        DeleteObject(hSubFont);
+
+        BitBlt(hdc, 0, 0, w, h, memDC, 0, 0, SRCCOPY);
+        SelectObject(memDC, oldBitmap);
+        DeleteObject(memBitmap);
+        DeleteDC(memDC);
+
+        EndPaint(hwnd, &ps);
+        return 0;
+    }
+    case WM_DESTROY: {
+        g_showcase_hwnd = NULL;
+        PostQuitMessage(0);
+        return 0;
+    }
+    }
+    return DefWindowProcW(hwnd, msg, wParam, lParam);
+}
+#endif
+
+void Utils::LockScreen(const std::string& message) {
+    {
+        std::lock_guard<std::mutex> lock(g_lock_mutex);
+        if (!message.empty()) g_lock_display_message = message;
+    }
+
+    if (g_screen_locked.exchange(true)) {
+        Log("INFO", "🔒 [ScreenLock] Screen is already locked; updated display message.");
+#ifdef _WIN32
+        if (g_curtain_hwnd && IsWindow(g_curtain_hwnd)) {
+            InvalidateRect(g_curtain_hwnd, NULL, TRUE);
+        }
+#endif
+        return;
+    }
+
+    Log("INFO", "🔒 [ScreenLock] Activating classroom screen & input lockout...");
+
+#ifdef _WIN32
+    if (g_curtain_thread.joinable()) {
+        g_curtain_thread.join();
+    }
+
+    g_curtain_thread = std::thread([]() {
+        HINSTANCE hInstance = GetModuleHandle(NULL);
+        WNDCLASSW wc = {0};
+        wc.lpfnWndProc = CurtainWndProc;
+        wc.hInstance = hInstance;
+        wc.lpszClassName = L"GridSightCurtainClass";
+        wc.hCursor = LoadCursor(NULL, IDC_ARROW);
+        RegisterClassW(&wc);
+
+        int screen_w = GetSystemMetrics(SM_CXSCREEN);
+        int screen_h = GetSystemMetrics(SM_CYSCREEN);
+
+        HWND hwnd = CreateWindowExW(
+            WS_EX_TOPMOST | WS_EX_TOOLWINDOW,
+            L"GridSightCurtainClass",
+            L"GridSight 課堂專注模式",
+            WS_POPUP | WS_VISIBLE,
+            0, 0, screen_w, screen_h,
+            NULL, NULL, hInstance, NULL
+        );
+
+        if (hwnd) {
+            g_curtain_hwnd = hwnd;
+            // Install low-level keyboard hook
+            g_keyboard_hook = SetWindowsHookExW(WH_KEYBOARD_LL, LowLevelKeyboardProc, hInstance, 0);
+
+            SetWindowPos(hwnd, HWND_TOPMOST, 0, 0, screen_w, screen_h, SWP_SHOWWINDOW);
+            SetForegroundWindow(hwnd);
+            UpdateWindow(hwnd);
+
+            MSG msg;
+            while (GetMessageW(&msg, NULL, 0, 0)) {
+                TranslateMessage(&msg);
+                DispatchMessageW(&msg);
+            }
+
+            if (g_keyboard_hook) {
+                UnhookWindowsHookEx(g_keyboard_hook);
+                g_keyboard_hook = NULL;
+            }
+        }
+    });
+#endif
+}
+
+void Utils::UnlockScreen() {
+    if (!g_screen_locked.exchange(false)) {
+        return;
+    }
+    Log("INFO", "🔓 [ScreenLock] Unlocking screen and restoring student desktop.");
+#ifdef _WIN32
+    if (g_curtain_hwnd && IsWindow(g_curtain_hwnd)) {
+        PostMessageW(g_curtain_hwnd, WM_CLOSE, 0, 0);
+    }
+#endif
+}
+
+bool Utils::IsScreenLocked() {
+    return g_screen_locked.load();
+}
+
+void Utils::SetShowcaseToast(bool active) {
+    if (g_showcase_toast_active.exchange(active) == active) {
+        return;
+    }
+
+    Log("INFO", active ? "💡 [Showcase] Showing bottom-right showcase toast." : "💡 [Showcase] Hiding showcase toast.");
+
+#ifdef _WIN32
+    if (active) {
+        if (g_showcase_thread.joinable()) {
+            g_showcase_thread.join();
+        }
+
+        g_showcase_thread = std::thread([]() {
+            HINSTANCE hInstance = GetModuleHandle(NULL);
+            WNDCLASSW wc = {0};
+            wc.lpfnWndProc = ShowcaseWndProc;
+            wc.hInstance = hInstance;
+            wc.lpszClassName = L"GridSightShowcaseClass";
+            wc.hCursor = LoadCursor(NULL, IDC_ARROW);
+            RegisterClassW(&wc);
+
+            int screen_w = GetSystemMetrics(SM_CXSCREEN);
+            int screen_h = GetSystemMetrics(SM_CYSCREEN);
+            int w = 340;
+            int h = 60;
+            int x = screen_w - w - 24;
+            int y = screen_h - h - 48; // Near bottom-right corner
+
+            HWND hwnd = CreateWindowExW(
+                WS_EX_TOPMOST | WS_EX_TOOLWINDOW | WS_EX_NOACTIVATE,
+                L"GridSightShowcaseClass",
+                L"GridSight Showcase",
+                WS_POPUP | WS_VISIBLE,
+                x, y, w, h,
+                NULL, NULL, hInstance, NULL
+            );
+
+            if (hwnd) {
+                g_showcase_hwnd = hwnd;
+                SetWindowPos(hwnd, HWND_TOPMOST, x, y, w, h, SWP_SHOWWINDOW | SWP_NOACTIVATE);
+                UpdateWindow(hwnd);
+
+                MSG msg;
+                while (g_showcase_toast_active.load() && GetMessageW(&msg, NULL, 0, 0)) {
+                    TranslateMessage(&msg);
+                    DispatchMessageW(&msg);
+                }
+
+                if (IsWindow(hwnd)) {
+                    DestroyWindow(hwnd);
+                }
+            }
+        });
+    } else {
+        if (g_showcase_hwnd && IsWindow(g_showcase_hwnd)) {
+            PostMessageW(g_showcase_hwnd, WM_CLOSE, 0, 0);
+        }
+    }
+#endif
+}
+
+bool Utils::IsShowcaseActive() {
+    return g_showcase_toast_active.load();
+}
+
+// --- Assignment Drop Zone (Feature 2) ---
+struct AssignmentConfig {
+    std::string id;
+    std::string title;
+    std::string allowed_exts;
+    int max_size_mb = 50;
+    std::string upload_url;
+    std::string token;
+};
+
+static std::atomic<bool> g_assignment_active{false};
+static std::mutex g_assignment_mutex;
+static AssignmentConfig g_assignment_config;
+
+#ifdef _WIN32
+static std::wstring g_assignment_status_text = L"請將作業檔案拖曳至此處放開即可繳交";
+static COLORREF g_assignment_status_color = RGB(56, 189, 248); // Sky-400
+static bool g_assignment_uploading = false;
+static HWND g_assignment_hwnd = NULL;
+static std::thread g_assignment_thread;
+
+static void PerformAssignmentUpload(const std::wstring& filePath, HWND hwnd) {
+    g_assignment_uploading = true;
+    size_t lastSlash = filePath.find_last_of(L"\\/");
+    std::wstring wFilename = (lastSlash != std::wstring::npos) ? filePath.substr(lastSlash + 1) : filePath;
+
+    // Convert filename to UTF-8
+    int fnLen = WideCharToMultiByte(CP_UTF8, 0, wFilename.c_str(), -1, NULL, 0, NULL, NULL);
+    std::string filenameUtf8;
+    if (fnLen > 0) {
+        filenameUtf8.resize(fnLen - 1);
+        WideCharToMultiByte(CP_UTF8, 0, wFilename.c_str(), -1, &filenameUtf8[0], fnLen, NULL, NULL);
+    }
+
+    g_assignment_status_text = L"⏳ 正在上傳：" + wFilename + L"...";
+    g_assignment_status_color = RGB(245, 158, 11); // Amber-500
+    if (hwnd && IsWindow(hwnd)) InvalidateRect(hwnd, NULL, TRUE);
+
+    AssignmentConfig config;
+    {
+        std::lock_guard<std::mutex> lock(g_assignment_mutex);
+        config = g_assignment_config;
+    }
+
+    // Check allowed extensions
+    if (!config.allowed_exts.empty() && config.allowed_exts != "*") {
+        size_t dotPos = filenameUtf8.find_last_of('.');
+        std::string ext = (dotPos != std::string::npos) ? filenameUtf8.substr(dotPos + 1) : "";
+        for (char& c : ext) c = (char)tolower((unsigned char)c);
+
+        bool allowed = false;
+        std::stringstream ss(config.allowed_exts);
+        std::string tok;
+        while (std::getline(ss, tok, ',')) {
+            while (!tok.empty() && isspace((unsigned char)tok.front())) tok.erase(tok.begin());
+            while (!tok.empty() && isspace((unsigned char)tok.back())) tok.pop_back();
+            if (!tok.empty() && tok.front() == '.') tok.erase(tok.begin());
+            for (char& c : tok) c = (char)tolower((unsigned char)c);
+            if (tok == ext || tok == "*") {
+                allowed = true;
+                break;
+            }
+        }
+        if (!allowed) {
+            g_assignment_uploading = false;
+            g_assignment_status_text = L"❌ 格式不符 (僅限: " + std::wstring(config.allowed_exts.begin(), config.allowed_exts.end()) + L")";
+            g_assignment_status_color = RGB(239, 68, 68);
+            if (hwnd && IsWindow(hwnd)) InvalidateRect(hwnd, NULL, TRUE);
+            MessageBeep(MB_ICONHAND);
+            return;
+        }
+    }
+
+    // Open file
+    HANDLE hFile = CreateFileW(filePath.c_str(), GENERIC_READ, FILE_SHARE_READ, NULL, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, NULL);
+    if (hFile == INVALID_HANDLE_VALUE) {
+        g_assignment_uploading = false;
+        g_assignment_status_text = L"❌ 無法讀取該檔案";
+        g_assignment_status_color = RGB(239, 68, 68);
+        if (hwnd && IsWindow(hwnd)) InvalidateRect(hwnd, NULL, TRUE);
+        MessageBeep(MB_ICONHAND);
+        return;
+    }
+
+    LARGE_INTEGER liSize;
+    if (!GetFileSizeEx(hFile, &liSize)) {
+        CloseHandle(hFile);
+        g_assignment_uploading = false;
+        g_assignment_status_text = L"❌ 無法讀取檔案大小";
+        g_assignment_status_color = RGB(239, 68, 68);
+        if (hwnd && IsWindow(hwnd)) InvalidateRect(hwnd, NULL, TRUE);
+        return;
+    }
+    int64_t fileSize = liSize.QuadPart;
+    if (fileSize > (int64_t)config.max_size_mb * 1024 * 1024) {
+        CloseHandle(hFile);
+        g_assignment_uploading = false;
+        g_assignment_status_text = L"❌ 檔案超過大小上限 (" + std::to_wstring(config.max_size_mb) + L" MB)";
+        g_assignment_status_color = RGB(239, 68, 68);
+        if (hwnd && IsWindow(hwnd)) InvalidateRect(hwnd, NULL, TRUE);
+        MessageBeep(MB_ICONHAND);
+        return;
+    }
+
+    // Parse URL
+    std::string uploadUrl = config.upload_url;
+    std::string proto = "http://";
+    if (uploadUrl.find(proto) == 0) uploadUrl = uploadUrl.substr(proto.length());
+    size_t slashPos = uploadUrl.find('/');
+    std::string hostPort = (slashPos != std::string::npos) ? uploadUrl.substr(0, slashPos) : uploadUrl;
+    std::string reqPath = (slashPos != std::string::npos) ? uploadUrl.substr(slashPos) : "/api/assignments/upload";
+    std::string host = hostPort;
+    int port = 3000;
+    size_t colonPos = hostPort.find(':');
+    if (colonPos != std::string::npos) {
+        host = hostPort.substr(0, colonPos);
+        try { port = std::stoi(hostPort.substr(colonPos + 1)); } catch(...) {}
+    }
+
+    SOCKET s = socket(AF_INET, SOCK_STREAM, 0);
+    if (s == INVALID_SOCKET) {
+        CloseHandle(hFile);
+        g_assignment_uploading = false;
+        g_assignment_status_text = L"❌ 網路連線建立失敗";
+        g_assignment_status_color = RGB(239, 68, 68);
+        if (hwnd && IsWindow(hwnd)) InvalidateRect(hwnd, NULL, TRUE);
+        return;
+    }
+
+    DWORD to = 30000;
+    setsockopt(s, SOL_SOCKET, SO_SNDTIMEO, (const char*)&to, sizeof(to));
+    setsockopt(s, SOL_SOCKET, SO_RCVTIMEO, (const char*)&to, sizeof(to));
+
+    sockaddr_in addr = {0};
+    addr.sin_family = AF_INET;
+    addr.sin_port = htons(port);
+    inet_pton(AF_INET, host.c_str(), &addr.sin_addr);
+
+    if (connect(s, (sockaddr*)&addr, sizeof(addr)) == SOCKET_ERROR) {
+        closesocket(s);
+        CloseHandle(hFile);
+        g_assignment_uploading = false;
+        g_assignment_status_text = L"❌ 無法連線至教師端伺服器";
+        g_assignment_status_color = RGB(239, 68, 68);
+        if (hwnd && IsWindow(hwnd)) InvalidateRect(hwnd, NULL, TRUE);
+        return;
+    }
+
+    NetworkInfo net = Utils::GetSystemNetworkInfo();
+    std::string fn_b64 = Utils::Base64Encode((const uint8_t*)filenameUtf8.data(), filenameUtf8.size());
+
+    std::ostringstream oss;
+    oss << "POST " << reqPath << " HTTP/1.1\r\n"
+        << "Host: " << host << ":" << port << "\r\n"
+        << "X-Agent-MAC: " << net.mac << "\r\n"
+        << "X-Agent-IP: " << net.ip << "\r\n"
+        << "X-Auth-Token: " << config.token << "\r\n"
+        << "X-Assignment-Id: " << config.id << "\r\n"
+        << "X-Filename: " << fn_b64 << "\r\n"
+        << "Content-Type: application/octet-stream\r\n"
+        << "Content-Length: " << fileSize << "\r\n"
+        << "Connection: close\r\n\r\n";
+    std::string headers = oss.str();
+    send(s, headers.c_str(), (int)headers.size(), 0);
+
+    char buf[65536];
+    DWORD bytesRead = 0;
+    while (ReadFile(hFile, buf, sizeof(buf), &bytesRead, NULL) && bytesRead > 0) {
+        int sent = send(s, buf, (int)bytesRead, 0);
+        if (sent <= 0) break;
+    }
+    CloseHandle(hFile);
+
+    char respBuf[512] = {0};
+    int rec = recv(s, respBuf, sizeof(respBuf) - 1, 0);
+    closesocket(s);
+
+    g_assignment_uploading = false;
+    if (rec > 0) {
+        std::string resp(respBuf, rec);
+        if (resp.find(" 200 ") != std::string::npos) {
+            int kb = (int)(fileSize / 1024);
+            g_assignment_status_text = L"✅ 繳交成功！" + wFilename + L" (" + std::to_wstring(kb) + L" KB)";
+            g_assignment_status_color = RGB(34, 197, 94); // Emerald-500
+            if (hwnd && IsWindow(hwnd)) InvalidateRect(hwnd, NULL, TRUE);
+            MessageBeep(MB_ICONASTERISK);
+            return;
+        }
+    }
+
+    g_assignment_status_text = L"❌ 伺服器接收失敗或格式錯誤";
+    g_assignment_status_color = RGB(239, 68, 68);
+    if (hwnd && IsWindow(hwnd)) InvalidateRect(hwnd, NULL, TRUE);
+    MessageBeep(MB_ICONHAND);
+}
+
+static LRESULT CALLBACK AssignmentDropWndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) {
+    switch (msg) {
+    case WM_CREATE: {
+        DragAcceptFiles(hwnd, TRUE);
+        return 0;
+    }
+    case WM_DROPFILES: {
+        HDROP hDrop = (HDROP)wParam;
+        UINT fileCount = DragQueryFileW(hDrop, 0xFFFFFFFF, NULL, 0);
+        if (fileCount > 0 && !g_assignment_uploading) {
+            wchar_t szFile[MAX_PATH];
+            if (DragQueryFileW(hDrop, 0, szFile, MAX_PATH) > 0) {
+                std::wstring filePath(szFile);
+                std::thread([filePath, hwnd]() {
+                    PerformAssignmentUpload(filePath, hwnd);
+                }).detach();
+            }
+        }
+        DragFinish(hDrop);
+        return 0;
+    }
+    case WM_PAINT: {
+        PAINTSTRUCT ps;
+        HDC hdc = BeginPaint(hwnd, &ps);
+
+        RECT rc;
+        GetClientRect(hwnd, &rc);
+        int w = rc.right - rc.left;
+        int h = rc.bottom - rc.top;
+
+        HDC memDC = CreateCompatibleDC(hdc);
+        HBITMAP memBitmap = CreateCompatibleBitmap(hdc, w, h);
+        HBITMAP oldBitmap = (HBITMAP)SelectObject(memDC, memBitmap);
+
+        // Background: Slate-900 (RGB 15, 23, 42)
+        HBRUSH bgBrush = CreateSolidBrush(RGB(15, 23, 42));
+        FillRect(memDC, &rc, bgBrush);
+        DeleteObject(bgBrush);
+
+        SetBkMode(memDC, TRANSPARENT);
+
+        // Header Background
+        RECT headerRc = { 0, 0, w, 52 };
+        HBRUSH headerBrush = CreateSolidBrush(RGB(30, 41, 59)); // Slate-800
+        FillRect(memDC, &headerRc, headerBrush);
+        DeleteObject(headerBrush);
+
+        // Header Border
+        HPEN hPen = CreatePen(PS_SOLID, 1, RGB(51, 65, 85));
+        HPEN oldPen = (HPEN)SelectObject(memDC, hPen);
+        MoveToEx(memDC, 0, 52, NULL);
+        LineTo(memDC, w, 52);
+        SelectObject(memDC, oldPen);
+        DeleteObject(hPen);
+
+        AssignmentConfig cfg;
+        {
+            std::lock_guard<std::mutex> lock(g_assignment_mutex);
+            cfg = g_assignment_config;
+        }
+
+        std::wstring wTitle = L"課堂作業收取箱";
+        if (!cfg.title.empty()) {
+            int len = MultiByteToWideChar(CP_UTF8, 0, cfg.title.c_str(), -1, NULL, 0);
+            if (len > 0) {
+                wTitle.resize(len - 1);
+                MultiByteToWideChar(CP_UTF8, 0, cfg.title.c_str(), -1, &wTitle[0], len);
+            }
+        }
+
+        SetTextColor(memDC, RGB(241, 245, 249)); // Slate-100
+        HFONT hTitleFont = CreateFontW(17, 0, 0, 0, FW_BOLD, FALSE, FALSE, FALSE, DEFAULT_CHARSET,
+                                       OUT_DEFAULT_PRECIS, CLIP_DEFAULT_PRECIS, DEFAULT_QUALITY,
+                                       DEFAULT_PITCH | FF_SWISS, L"Microsoft JhengHei");
+        HFONT oldF = (HFONT)SelectObject(memDC, hTitleFont);
+        RECT titleRc = { 16, 14, w - 16, 40 };
+        DrawTextW(memDC, wTitle.c_str(), -1, &titleRc, DT_LEFT | DT_SINGLELINE | DT_END_ELLIPSIS);
+
+        // Dashed Drop Area Box
+        RECT dropRc = { 16, 64, w - 16, h - 48 };
+        HPEN dashPen = CreatePen(PS_DASH, 2, RGB(56, 189, 248)); // Sky-400
+        HBRUSH dropBrush = CreateSolidBrush(RGB(2, 6, 23)); // Slate-950
+        oldPen = (HPEN)SelectObject(memDC, dashPen);
+        HBRUSH oldB = (HBRUSH)SelectObject(memDC, dropBrush);
+        RoundRect(memDC, dropRc.left, dropRc.top, dropRc.right, dropRc.bottom, 12, 12);
+        SelectObject(memDC, oldPen);
+        SelectObject(memDC, oldB);
+        DeleteObject(dashPen);
+        DeleteObject(dropBrush);
+
+        // Center drop icon & instructions
+        SetTextColor(memDC, RGB(186, 230, 253)); // Sky-200
+        HFONT hDropFont = CreateFontW(15, 0, 0, 0, FW_BOLD, FALSE, FALSE, FALSE, DEFAULT_CHARSET,
+                                      OUT_DEFAULT_PRECIS, CLIP_DEFAULT_PRECIS, DEFAULT_QUALITY,
+                                      DEFAULT_PITCH | FF_SWISS, L"Microsoft JhengHei");
+        SelectObject(memDC, hDropFont);
+        RECT dropPromptRc = { dropRc.left, dropRc.top + 20, dropRc.right, dropRc.top + 42 };
+        DrawTextW(memDC, L"⬇️ 請將作業檔案拖曳至此處放開", -1, &dropPromptRc, DT_CENTER | DT_SINGLELINE);
+
+        // Allowed formats text
+        std::wstring wExt = cfg.allowed_exts.empty() ? L"格式不限" : std::wstring(cfg.allowed_exts.begin(), cfg.allowed_exts.end());
+        std::wstring limitText = L"限制格式: " + wExt + L" (上限 " + std::to_wstring(cfg.max_size_mb) + L"MB · 可重複拖曳覆蓋更新)";
+        SetTextColor(memDC, RGB(148, 163, 184)); // Slate-400
+        HFONT hLimitFont = CreateFontW(12, 0, 0, 0, FW_NORMAL, FALSE, FALSE, FALSE, DEFAULT_CHARSET,
+                                       OUT_DEFAULT_PRECIS, CLIP_DEFAULT_PRECIS, DEFAULT_QUALITY,
+                                       DEFAULT_PITCH | FF_SWISS, L"Microsoft JhengHei");
+        SelectObject(memDC, hLimitFont);
+        RECT limitRc = { dropRc.left, dropRc.top + 46, dropRc.right, dropRc.top + 66 };
+        DrawTextW(memDC, limitText.c_str(), -1, &limitRc, DT_CENTER | DT_SINGLELINE);
+
+        // Bottom status line
+        SetTextColor(memDC, g_assignment_status_color);
+        HFONT hStatusFont = CreateFontW(13, 0, 0, 0, FW_BOLD, FALSE, FALSE, FALSE, DEFAULT_CHARSET,
+                                        OUT_DEFAULT_PRECIS, CLIP_DEFAULT_PRECIS, DEFAULT_QUALITY,
+                                        DEFAULT_PITCH | FF_SWISS, L"Microsoft JhengHei");
+        SelectObject(memDC, hStatusFont);
+        RECT statusRc = { 16, h - 38, w - 16, h - 12 };
+        DrawTextW(memDC, g_assignment_status_text.c_str(), -1, &statusRc, DT_CENTER | DT_SINGLELINE | DT_END_ELLIPSIS);
+
+        SelectObject(memDC, oldF);
+        DeleteObject(hTitleFont);
+        DeleteObject(hDropFont);
+        DeleteObject(hLimitFont);
+        DeleteObject(hStatusFont);
+
+        BitBlt(hdc, 0, 0, w, h, memDC, 0, 0, SRCCOPY);
+        SelectObject(memDC, oldBitmap);
+        DeleteObject(memBitmap);
+        DeleteDC(memDC);
+
+        EndPaint(hwnd, &ps);
+        return 0;
+    }
+    case WM_CLOSE: {
+        ShowWindow(hwnd, SW_HIDE);
+        return 0;
+    }
+    case WM_DESTROY: {
+        g_assignment_hwnd = NULL;
+        PostQuitMessage(0);
+        return 0;
+    }
+    }
+    return DefWindowProcW(hwnd, msg, wParam, lParam);
+}
+#endif
+
+void Utils::ShowAssignmentDropZone(const std::string& id, const std::string& title, const std::string& allowed_exts, int max_size_mb, const std::string& upload_url, const std::string& token) {
+    {
+        std::lock_guard<std::mutex> lock(g_assignment_mutex);
+        g_assignment_config.id = id;
+        g_assignment_config.title = title;
+        g_assignment_config.allowed_exts = allowed_exts;
+        g_assignment_config.max_size_mb = max_size_mb > 0 ? max_size_mb : 50;
+        g_assignment_config.upload_url = upload_url;
+        g_assignment_config.token = token;
+#ifdef _WIN32
+        g_assignment_status_text = L"請將作業檔案拖曳至此處放開即可繳交";
+        g_assignment_status_color = RGB(56, 189, 248);
+#endif
+    }
+    g_assignment_active.store(true);
+
+#ifdef _WIN32
+    if (g_assignment_hwnd && IsWindow(g_assignment_hwnd)) {
+        ShowWindow(g_assignment_hwnd, SW_SHOW);
+        SetForegroundWindow(g_assignment_hwnd);
+        InvalidateRect(g_assignment_hwnd, NULL, TRUE);
+        return;
+    }
+
+    if (g_assignment_thread.joinable()) {
+        g_assignment_thread.join();
+    }
+
+    g_assignment_thread = std::thread([]() {
+        HINSTANCE hInstance = GetModuleHandle(NULL);
+        WNDCLASSW wc = {0};
+        wc.lpfnWndProc = AssignmentDropWndProc;
+        wc.hInstance = hInstance;
+        wc.lpszClassName = L"GridSightAssignmentDropZone";
+        wc.hCursor = LoadCursor(NULL, IDC_ARROW);
+        RegisterClassW(&wc);
+
+        int screen_w = GetSystemMetrics(SM_CXSCREEN);
+        int screen_h = GetSystemMetrics(SM_CYSCREEN);
+        int w = 460;
+        int h = 240;
+        int x = (screen_w - w) / 2;
+        int y = (screen_h - h) / 2;
+
+        HWND hwnd = CreateWindowExW(
+            WS_EX_TOPMOST,
+            L"GridSightAssignmentDropZone",
+            L"GridSight 作業收取箱",
+            WS_POPUP | WS_CAPTION | WS_SYSMENU | WS_VISIBLE,
+            x, y, w, h,
+            NULL, NULL, hInstance, NULL
+        );
+
+        if (hwnd) {
+            g_assignment_hwnd = hwnd;
+            SetForegroundWindow(hwnd);
+            UpdateWindow(hwnd);
+
+            MSG msg;
+            while (g_assignment_active.load() && GetMessageW(&msg, NULL, 0, 0)) {
+                TranslateMessage(&msg);
+                DispatchMessageW(&msg);
+            }
+
+            if (IsWindow(hwnd)) {
+                DestroyWindow(hwnd);
+            }
+        }
+    });
+#endif
+}
+
+void Utils::HideAssignmentDropZone() {
+    g_assignment_active.store(false);
+#ifdef _WIN32
+    if (g_assignment_hwnd && IsWindow(g_assignment_hwnd)) {
+        PostMessageW(g_assignment_hwnd, WM_CLOSE, 0, 0);
+    }
+#endif
+}
+
+bool Utils::IsAssignmentActive() {
+    return g_assignment_active.load();
+}
+
 } // namespace GridSight
+

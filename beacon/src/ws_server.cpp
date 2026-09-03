@@ -307,6 +307,7 @@ void WebSocketStreamer::HandleCommandMessage(uintptr_t sock_fd, const std::strin
     } else if (action == "STOP_STREAM") {
         Utils::Log("INFO", "🛑 [Stream Command] Received STOP_STREAM from Teacher Console, pausing stream");
         streaming_active_ = false;
+        Utils::SetShowcaseToast(false);
     } else if (action == "STOP_BROADCAST") {
         Utils::Log("INFO", "🛑 [Broadcast Command] Received STOP_BROADCAST from Teacher Console, closing overlay window immediately");
         RTPReceiver::RequestCloseOverlay();
@@ -333,6 +334,38 @@ void WebSocketStreamer::HandleCommandMessage(uintptr_t sock_fd, const std::strin
     } else if (action == "CANCEL_SHUTDOWN") {
         Utils::Log("INFO", "🛑 [Power Command] Received CANCEL_SHUTDOWN request from Teacher Console");
         Utils::CancelShutdown();
+    } else if (action == "LOCK_SCREEN") {
+        const std::string msg = Utils::ExtractJsonField(message, "message");
+        Utils::Log("INFO", "🔒 [Lock Command] Received LOCK_SCREEN from Teacher Console (msg: " + (msg.empty() ? "default" : msg) + ")");
+        Utils::LockScreen(msg);
+    } else if (action == "UNLOCK_SCREEN") {
+        Utils::Log("INFO", "🔓 [Lock Command] Received UNLOCK_SCREEN from Teacher Console");
+        Utils::UnlockScreen();
+    } else if (action == "SHOWCASE_START") {
+        Utils::Log("INFO", "💡 [Showcase Command] Received SHOWCASE_START from Teacher Console");
+        Utils::SetShowcaseToast(true);
+    } else if (action == "SHOWCASE_STOP") {
+        Utils::Log("INFO", "💡 [Showcase Command] Received SHOWCASE_STOP from Teacher Console");
+        Utils::SetShowcaseToast(false);
+    } else if (action == "COLLECT_ASSIGNMENT") {
+        const std::string id = Utils::ExtractJsonField(message, "id");
+        const std::string title = Utils::ExtractJsonField(message, "title");
+        const std::string allowed_exts = Utils::ExtractJsonField(message, "allowedExts");
+        const std::string max_mb_str = Utils::ExtractJsonField(message, "maxSizeMb");
+        const std::string upload_url = Utils::ExtractJsonField(message, "uploadUrl");
+        int max_mb = 50;
+        try {
+            if (!max_mb_str.empty()) max_mb = std::stoi(max_mb_str);
+        } catch (...) {
+            max_mb = 50;
+        }
+        Utils::Log("INFO", "📁 [Assignment Command] Received COLLECT_ASSIGNMENT: " + title);
+        std::thread([id, title, allowed_exts, max_mb, upload_url]() {
+            Utils::ShowAssignmentDropZone(id, title, allowed_exts, max_mb, upload_url, TokenManager::Instance().GetSessionToken());
+        }).detach();
+    } else if (action == "STOP_ASSIGNMENT") {
+        Utils::Log("INFO", "📁 [Assignment Command] Received STOP_ASSIGNMENT from Teacher Console");
+        Utils::HideAssignmentDropZone();
     } else if (action == "GET_HIGHRES_SNAPSHOT") {
         Utils::Log("INFO", "📸 [Command] Received GET_HIGHRES_SNAPSHOT request from Teacher Console");
         FrameData frame;

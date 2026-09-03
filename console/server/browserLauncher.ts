@@ -8,7 +8,15 @@ export function validateUrl(url: string): boolean {
   if (!url || typeof url !== 'string') return false;
   try {
     const parsed = new URL(url);
-    return parsed.protocol === 'http:' || parsed.protocol === 'https:';
+    if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') {
+      return false;
+    }
+    // Reject shell metacharacters to prevent command injection
+    const shellMetachars = /[&|;<>()^"'$`\\]/;
+    if (shellMetachars.test(url)) {
+      return false;
+    }
+    return true;
   } catch {
     return false;
   }

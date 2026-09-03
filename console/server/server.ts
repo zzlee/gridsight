@@ -985,7 +985,7 @@ app.post('/api/assignments/start', requireTeacherAuth, async (req, res) => {
   const maxSizeMb = typeof req.body?.maxSizeMb === 'number' && req.body.maxSizeMb > 0 ? req.body.maxSizeMb : 50;
   const targets = req.body?.targets;
 
-  const id = `as-${Date.now().toString(36)}-${Math.random().toString(36).substring(2, 6)}`;
+  const id = `as-${Date.now().toString(36)}-${crypto.randomBytes(16).toString('hex')}`;
   const sessionDir = path.join(ASSIGNMENTS_DIR, id);
   await fs.promises.mkdir(sessionDir, { recursive: true });
 
@@ -1565,7 +1565,7 @@ app.post(
       }
       const safeName = path.basename(filename).replace(/[/\\?%*:|"<>]/g, '_');
       const ext = path.extname(safeName).toLowerCase() || '.mp4';
-      const fileId = Date.now().toString(36) + Math.random().toString(36).substring(2, 6);
+      const fileId = Date.now().toString(36) + crypto.randomBytes(16).toString('hex');
       const storedName = `media_${fileId}${ext}`;
       const savedPath = path.join(BROADCAST_TEST_DIR, storedName);
 
@@ -1705,7 +1705,7 @@ app.post(
         }
       }
 
-      const fileId = Date.now().toString(36) + Math.random().toString(36).substring(2, 6);
+      const fileId = Date.now().toString(36) + crypto.randomBytes(16).toString('hex');
       const savedPath = path.join(UPLOADS_DIR, `${fileId}_${safeFilename}`);
 
       let totalBytes = 0;

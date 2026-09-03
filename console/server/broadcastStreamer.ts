@@ -183,7 +183,9 @@ export class TeacherBroadcastStreamer {
       quality: this.currentQuality || 'high',
       bitrateKbps: this.currentBitrateKbps,
       record: enable,
-      recordFile: enable && recordingsDir ? path.join(recordingsDir, `GridSight_Record_${new Date().toISOString().replace(/[:.]/g, '-').slice(0, 19)}.mp4`) : undefined,
+      ...(enable && recordingsDir
+        ? { recordFile: path.join(recordingsDir, `GridSight_Record_${new Date().toISOString().replace(/[:.]/g, '-').slice(0, 19)}.mp4`) }
+        : {}),
     };
     this.stopStream();
     await new Promise((r) => setTimeout(r, 200));
@@ -304,7 +306,7 @@ export class TeacherBroadcastStreamer {
                 const m = line.match(/^READY\s+(\d+)\s+(\d+)\s+(\d+)(?:\s+(\w+))?/);
                 if (m) {
                   clearTimeout(timer);
-                  resolve({ w: parseInt(m[1], 10), h: parseInt(m[2], 10), method: m[4] || 'DXGI' });
+                  resolve({ w: parseInt(m[1] ?? '0', 10), h: parseInt(m[2] ?? '0', 10), method: m[4] || 'DXGI' });
                   return;
                 }
               }
@@ -521,7 +523,7 @@ export class TeacherBroadcastStreamer {
     if (sourceType === 'screen' && !this.captureProcess) {
       this.mouseOverlay.start();
       this.inputRtpStreamer.start({
-        localIp: localaddr || undefined,
+        ...(localaddr ? { localIp: localaddr } : {}),
         multicastIp: multicastIp,
       });
     }

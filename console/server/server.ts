@@ -44,7 +44,7 @@ const APP_VERSION: string = (() => {
       if (pkg.version) return pkg.version;
     } catch { /* ignore */ }
   }
-  return '5.8.7'; // fallback
+  return '5.8.8'; // fallback
 })();
 
 const app = express();
@@ -243,7 +243,7 @@ wss.on('connection', (ws, req) => {
       }
       const rec = activeStudentRecordings.get(mac);
       if (rec) {
-        try { rec.process.stdin.end(); } catch {}
+        try { rec.process.stdin?.end(); } catch {}
         activeStudentRecordings.delete(mac);
         logger.info(`[Student Record] Student ${mac} disconnected, finished recording ${rec.filename}`);
       }
@@ -705,7 +705,7 @@ app.get('/api/record/list', requireTeacherAuth, async (req, res) => {
 });
 
 app.get('/api/record/download/:filename', requireTeacherAuth, (req, res) => {
-  const rawFilename = req.params.filename;
+  const rawFilename = req.params.filename ?? '';
   const safeFilename = path.basename(rawFilename);
   const filePath = path.join(RECORDINGS_DIR, safeFilename);
   const resolved = path.resolve(filePath);
@@ -719,7 +719,7 @@ app.get('/api/record/download/:filename', requireTeacherAuth, (req, res) => {
 });
 
 app.delete('/api/record/:filename', requireTeacherAuth, async (req, res) => {
-  const rawFilename = req.params.filename;
+  const rawFilename = req.params.filename ?? '';
   const safeFilename = path.basename(rawFilename);
   const filePath = path.join(RECORDINGS_DIR, safeFilename);
   const resolved = path.resolve(filePath);
@@ -854,7 +854,7 @@ app.post('/api/record/student/stop', requireTeacherAuth, async (req, res) => {
   activeStudentRecordings.delete(mac);
 
   try {
-    rec.process.stdin.end();
+    rec.process.stdin?.end();
   } catch {}
 
   // Wait brief moment for FFmpeg to finalize

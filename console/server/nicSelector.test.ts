@@ -41,17 +41,17 @@ try {
   setMockInterfaces({
     lo: [
       { address: '127.0.0.1', netmask: '255.0.0.0', family: 'IPv4', mac: '00:00:00:00:00:00', internal: true, cidr: '127.0.0.1/8' },
-      { address: '::1', netmask: 'ffff:ffff:ffff:ffff:ffff:ffff:ffff:ffff', family: 'IPv6', mac: '00:00:00:00:00:00', internal: true, cidr: '::1/128' },
+      { address: '::1', netmask: 'ffff:ffff:ffff:ffff:ffff:ffff:ffff:ffff', family: 'IPv6', mac: '00:00:00:00:00:00', internal: true, cidr: '::1/128', scopeid: 0 },
     ],
     eth0: [
-      { address: 'fe80::1234', netmask: 'ffff:ffff:ffff:ffff::', family: 'IPv6', mac: '11:22:33:44:55:66', internal: false, cidr: 'fe80::1234/64' },
+      { address: 'fe80::1234', netmask: 'ffff:ffff:ffff:ffff::', family: 'IPv6', mac: '11:22:33:44:55:66', internal: false, cidr: 'fe80::1234/64', scopeid: 1 },
       { address: '192.168.1.10', netmask: '255.255.255.0', family: 'IPv4', mac: '11:22:33:44:55:66', internal: false, cidr: '192.168.1.10/24' },
     ],
   });
 
   result = detectNetworkInterfaces();
   assert(result.length === 1, 'Filters out IPv6 and internal IPv4 interfaces');
-  assert(result[0].name === 'eth0' && result[0].ip === '192.168.1.10', 'Correctly captures external IPv4 interface details');
+  assert(result[0]?.name === 'eth0' && result[0]?.ip === '192.168.1.10', 'Correctly captures external IPv4 interface details');
 
   // 3. Virtual interfaces detection
   const virtualNames = [

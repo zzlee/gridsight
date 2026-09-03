@@ -35,6 +35,8 @@ export interface DiscoveredAgent {
   username?: string;
   token?: string;
   activeWindow?: string;
+  status?: string;
+  seatNo?: string;
   specs?: DeviceSystemInfo;
   thumbnailBase64?: string;
   lastSeen: number;

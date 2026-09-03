@@ -16,7 +16,7 @@ console.log('Running TokenAuthority tests...\n');
 
 // 1. generateToken, getToken, validateToken basic functionality
 const auth = new TokenAuthority();
-const mac1 = 'AA:BB:CC:DD:EE:FF';
+const mac1: string = 'AA:BB:CC:DD:EE:FF';
 const ip1 = '192.168.1.50';
 
 assert(auth.getToken(mac1) === undefined, 'getToken returns undefined for ungenerated MAC');
@@ -33,7 +33,7 @@ const token1Reuse = auth.generateToken(mac1, ip1);
 assert(token1Reuse === token1, 'generateToken reuses existing token for same MAC');
 
 // Different MAC gets different token
-const mac2 = '11:22:33:44:55:66';
+const mac2: string = '11:22:33:44:55:66';
 const ip2 = '192.168.1.51';
 const token2 = auth.generateToken(mac2, ip2);
 assert(token2 !== token1, 'generateToken creates distinct tokens for different MACs');

@@ -92,13 +92,14 @@ export async function promptSelectNic(timeoutSec = 6): Promise<{ host: string; i
 
   // If only 1 interface found, auto-select
   if (nics.length === 1) {
-    console.log(`[Network] 偵測到單一網路介面: ${nics[0].name} (${nics[0].ip})，已自動選定。`);
-    return { host: '0.0.0.0', ip: nics[0].ip, nicName: nics[0].name };
+    const only = nics[0]!;
+    console.log(`[Network] 偵測到單一網路介面: ${only.name} (${only.ip})，已自動選定。`);
+    return { host: '0.0.0.0', ip: only.ip, nicName: only.name };
   }
 
   // If non-interactive (Docker, background daemon, or --no-prompt)
   if (!process.stdin.isTTY || process.argv.includes('--no-prompt')) {
-    const best = nics[0];
+    const best = nics[0]!;
     console.log(`[Network] 非互動環境，已自動選定主要網卡: ${best.name} (${best.ip})`);
     return { host: '0.0.0.0', ip: best.ip, nicName: best.name };
   }
@@ -131,10 +132,10 @@ export async function promptSelectNic(timeoutSec = 6): Promise<{ host: string; i
       rl.close();
 
       if (choice === 0) {
-        console.log(`\n  ✅ 已選擇: 全部網卡 (0.0.0.0) - 學生端連線預設使用 ${nics[0].ip}\n`);
-        resolve({ host: '0.0.0.0', ip: nics[0].ip, nicName: '全部網卡 (0.0.0.0)' });
+        console.log(`\n  ✅ 已選擇: 全部網卡 (0.0.0.0) - 學生端連線預設使用 ${nics[0]!.ip}\n`);
+        resolve({ host: '0.0.0.0', ip: nics[0]!.ip, nicName: '全部網卡 (0.0.0.0)' });
       } else {
-        const selected = nics[choice - 1] || nics[0];
+        const selected = nics[choice - 1] || nics[0]!;
         console.log(`\n  ✅ 已選定網卡: [${selected.name}] -> ${selected.ip}\n`);
         resolve({ host: '0.0.0.0', ip: selected.ip, nicName: selected.name });
       }
@@ -146,7 +147,7 @@ export async function promptSelectNic(timeoutSec = 6): Promise<{ host: string; i
       remaining--;
       if (remaining <= 0) {
         readline.cursorTo(process.stdout, 0);
-        process.stdout.write(`\n⏰ 倒數結束，自動選定預設網卡 [1] ${nics[0].name} (${nics[0].ip})\n`);
+        process.stdout.write(`\n⏰ 倒數結束，自動選定預設網卡 [1] ${nics[0]!.name} (${nics[0]!.ip})\n`);
         finalize(1);
       } else {
         readline.cursorTo(process.stdout, 0);
@@ -163,7 +164,7 @@ export async function promptSelectNic(timeoutSec = 6): Promise<{ host: string; i
         if (!isNaN(num) && num >= 0 && num <= nics.length) {
           finalize(num);
         } else {
-          console.log(`\n輸入無效，將使用預設網卡 [1] ${nics[0].name} (${nics[0].ip})`);
+          console.log(`\n輸入無效，將使用預設網卡 [1] ${nics[0]!.name} (${nics[0]!.ip})`);
           finalize(1);
         }
       }

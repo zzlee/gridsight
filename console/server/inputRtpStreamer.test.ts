@@ -88,7 +88,7 @@ async function testLiveNetworkTransmission() {
   await new Promise((r) => setTimeout(r, 100));
 
   assert.ok(receivedPackets.length > 0, 'Receiver should have received at least 1 packet');
-  const rx = receivedPackets[0];
+  const rx = receivedPackets[0]!;
   assert.strictEqual(rx.length, 33, 'Received packet must be exactly 33 bytes');
   assert.strictEqual(rx.readUInt8(0), 0x80, 'RTP Version should be 2');
   assert.strictEqual(rx.readUInt8(1), 0x62, 'RTP Payload Type should be 98');

@@ -44,14 +44,14 @@ export function parseEventLine(line: string): InputEventData | null {
   const parts = trimmed.split(' ');
   if (parts.length < 9) return null;
 
-  const eventType = parseInt(parts[1], 10);
-  const normX = parseInt(parts[2], 10);
-  const normY = parseInt(parts[3], 10);
-  const buttonFlags = parseInt(parts[4], 10);
-  const scrollDelta = parseInt(parts[5], 10);
-  const modifierFlags = parseInt(parts[6], 10);
-  const keyCode = parseInt(parts[7], 10);
-  const timestampMs = parseInt(parts[8], 10);
+  const eventType = parseInt(parts[1] ?? '', 10);
+  const normX = parseInt(parts[2] ?? '', 10);
+  const normY = parseInt(parts[3] ?? '', 10);
+  const buttonFlags = parseInt(parts[4] ?? '', 10);
+  const scrollDelta = parseInt(parts[5] ?? '', 10);
+  const modifierFlags = parseInt(parts[6] ?? '', 10);
+  const keyCode = parseInt(parts[7] ?? '', 10);
+  const timestampMs = parseInt(parts[8] ?? '', 10);
 
   if (isNaN(eventType)) return null;
 

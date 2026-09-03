@@ -37,7 +37,7 @@ export class TeacherInputRtpStreamer {
   private ssrc: number;
   private multicastIp: string;
   private port: number;
-  private localIp?: string;
+  private localIp: string | undefined = undefined;
   private redundantCount: number;
   private heartbeatIntervalMs: number;
   private heartbeatTimer: NodeJS.Timeout | null = null;
@@ -221,10 +221,10 @@ export class TeacherInputRtpStreamer {
 
     const heartbeatEvent: InputEventData = {
       eventType: InputEventType.Heartbeat,
-      normX: this.lastState.normX,
-      normY: this.lastState.normY,
-      buttonFlags: this.lastState.buttonFlags,
-      modifierFlags: this.lastState.modifierFlags,
+      normX: this.lastState.normX ?? 0,
+      normY: this.lastState.normY ?? 0,
+      buttonFlags: this.lastState.buttonFlags ?? 0,
+      modifierFlags: this.lastState.modifierFlags ?? 0,
       scrollDelta: 0,
       keyCode: 0,
       timestampMs: Date.now(),

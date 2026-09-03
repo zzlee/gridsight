@@ -35,6 +35,13 @@ sequenceDiagram
     Note over Student: 學生端保存 Token 於 RAM<br/>設定 Teacher IP 供出站推流使用
 ```
 
+> [!IMPORTANT]
+> **HMAC 信任模型與限制 (Trust Model & Trade-off)**：
+> `TOKEN_GRANT` 回覆由教師端以 `HMAC-SHA256(secret, token + "|" + mac)` 簽章，學生端據此驗證回應確實來自真正的教師端。
+> 然而 HMAC secret 亦內嵌於**未鑑權**的 `GET /install-agent.ps1` 中，供學生端首次引導時同步取得。
+> 因此**同網段內任何能取得安裝腳本的人，皆可偽造有效 Token 並向學生端假冒教師端**——這是「零輸入、一鍵部署」引導流程的既定取捨（Trust-on-First-Use 類模型）。
+> 教師端控制行為（關機、分享、錄影、廣播）仍受 PIN + Bearer Token + 登入鎖定保護；此限制僅影響學生端對「教師伺服器身份」的驗證，不影響已鑑權的教師端控制面。
+
 ### 2.2 常態監控縮圖推拉流程 (Snapshot Push, Cache & Fetch)
 
 ```mermaid

@@ -57,7 +57,19 @@ const HOST = process.env.API_HOST || '0.0.0.0';
 let activeTeacherIp = '127.0.0.1';
 let activeNicName = 'Default';
 
-app.use(cors());
+// CORS allowlist: same-origin requests (no Origin header) are always allowed;
+// unknown cross-origin browsers get no CORS headers — defense against
+// malicious websites on the LAN abusing unauthenticated endpoints.
+const CORS_ALLOWLIST = (process.env.CORS_ORIGINS ||
+  'http://localhost:3000,http://127.0.0.1:3000,http://localhost:5173,http://127.0.0.1:5173')
+  .split(',').map((s) => s.trim()).filter(Boolean);
+
+app.use(cors({
+  origin(origin, callback) {
+    if (!origin || CORS_ALLOWLIST.includes(origin)) return callback(null, true);
+    return callback(null, false);
+  },
+}));
 app.use(express.json());
 
 export const tokenAuth = new TokenAuthority();
@@ -69,6 +81,50 @@ const discoveryService = new MulticastDiscoveryService(tokenAuth, (device) => {
 // Teacher PIN authentication state
 let teacherPin = process.env.TEACHER_PIN || '888888';
 export const teacherSessions = new Map<string, number>(); // token -> expiresAt
+
+// Brute-force protection: per-IP failed login tracking with a temporary
+// lockout window (in-memory only; resets on server restart). Limits are
+// configurable via env so tests can use short windows.
+const getLoginMaxAttempts = () => {
+  const v = parseInt(process.env.LOGIN_MAX_ATTEMPTS || '', 10);
+  return Number.isFinite(v) && v > 0 ? v : 5;
+};
+const getLoginLockoutMs = () => {
+  const v = parseInt(process.env.LOGIN_LOCKOUT_MS || '', 10);
+  return Number.isFinite(v) && v > 0 ? v : 15 * 60 * 1000;
+};
+interface LoginFailureEntry { count: number; firstFailureAt: number; lockedUntil: number }
+const loginFailures = new Map<string, LoginFailureEntry>(); // ip -> attempts
+
+const pruneLoginFailures = (now = Date.now()) => {
+  for (const [ip, entry] of loginFailures) {
+    if (now > entry.lockedUntil && now - entry.firstFailureAt > getLoginLockoutMs()) {
+      loginFailures.delete(ip);
+    }
+  }
+};
+
+const isLoginLocked = (ip: string): number => {
+  const entry = loginFailures.get(ip);
+  if (!entry) return 0;
+  const remaining = entry.lockedUntil - Date.now();
+  return remaining > 0 ? remaining : 0;
+};
+
+const recordLoginFailure = (ip: string) => {
+  const now = Date.now();
+  const lockoutMs = getLoginLockoutMs();
+  const maxAttempts = getLoginMaxAttempts();
+  const entry = loginFailures.get(ip);
+  if (!entry || now - entry.firstFailureAt > lockoutMs) {
+    loginFailures.set(ip, { count: 1, firstFailureAt: now, lockedUntil: 0 });
+    return;
+  }
+  entry.count += 1;
+  if (entry.count >= maxAttempts) {
+    entry.lockedUntil = now + lockoutMs;
+  }
+};
 
 export const generateTeacherToken = () => {
   const token = crypto.randomBytes(32).toString('hex');
@@ -112,7 +168,17 @@ const pendingHighResRequests = new Map<string, (b64Image: string) => void>();
 // Normalizes MAC addresses and targets by decoding URL characters and standardizing case
 const normalizeTarget = (raw: string) => {
   if (!raw) return '';
-  return decodeURIComponent(raw).replace(/%3A/gi, ':').trim().toUpperCase();
+  let decoded = raw;
+  try {
+    decoded = decodeURIComponent(raw);
+  } catch {
+    // Malformed percent-encoding (e.g. a raw '%' or an invalid '%ZZ'
+    // sequence) must never escape into request/connection handlers as an
+    // exception — that would crash the server on unauthenticated input.
+    // Fall back to the raw input instead.
+    decoded = raw;
+  }
+  return decoded.replace(/%3A/gi, ':').trim().toUpperCase();
 };
 
 const pruneSnapshotCache = (now = Date.now()) => {
@@ -306,13 +372,25 @@ wss.on('connection', (ws, req) => {
 
 // Auth Routes: Teacher PIN Login and Verification
 app.post('/api/auth/login', (req, res) => {
+  const ip = req.ip || 'unknown';
+  pruneLoginFailures();
+  const remainingLockMs = isLoginLocked(ip);
+  if (remainingLockMs > 0) {
+    const minutes = Math.ceil(remainingLockMs / 60000);
+    logger.warn(`[Auth] Login attempt from ${ip} rejected: temporarily locked out`);
+    res.setHeader('Retry-After', String(Math.ceil(remainingLockMs / 1000)));
+    return res.status(429).json({ success: false, error: `嘗試次數過多，請 ${minutes} 分鐘後再試` });
+  }
+
   const { pin } = req.body;
   if (typeof pin === 'string' && pin.trim() === teacherPin.trim()) {
+    loginFailures.delete(ip);
     const { token, expiresAt } = generateTeacherToken();
-    logger.info(`[Auth] Teacher logged in successfully from IP: ${req.ip}`);
+    logger.info(`[Auth] Teacher logged in successfully from IP: ${ip}`);
     res.json({ success: true, token, expiresAt });
   } else {
-    logger.warn(`[Auth] Failed PIN attempt from IP: ${req.ip}`);
+    recordLoginFailure(ip);
+    logger.warn(`[Auth] Failed PIN attempt from IP: ${ip}`);
     res.status(401).json({ success: false, error: 'PIN 碼錯誤，請重新輸入' });
   }
 });

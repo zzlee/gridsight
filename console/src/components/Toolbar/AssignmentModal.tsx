@@ -13,7 +13,7 @@ import {
   HardDrive
 } from 'lucide-react';
 import { AuthService } from '../../services/authService';
-import type { ActiveAssignment } from '../../types';
+import type { ActiveAssignment, StudentDevice } from '../../types';
 
 interface AssignmentModalProps {
   isOpen: boolean;
@@ -22,6 +22,7 @@ interface AssignmentModalProps {
   selectedCount: number;
   totalOnlineCount: number;
   activeAssignment: ActiveAssignment | null;
+  allDevices: StudentDevice[];
   onRefresh: () => void;
 }
 
@@ -32,6 +33,7 @@ export const AssignmentModal: React.FC<AssignmentModalProps> = ({
   selectedCount,
   totalOnlineCount,
   activeAssignment,
+  allDevices,
   onRefresh,
 }) => {
   const [title, setTitle] = useState('');
@@ -41,7 +43,7 @@ export const AssignmentModal: React.FC<AssignmentModalProps> = ({
   const [isProcessing, setIsProcessing] = useState(false);
   const [statusMessage, setStatusMessage] = useState<string | null>(null);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
-  const [filterMode, setFilterMode] = useState<'all' | 'submitted' | 'unsubmitted'>('all');
+  const [filterMode, setFilterMode] = useState<'all' | 'submitted' | 'pending'>('all');
 
   if (!isOpen) return null;
 
@@ -153,6 +155,28 @@ export const AssignmentModal: React.FC<AssignmentModalProps> = ({
   const submittedCount = submissions.length;
   const targetTotal = totalOnlineCount > 0 ? totalOnlineCount : submittedCount;
   const progressPercent = targetTotal > 0 ? Math.min(100, Math.round((submittedCount / targetTotal) * 100)) : 0;
+
+  // Build the live submission board combining all target devices with submissions
+  const boardData = allDevices.map((dev) => {
+    const sub = submissions.find(
+      (s) => s.mac.toLowerCase() === (dev.mac || '').toLowerCase()
+    );
+    return {
+      mac: dev.mac || dev.id,
+      seatNo: sub?.seatNo || dev.seatNo || '-',
+      hostname: dev.hostname || '-',
+      isSubmitted: !!sub,
+      submission: sub,
+    };
+  });
+
+  // Filter the board data
+  const filteredBoard = boardData.filter((row) => {
+    if (filterMode === 'all') return true;
+    if (filterMode === 'submitted') return row.isSubmitted;
+    if (filterMode === 'pending') return !row.isSubmitted;
+    return true;
+  });
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm animate-in fade-in duration-200">
@@ -273,7 +297,7 @@ export const AssignmentModal: React.FC<AssignmentModalProps> = ({
               {/* Submissions List */}
               <div className="space-y-2">
                 <div className="flex items-center justify-between text-xs text-slate-400">
-                  <span className="font-semibold text-slate-300">繳交名冊 ({submissions.length} 件)</span>
+                  <span className="font-semibold text-slate-300">繳交名冊 ({boardData.length} 件)</span>
                   <div className="flex items-center gap-1 bg-slate-800/80 p-0.5 rounded-lg">
                     <button
                       type="button"
@@ -289,18 +313,26 @@ export const AssignmentModal: React.FC<AssignmentModalProps> = ({
                     >
                       已繳 ({submittedCount})
                     </button>
+                    <button
+                      type="button"
+                      onClick={() => setFilterMode('pending')}
+                      className={`px-2 py-1 rounded text-xs transition-colors ${filterMode === 'pending' ? 'bg-amber-600/40 text-amber-300' : 'text-slate-400'}`}
+                    >
+                      未繳 ({boardData.length - submittedCount})
+                    </button>
                   </div>
                 </div>
 
                 <div className="border border-slate-800 rounded-xl overflow-hidden max-h-56 overflow-y-auto">
-                  {submissions.length === 0 ? (
+                  {filteredBoard.length === 0 ? (
                     <div className="py-8 text-center text-xs text-slate-500">
-                      等待學生拖曳繳交檔案中...
+                      沒有符合條件的學生
                     </div>
                   ) : (
                     <table className="w-full text-left text-xs text-slate-300">
                       <thead className="bg-slate-950/60 text-slate-400 uppercase text-[10px] tracking-wider border-b border-slate-800 sticky top-0">
                         <tr>
+                          <th className="px-3 py-2 w-8">狀態</th>
                           <th className="px-3 py-2">座號</th>
                           <th className="px-3 py-2">電腦名稱</th>
                           <th className="px-3 py-2">檔案名稱</th>
@@ -309,18 +341,25 @@ export const AssignmentModal: React.FC<AssignmentModalProps> = ({
                         </tr>
                       </thead>
                       <tbody className="divide-y divide-slate-800/60 font-mono">
-                        {submissions.map((sub, idx) => (
+                        {filteredBoard.map((row, idx) => (
                           <tr key={idx} className="hover:bg-slate-800/40 transition-colors">
-                            <td className="px-3 py-2 font-bold text-emerald-400">{sub.seatNo}</td>
-                            <td className="px-3 py-2 text-slate-300 font-sans">{sub.hostname}</td>
-                            <td className="px-3 py-2 text-sky-300 truncate max-w-[160px]" title={sub.filename}>
-                              {sub.filename}
+                            <td className="px-3 py-2">
+                              {row.isSubmitted ? (
+                                <CheckCircle2 className="w-4 h-4 text-emerald-400" />
+                              ) : (
+                                <Clock className="w-4 h-4 text-amber-400" />
+                              )}
+                            </td>
+                            <td className={`px-3 py-2 font-bold ${row.isSubmitted ? 'text-emerald-400' : 'text-slate-400'}`}>{row.seatNo}</td>
+                            <td className="px-3 py-2 text-slate-300 font-sans">{row.hostname}</td>
+                            <td className="px-3 py-2 text-sky-300 truncate max-w-[160px]" title={row.submission?.filename || ''}>
+                              {row.submission?.filename || '-'}
                             </td>
                             <td className="px-3 py-2 text-right text-slate-400">
-                              {(sub.size / 1024).toFixed(0)} KB
+                              {row.submission ? `${(row.submission.size / 1024).toFixed(0)} KB` : '-'}
                             </td>
                             <td className="px-3 py-2 text-right text-slate-500 font-sans">
-                              {new Date(sub.submittedAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' })}
+                              {row.submission ? new Date(row.submission.submittedAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' }) : '-'}
                             </td>
                           </tr>
                         ))}

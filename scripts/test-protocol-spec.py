@@ -10,7 +10,6 @@ import base64
 import urllib.request
 import urllib.parse
 import json
-import subprocess
 import os
 
 PORT = os.environ.get("PORT", "3000")

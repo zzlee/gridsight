@@ -5,7 +5,6 @@ Verifies server endpoints, headers, snapshot push/pull, and protocol compliance.
 """
 
 import sys
-import time
 import base64
 import urllib.request
 import urllib.parse

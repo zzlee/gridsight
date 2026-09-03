@@ -35,6 +35,7 @@ console/server/data/*
 # IDE / Editor
 .vscode/
 .idea/
+.obsidian/
 *.swp
 *.swo
 .DS_Store

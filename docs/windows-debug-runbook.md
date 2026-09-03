@@ -148,7 +148,7 @@ python scripts/test-network-multicast.py   # 於學生機執行（或單發一�
 
 | 用途 | 內建工具 | 進階工具 |
 | :--- | :--- | :--- |
-| 封包擷取 | `pktmon`（Win10+/Server2019+） | Wireshark（filter: `udp.port==8888 \|\| udp.port==9000 \|\| tcp.port==3000`） |
+| 封包擷取 | `pktmon`（Win10+/Server2019+） | Wireshark（filter: `udp.port in {8888, 9000} or tcp.port == 3000`） |
 | 連線測試 | `Test-NetConnection`、`curl.exe`（Win10 1803+ 內建） | nmap/portqry |
 | 行程與控制代碼 | `tasklist /v`、`taskkill /f /im gs-agent.exe` | Process Explorer（查 CWD、子程序樹）、Process Monitor（檔案/登錄追蹤） |
 | 崩潰分析 | 事件檢視器 → Windows Logs → Application（Source: Windows Error Reporting） | WinDbg Preview `!analyze -v`、procdump `-e` |

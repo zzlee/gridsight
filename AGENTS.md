@@ -252,4 +252,4 @@ powershell -WindowStyle Hidden -c "irm http://<教師IP>:3000/install-agent.ps1|
   - 懸浮框選操作列（`MonitorBatchToolbar`）：支援針對選定學生發起作業收取。
 - **一鍵催繳與全班打包**：
   - 一鍵催繳：向所有連線中且「尚未繳交」之學生機再次發送 `COLLECT_ASSIGNMENT` 彈窗。
-  - 零依賴全班 ZIP 打包（[`zipPacker.ts`](file:///home/zzlee/gridsight/console/server/zipPacker.ts)）：純 Node.js 原生實作 deflate 與 CRC32 封包，點擊「下載全班作業打包」直接透過 HTTP 串流下載包含所有學生作業的 ZIP 壓縮檔，隨身碟一鍵帶走。
+  - 零依賴全班 ZIP 打包（[`zipPacker.ts`](console/server/zipPacker.ts)）：純 Node.js 原生實作 deflate 與 CRC32 封包，點擊「下載全班作業打包」直接透過 HTTP 串流下載包含所有學生作業的 ZIP 壓縮檔，隨身碟一鍵帶走。

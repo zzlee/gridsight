@@ -1,5 +1,5 @@
 import React, { useState, useRef, useEffect } from 'react';
-import { StudentDevice, AppMode, GridAisle, GridObstacle } from './types';
+import { StudentDevice, AppMode, GridAisle, GridObstacle, ClassroomLayout } from './types';
 import { TopNav } from './components/Toolbar/TopNav';
 import { GridCanvas } from './components/Canvas/GridCanvas';
 import { FocusModal } from './components/Viewer/FocusModal';
@@ -640,6 +640,27 @@ export const App: React.FC = () => {
     return <StudentConnectModal isOpen={true} isStandalonePage={true} onClose={() => {}} />;
   }
 
+
+  const handleExportLayout = () => {
+    const dataStr = "data:text/json;charset=utf-8," + encodeURIComponent(JSON.stringify(layout, null, 2));
+    const dlAnchorElem = document.createElement('a');
+    dlAnchorElem.setAttribute("href", dataStr);
+    dlAnchorElem.setAttribute("download", `gridsight_layout_${Date.now()}.json`);
+    document.body.appendChild(dlAnchorElem);
+    dlAnchorElem.click();
+    document.body.removeChild(dlAnchorElem);
+  };
+
+  const handleImportLayout = (importedLayout: ClassroomLayout) => {
+    // Basic validation to ensure valid ClassroomLayout
+    if (!importedLayout || !Array.isArray(importedLayout.seats)) {
+      console.error('Invalid layout file structure');
+      return;
+    }
+    setLayout(importedLayout);
+    LayoutStorage.saveLayout(importedLayout);
+  };
+
   const offTaskDevices = layout.seats.filter((s) => s.status !== 'offline' && s.isOffTask);
   const selectedSeats = layout.seats.filter((s) => s.selected);
   const selectedTargets = selectedSeats.map((s) => s.mac || s.ip).filter((t): t is string => Boolean(t));
@@ -649,6 +670,8 @@ export const App: React.FC = () => {
     <div className="w-screen h-screen flex flex-col bg-slate-950 overflow-hidden">
       <TopNav
         mode={mode}
+        onImportLayout={handleImportLayout}
+        onExportLayout={handleExportLayout}
         setMode={setMode}
         layout={layout}
         onOpenMatrixConfig={() => setIsMatrixConfigOpen(true)}

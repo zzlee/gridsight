@@ -25,6 +25,9 @@
 #pragma comment(lib, "mfuuid.lib")
 #pragma comment(lib, "wmcodecdspuuid.lib")
 #pragma comment(lib, "ole32.lib")
+
+static const GUID GS_CODECAPI_AVLowLatencyMode = {0x9c27891a, 0xed7a, 0x40e1, {0x88, 0xe1, 0xb2, 0xe4, 0x5b, 0x30, 0x49, 0x11}};
+static const GUID GS_MF_LOW_LATENCY = {0x9c51d740, 0xdc55, 0x4864, {0x9c, 0x41, 0x8b, 0xa4, 0x76, 0xa5, 0xa1, 0xb8}};
 #endif
 
 namespace GridSight {
@@ -312,6 +315,14 @@ bool H264Encoder::Initialize(int width, int height, int fps, int bitrate_kbps) {
     if (!pEncoder) {
         Utils::Log("ERROR", "Failed to find MF H264 encoder.");
         return false;
+    }
+
+    // Enable low latency encoding mode
+    IMFAttributes* pAttributes = nullptr;
+    if (SUCCEEDED(pEncoder->GetAttributes(&pAttributes))) {
+        pAttributes->SetUINT32(GS_MF_LOW_LATENCY, 1);
+        pAttributes->SetUINT32(GS_CODECAPI_AVLowLatencyMode, 1);
+        pAttributes->Release();
     }
 
     IMFMediaType* pOutputType = nullptr;

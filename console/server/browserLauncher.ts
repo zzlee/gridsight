@@ -71,8 +71,9 @@ export function openBrowser(targetUrl: string, platform: string = process.platfo
     child.unref();
     logger.info(`[Browser] 🌐 已自動開啟瀏覽器導向控制台: ${targetUrl}`);
     return true;
-  } catch (err: any) {
-    logger.warn(`[Browser] ⚠️ 無法啟動瀏覽器行程: ${err?.message || err}`);
+  } catch (err: unknown) {
+    const message = err instanceof Error ? err.message : String(err);
+    logger.warn(`[Browser] ⚠️ 無法啟動瀏覽器行程: ${message}`);
     return false;
   }
 }

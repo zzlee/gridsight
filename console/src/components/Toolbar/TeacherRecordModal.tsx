@@ -187,7 +187,7 @@ export const TeacherRecordModal: React.FC<TeacherRecordModalProps> = ({
         const err = await res.json();
         setErrorMsg(err.error || '啟動錄影失敗');
       }
-    } catch (err: any) {
+    } catch (err) {
       setErrorMsg('無法連接伺服器');
     } finally {
       setLoading(false);

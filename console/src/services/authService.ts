@@ -31,7 +31,7 @@ export const AuthService = {
         return { success: true };
       }
       return { success: false, error: data.error || 'PIN 碼錯誤' };
-    } catch (e: any) {
+    } catch (e) {
       return { success: false, error: '無法連線至伺服器' };
     }
   },

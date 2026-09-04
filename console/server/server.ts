@@ -1475,8 +1475,8 @@ app.post('/api/record/student/start', requireTeacherAuth, async (req, res) => {
       filename,
       startTime: session.startTime,
     });
-  } catch (err: any) {
-    logger.error(`[Student Record] Failed to launch FFmpeg: ${err.message}`);
+  } catch (err) {
+    logger.error(`[Student Record] Failed to launch FFmpeg: ${err instanceof Error ? err.message : String(err)}`);
     res.status(500).json({ error: '無法啟動學生畫面錄製行程' });
   }
 });

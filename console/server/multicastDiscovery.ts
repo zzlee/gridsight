@@ -157,7 +157,13 @@ export class MulticastDiscoveryService {
 
     this.server.on('message', async (msg, rinfo) => {
       try {
-        const payload = JSON.parse(msg.toString('utf-8'));
+        let payload;
+        try {
+          payload = JSON.parse(msg.toString('utf-8'));
+        } catch (parseErr) {
+          logger.debug(`[Discovery] Ignoring malformed UDP payload from ${rinfo.address}`);
+          return;
+        }
         const pType = (payload.type || '').toUpperCase();
         if (pType === 'BEACON') {
           const mac = payload.mac || rinfo.address;

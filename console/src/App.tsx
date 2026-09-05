@@ -642,13 +642,15 @@ export const App: React.FC = () => {
 
 
   const handleExportLayout = () => {
-    const dataStr = "data:text/json;charset=utf-8," + encodeURIComponent(JSON.stringify(layout, null, 2));
+    const blob = new Blob([JSON.stringify(layout, null, 2)], { type: 'application/json' });
+    const url = URL.createObjectURL(blob);
     const dlAnchorElem = document.createElement('a');
-    dlAnchorElem.setAttribute("href", dataStr);
+    dlAnchorElem.setAttribute("href", url);
     dlAnchorElem.setAttribute("download", `gridsight_layout_${Date.now()}.json`);
     document.body.appendChild(dlAnchorElem);
     dlAnchorElem.click();
     document.body.removeChild(dlAnchorElem);
+    URL.revokeObjectURL(url);
   };
 
   const handleImportLayout = (importedLayout: ClassroomLayout) => {

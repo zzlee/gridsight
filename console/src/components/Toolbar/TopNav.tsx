@@ -23,6 +23,8 @@ import {
   ChevronDown,
   Power,
   Video,
+  Download,
+  Upload,
 } from 'lucide-react';
 
 type BroadcastQuality = 'high' | 'medium' | 'low';
@@ -42,6 +44,8 @@ interface TopNavProps {
   onOpenObstacleModal: () => void;
   onOpenDevicePool: () => void;
   onOpenStudentConnect: () => void;
+  onImportLayout?: (layout: ClassroomLayout) => void;
+  onExportLayout?: () => void;
   onOpenAlertSettings?: () => void;
   onOpenShareUrl?: () => void;
   onOpenShareFile?: () => void;
@@ -67,6 +71,8 @@ export const TopNav: React.FC<TopNavProps> = ({
   onOpenObstacleModal,
   onOpenDevicePool,
   onOpenStudentConnect,
+  onImportLayout,
+  onExportLayout,
   onOpenAlertSettings,
   onOpenShareUrl,
   onOpenShareFile,
@@ -93,6 +99,29 @@ export const TopNav: React.FC<TopNavProps> = ({
   const [isServerRecording, setIsServerRecording] = useState(false);
   const [qualityMenuOpen, setQualityMenuOpen] = useState(false);
   const qualityMenuRef = useRef<HTMLDivElement>(null);
+  const fileInputRef = useRef<HTMLInputElement>(null);
+
+
+  const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onload = (ev) => {
+      try {
+        const text = ev.target?.result as string;
+        const parsed = JSON.parse(text) as ClassroomLayout;
+        if (parsed && onImportLayout) {
+          onImportLayout(parsed);
+        }
+      } catch (err) {
+        console.error('Failed to parse layout JSON', err);
+        alert('匯入失敗：檔案格式不正確');
+      }
+    };
+    reader.readAsText(file);
+    // Reset input
+    e.target.value = '';
+  };
 
   // States for student screen lock and showcase
   const [lockedCount, setLockedCount] = useState<number>(0);
@@ -511,6 +540,39 @@ export const TopNav: React.FC<TopNavProps> = ({
         {/* === SCENARIO B: EDIT LAYOUT MODE (Initial Setup & Customization) === */}
         {mode === 'EDIT_LAYOUT' && (
           <div className="flex items-center space-x-2 animate-in fade-in duration-200">
+
+            {/* Export & Import */}
+            {onExportLayout && (
+              <button
+                onClick={onExportLayout}
+                className="flex items-center space-x-1.5 px-2.5 py-1.5 rounded-lg bg-slate-900 hover:bg-slate-800 border border-slate-700 text-xs text-slate-200 hover:text-white transition-colors"
+                title="匯出設定與配置"
+              >
+                <Download className="w-3.5 h-3.5 text-emerald-400" />
+                <span>匯出</span>
+              </button>
+            )}
+
+            {onImportLayout && (
+              <>
+                <button
+                  onClick={() => fileInputRef.current?.click()}
+                  className="flex items-center space-x-1.5 px-2.5 py-1.5 rounded-lg bg-slate-900 hover:bg-slate-800 border border-slate-700 text-xs text-slate-200 hover:text-white transition-colors"
+                  title="匯入設定與配置"
+                >
+                  <Upload className="w-3.5 h-3.5 text-purple-400" />
+                  <span>匯入</span>
+                </button>
+                <input
+                  type="file"
+                  accept=".json"
+                  style={{ display: 'none' }}
+                  ref={fileInputRef}
+                  onChange={handleFileChange}
+                />
+              </>
+            )}
+
             {/* Matrix Dimensions Button (X × Y Standard Matrix) */}
             <button
               onClick={onOpenMatrixConfig}

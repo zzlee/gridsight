@@ -65,6 +65,8 @@ public:
     static void HideAssignmentDropZone();
     static bool IsAssignmentActive();
 
+    static std::string ShowStudentLoginDialog();
+
     static std::string HMACSHA256Hex(const std::string& key, const std::string& data);
     static bool VerifyHMACSHA256(const std::string& key, const std::string& data, const std::string& expected_hex);
 };

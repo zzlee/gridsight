@@ -1262,7 +1262,7 @@ app.get('/api/record/audio-devices', requireTeacherAuth, async (_req, res) => {
   try {
     const devices = await listAudioInputDevices();
     res.json({ ok: true, devices });
-  } catch (err: unknown) {
+  } catch (err) {
     const msg = err instanceof Error ? err.message : String(err);
     logger.warn('[Record] Failed to list audio devices:', msg);
     res.status(500).json({ error: `無法取得音訊裝置: ${msg}` });
@@ -1475,7 +1475,7 @@ app.post('/api/record/student/start', requireTeacherAuth, async (req, res) => {
       filename,
       startTime: session.startTime,
     });
-  } catch (err: unknown) {
+  } catch (err) {
     const errorMessage = err instanceof Error ? err.message : String(err);
     logger.error(`[Student Record] Failed to launch FFmpeg: ${errorMessage}`);
     res.status(500).json({ error: '無法啟動學生畫面錄製行程' });
@@ -1577,7 +1577,7 @@ app.post(
       await fs.promises.writeFile(savedPath, req.body);
       logger.info(`[Broadcast Test] Media file saved to ${savedPath} (${totalBytes} bytes)`);
       res.json({ success: true, fileId, filename: safeName, filePath: savedPath, fileSize: totalBytes });
-    } catch (err: unknown) {
+    } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);
       logger.error(`[Broadcast Test] Failed to store media file: ${msg}`);
       res.status(500).json({ error: `儲存測試媒體檔案失敗: ${msg}` });
@@ -1782,7 +1782,7 @@ app.post(
         downloadUrl,
         message: `已將檔案 "${safeFilename}" (${(totalBytes / 1048576).toFixed(1)} MB) 發送至 ${successCount} 台學生機 (總目標: ${totalTargets}，失敗/離線: ${failedCount})`,
       });
-    } catch (err: unknown) {
+    } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);
       logger.error(`[Share] Error sharing file: ${msg}`);
       res.status(500).json({ error: `伺服器處理檔案分享失敗: ${msg}` });

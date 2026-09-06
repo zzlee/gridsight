@@ -53,7 +53,7 @@ export const ShutdownModal: React.FC<ShutdownModalProps> = ({
         setSuccessMsg('');
         onClose();
       }, 1800);
-    } catch (err: unknown) {
+    } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);
       setErrorMsg(msg);
     } finally {
@@ -84,7 +84,7 @@ export const ShutdownModal: React.FC<ShutdownModalProps> = ({
         setSuccessMsg('');
         onClose();
       }, 1800);
-    } catch (err: unknown) {
+    } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);
       setErrorMsg(msg);
     } finally {

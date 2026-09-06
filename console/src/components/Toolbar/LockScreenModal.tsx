@@ -77,7 +77,7 @@ export const LockScreenModal: React.FC<LockScreenModalProps> = ({
         setSuccessMsg('');
         onClose();
       }, 1200);
-    } catch (err: unknown) {
+    } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);
       setErrorMsg(msg);
     } finally {

@@ -310,8 +310,55 @@ async def beacon_broadcast_loop(agents: List[MockAgent], multicast_ip: str, mult
         await asyncio.sleep(interval)
 
 
+async def get_agent_token_async(teacher_ip: str, agent: MockAgent) -> str:
+    """Asynchronously acquires an agent token via UDP beacon."""
+    token = getattr(agent, 'token', None)
+    if token:
+        return token
+
+    class UdpProtocol(asyncio.DatagramProtocol):
+        def __init__(self):
+            self.transport = None
+            self.future = asyncio.get_running_loop().create_future()
+
+        def connection_made(self, transport):
+            self.transport = transport
+            payload = agent.get_beacon_payload()
+            self.transport.sendto(json.dumps(payload).encode('utf-8'), (teacher_ip, 8888))
+
+        def datagram_received(self, data, addr):
+            try:
+                grant = json.loads(data.decode('utf-8'))
+                if "token" in grant and not self.future.done():
+                    self.future.set_result(grant["token"])
+            except Exception as e:
+                pass
+
+        def error_received(self, exc):
+            if not self.future.done():
+                self.future.set_exception(exc)
+
+    loop = asyncio.get_running_loop()
+    transport, protocol = await loop.create_datagram_endpoint(
+        lambda: UdpProtocol(),
+        local_addr=('0.0.0.0', 0)
+    )
+
+    try:
+        token = await asyncio.wait_for(protocol.future, timeout=2.0)
+        agent.token = token
+        return token
+    except Exception:
+        return ""
+    finally:
+        transport.close()
+
+
 async def push_single_snapshot(teacher_ip: str, teacher_port: int, agent: MockAgent):
     """Sends a single HTTP POST snapshot asynchronously via raw TCP socket."""
+    # Ensure token is acquired before pushing
+    token = await get_agent_token_async(teacher_ip, agent)
+
     try:
         reader, writer = await asyncio.open_connection(teacher_ip, teacher_port)
         req_headers = (
@@ -321,6 +368,7 @@ async def push_single_snapshot(teacher_ip: str, teacher_port: int, agent: MockAg
             f"x-agent-mac: {agent.mac}\r\n"
             f"x-agent-ip: {agent.ip}\r\n"
             f"x-agent-hostname: {agent.hostname}\r\n"
+            + (f"x-auth-token: {token}\r\n" if token else "") +
             f"Content-Length: {len(agent.jpeg_cache)}\r\n"
             f"Connection: close\r\n"
             f"\r\n"

@@ -5,7 +5,7 @@
  * Simulates 70 agents pushing snapshots and sending UDP beacons to the Multicast group so the Teacher Console can discover them.
  */
 
-const dgram = require('dgram');
+import dgram from 'dgram';
 
 const NUM_AGENTS = 70;
 const MULTICAST_GROUP = '239.255.42.99';

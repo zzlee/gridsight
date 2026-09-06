@@ -86,7 +86,7 @@ export const ShareUrlModal: React.FC<ShareUrlModalProps> = ({
         setProgress(0);
         setErrorMsg(data.error || '網址發送失敗');
       }
-    } catch (err: unknown) {
+    } catch (err) {
       clearInterval(timer);
       clearTimeout(timeoutId);
       setProgress(0);

@@ -566,7 +566,7 @@ export class TeacherBroadcastStreamer {
         ? 'pipe'
         : ((this.captureProcess && this.captureProcess.stdout) ? this.captureProcess.stdout : 'ignore');
       child = spawn(ffmpegCmd, ffmpegArgs, { stdio: [stdinSource, 'ignore', 'pipe'] });
-    } catch (err: unknown) {
+    } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);
       logger.error(`[Broadcast] Failed to spawn FFmpeg (${ffmpegCmd}):`, msg);
       if (this.captureProcess) {

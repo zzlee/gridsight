@@ -113,7 +113,7 @@ export class MulticastDiscoveryService {
         try {
           this.server?.addMembership(this.multicastAddress, selectedInterfaceIp);
           joinedCount++;
-        } catch (err: unknown) {
+        } catch (err) {
           const msg = err instanceof Error ? err.message : String(err);
           logger.warn(`[Discovery] Add membership on ${selectedInterfaceIp} failed: ${msg}`);
         }

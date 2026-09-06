@@ -1,4 +1,22 @@
 #!/usr/bin/env python3
+
+def get_agent_token(mac):
+    import socket, json
+    sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+    sock.settimeout(2.0)
+    sock.bind(("0.0.0.0", 0))
+    payload = json.dumps({
+        "type": "BEACON",
+        "mac": mac,
+        "hostname": "test",
+        "ip": "127.0.0.1"
+    }).encode("utf-8")
+    sock.sendto(payload, ("127.0.0.1", 8888))
+    try:
+        data, _ = sock.recvfrom(4096)
+        return json.loads(data.decode("utf-8")).get("token")
+    except:
+        return ""
 """
 Protocol Specification Integration Test Suite for GridSight
 Verifies server endpoints, headers, snapshot push/pull, and protocol compliance.
@@ -33,6 +51,7 @@ def test_server_info():
 
 def test_agent_snapshot_push_and_fetch():
     test_mac = "00:1A:2B:3C:4D:99"
+    token = get_agent_token(test_mac)
     test_ip = "192.168.1.199"
     test_window_title = "Visual Studio Code - main.cpp"
     b64_window = base64.b64encode(test_window_title.encode("utf-8")).decode("utf-8")
@@ -47,7 +66,8 @@ def test_agent_snapshot_push_and_fetch():
             "X-Agent-MAC": test_mac,
             "X-Agent-IP": test_ip,
             "X-Active-Window": b64_window,
-            "Content-Type": "image/jpeg"
+            "Content-Type": "image/jpeg",
+            "X-Auth-Token": token
         },
         method="POST"
     )
@@ -58,8 +78,14 @@ def test_agent_snapshot_push_and_fetch():
     print("✅ POST /api/agent/snapshot test passed.")
 
     # 2. Test GET /api/snapshot/:id
+    login_url = f"{BASE_URL}/api/auth/login"
+    login_payload = json.dumps({"pin": "888888"}).encode("utf-8")
+    login_req = urllib.request.Request(login_url, data=login_payload, headers={"Content-Type": "application/json"}, method="POST")
+    with urllib.request.urlopen(login_req, timeout=3) as resp:
+        teacher_token = json.loads(resp.read().decode("utf-8")).get("token")
+
     fetch_url = f"{BASE_URL}/api/snapshot/{test_mac}"
-    req = urllib.request.Request(fetch_url)
+    req = urllib.request.Request(fetch_url, headers={"Authorization": f"Bearer {teacher_token}"})
     with urllib.request.urlopen(req, timeout=3) as resp:
         assert resp.status == 200, f"Snapshot fetch failed: {resp.status}"
         assert resp.headers.get("Content-Type") == "image/jpeg", "Invalid Content-Type header"

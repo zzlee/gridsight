@@ -75,13 +75,33 @@ def auth_headers(token, extra=None):
 
 # ---------------------------------------------------------------- mock agent (RFC6455 client, stdlib only)
 
+
+def get_agent_token(mac):
+    sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+    sock.settimeout(2.0)
+    sock.bind(("0.0.0.0", 0))
+    payload = json.dumps({
+        "type": "BEACON",
+        "mac": mac,
+        "hostname": "test",
+        "ip": "127.0.0.1"
+    }).encode("utf-8")
+    sock.sendto(payload, ("127.0.0.1", 8888))
+    try:
+        data, _ = sock.recvfrom(4096)
+        return json.loads(data.decode("utf-8")).get("token")
+    except:
+        return "mocktoken"
+
 class MockAgent:
     def __init__(self, mac=MOCK_MAC):
         self.mac = mac
+        self.token = get_agent_token(mac)
         self.sock = socket.create_connection(("127.0.0.1", PORT), timeout=8)
+
         key = base64.b64encode(os.urandom(16)).decode()
         handshake = (
-            f"GET /ws/agent?mac={mac}&ip=127.0.0.1&token=mocktoken HTTP/1.1\r\n"
+            f"GET /ws/agent?mac={mac}&ip=127.0.0.1&token={self.token} HTTP/1.1\r\n"
             f"Host: 127.0.0.1:{PORT}\r\n"
             "Upgrade: websocket\r\nConnection: Upgrade\r\n"
             f"Sec-WebSocket-Key: {key}\r\nSec-WebSocket-Version: 13\r\n\r\n"

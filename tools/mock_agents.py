@@ -94,6 +94,7 @@ SAMPLE_WINDOWS = [
 ]
 
 class MockAgent:
+
     def __init__(self, agent_index: int, local_ip: str, base_port: int):
         self.index = agent_index
         self.port = base_port + agent_index - 1
@@ -108,8 +109,9 @@ class MockAgent:
             "disk": random.randint(40, 70),
             "temp": random.randint(38, 55)
         }
-        # Pre-cache JPEG in RAM for instant 0% CPU delivery
         self.jpeg_cache = create_sample_jpeg(self.index, self.hostname)
+        self.token = ""
+
 
     def get_beacon_payload(self) -> dict:
         # Simulate slight dynamic fluctuation in telemetry metrics
@@ -310,9 +312,24 @@ async def beacon_broadcast_loop(agents: List[MockAgent], multicast_ip: str, mult
         await asyncio.sleep(interval)
 
 
+
 async def push_single_snapshot(teacher_ip: str, teacher_port: int, agent: MockAgent):
     """Sends a single HTTP POST snapshot asynchronously via raw TCP socket."""
     try:
+        if not agent.token:
+            sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+            sock.settimeout(1.0)
+            sock.bind(("0.0.0.0", 0))
+            payload = json.dumps({"type": "BEACON", "mac": agent.mac, "hostname": agent.hostname, "ip": agent.ip}).encode("utf-8")
+            sock.sendto(payload, ("127.0.0.1", 8888))
+            try:
+                data, _ = sock.recvfrom(4096)
+                agent.token = json.loads(data.decode("utf-8")).get("token", "")
+            except:
+                pass
+            finally:
+                sock.close()
+
         reader, writer = await asyncio.open_connection(teacher_ip, teacher_port)
         req_headers = (
             f"POST /api/agent/snapshot HTTP/1.1\r\n"
@@ -321,6 +338,7 @@ async def push_single_snapshot(teacher_ip: str, teacher_port: int, agent: MockAg
             f"x-agent-mac: {agent.mac}\r\n"
             f"x-agent-ip: {agent.ip}\r\n"
             f"x-agent-hostname: {agent.hostname}\r\n"
+            f"x-auth-token: {agent.token}\r\n"
             f"Content-Length: {len(agent.jpeg_cache)}\r\n"
             f"Connection: close\r\n"
             f"\r\n"
@@ -329,8 +347,9 @@ async def push_single_snapshot(teacher_ip: str, teacher_port: int, agent: MockAg
         await writer.drain()
         writer.close()
         await writer.wait_closed()
-    except Exception:
+    except Exception as e:
         pass
+
 
 
 async def snapshot_push_loop(agents: List[MockAgent], teacher_ip: str, teacher_port: int = 3000, interval: float = 1.0):

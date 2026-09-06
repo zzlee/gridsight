@@ -38,6 +38,26 @@ def test_agent_snapshot_push_and_fetch():
     b64_window = base64.b64encode(test_window_title.encode("utf-8")).decode("utf-8")
     dummy_jpeg = b"\xff\xd8\xff\xe0\x00\x10JFIF\x00\x01\x01\x01\x00`\x00`\x00\x00\xff\xd9"
 
+    import socket
+    import urllib.parse
+
+    parsed_base = urllib.parse.urlparse(BASE_URL)
+    target_host = parsed_base.hostname or "127.0.0.1"
+
+    # Obtain a valid token via UDP multicast announcement simulation
+    udp_sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+    udp_sock.settimeout(2.0)
+    beacon_payload = json.dumps({"type": "BEACON", "mac": test_mac, "hostname": "MockAgentTest"})
+    udp_sock.sendto(beacon_payload.encode(), (target_host, 8888))
+    try:
+        resp, _ = udp_sock.recvfrom(2048)
+        grant = json.loads(resp.decode())
+        agent_token = grant["token"]
+    except Exception as e:
+        raise AssertionError(f"Failed to acquire valid agent token via UDP beacon: {e}")
+    finally:
+        udp_sock.close()
+
     # 1. Test POST /api/agent/snapshot
     push_url = f"{BASE_URL}/api/agent/snapshot"
     req = urllib.request.Request(
@@ -47,6 +67,7 @@ def test_agent_snapshot_push_and_fetch():
             "X-Agent-MAC": test_mac,
             "X-Agent-IP": test_ip,
             "X-Active-Window": b64_window,
+            "X-Auth-Token": agent_token,
             "Content-Type": "image/jpeg"
         },
         method="POST"
@@ -58,8 +79,14 @@ def test_agent_snapshot_push_and_fetch():
     print("✅ POST /api/agent/snapshot test passed.")
 
     # 2. Test GET /api/snapshot/:id
+    login_url = f"{BASE_URL}/api/auth/login"
+    login_payload = json.dumps({"pin": "888888"}).encode("utf-8")
+    login_req = urllib.request.Request(login_url, data=login_payload, headers={"Content-Type": "application/json"}, method="POST")
+    with urllib.request.urlopen(login_req, timeout=3) as resp:
+        teacher_token = json.loads(resp.read().decode("utf-8")).get("token")
+
     fetch_url = f"{BASE_URL}/api/snapshot/{test_mac}"
-    req = urllib.request.Request(fetch_url)
+    req = urllib.request.Request(fetch_url, headers={"Authorization": f"Bearer {teacher_token}"})
     with urllib.request.urlopen(req, timeout=3) as resp:
         assert resp.status == 200, f"Snapshot fetch failed: {resp.status}"
         assert resp.headers.get("Content-Type") == "image/jpeg", "Invalid Content-Type header"

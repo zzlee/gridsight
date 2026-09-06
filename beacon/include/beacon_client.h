@@ -15,7 +15,8 @@ public:
     BeaconClient(const std::string& multicast_ip = "239.255.42.99", int port = 8888,
                  std::shared_ptr<HttpServer> http_server = nullptr,
                  std::shared_ptr<WebSocketStreamer> ws_streamer = nullptr,
-                 const std::string& hmac_secret = "");
+                 const std::string& hmac_secret = "",
+                 const std::string& student_id = "");
     ~BeaconClient();
 
     void Start();
@@ -31,6 +32,7 @@ private:
     std::shared_ptr<HttpServer> http_server_;
     std::shared_ptr<WebSocketStreamer> ws_streamer_;
     std::string hmac_secret_;
+    std::string student_id_;
     std::atomic<bool> running_{false};
     std::thread worker_thread_;
 };

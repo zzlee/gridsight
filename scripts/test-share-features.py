@@ -78,10 +78,26 @@ def auth_headers(token, extra=None):
 class MockAgent:
     def __init__(self, mac=MOCK_MAC):
         self.mac = mac
+
+        # 1. Obtain a valid token via UDP multicast announcement simulation
+        udp_sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+        udp_sock.settimeout(2.0)
+        beacon_payload = json.dumps({"type": "BEACON", "mac": mac, "hostname": "MockAgentTest"})
+        udp_sock.sendto(beacon_payload.encode(), ("127.0.0.1", 8888))
+        try:
+            resp, _ = udp_sock.recvfrom(2048)
+            grant = json.loads(resp.decode())
+            agent_token = grant["token"]
+        except Exception as e:
+            raise AssertionError(f"Failed to acquire valid agent token via UDP beacon: {e}")
+        finally:
+            udp_sock.close()
+
+        # 2. Connect WebSocket using the valid token
         self.sock = socket.create_connection(("127.0.0.1", PORT), timeout=8)
         key = base64.b64encode(os.urandom(16)).decode()
         handshake = (
-            f"GET /ws/agent?mac={mac}&ip=127.0.0.1&token=mocktoken HTTP/1.1\r\n"
+            f"GET /ws/agent?mac={mac}&ip=127.0.0.1&token={agent_token} HTTP/1.1\r\n"
             f"Host: 127.0.0.1:{PORT}\r\n"
             "Upgrade: websocket\r\nConnection: Upgrade\r\n"
             f"Sec-WebSocket-Key: {key}\r\nSec-WebSocket-Version: 13\r\n\r\n"

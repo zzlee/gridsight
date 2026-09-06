@@ -252,6 +252,10 @@ int main(int argc, char* argv[]) {
         }
     }
 
+    // Request Student ID before starting full agent services
+    std::string student_id = GridSight::Utils::ShowStudentLoginDialog();
+    GridSight::Utils::Log("INFO", "Student ID recorded: " + student_id);
+
     auto capturer = std::make_shared<GridSight::ScreenCapturer>();
     if (!capturer->Initialize()) {
         GridSight::Utils::Log("WARN", "Initial ScreenCapturer setup failed; capture requests will retry initialization");
@@ -269,7 +273,7 @@ int main(int argc, char* argv[]) {
     // 2. Start discovery only after both consumers exist, so every verified
     // teacher endpoint update is applied atomically to snapshot and WS paths.
     GridSight::BeaconClient beacon_client(
-        multicast_ip, multicast_port, http_server, ws_streamer, hmac_secret);
+        multicast_ip, multicast_port, http_server, ws_streamer, hmac_secret, student_id);
     beacon_client.Start();
 
     // 3. Start RTP Receiver for Teacher Multicast Broadcast

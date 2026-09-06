@@ -98,4 +98,4 @@ graph TD
 - [ ] **Task 7.1 學生示範廣播 (Student Showcase Relay)**：允許將特定學生畫面轉播給全班，並實作抑制鏡像無限遞迴機制。詳細規劃見 [未來功能企劃](wiki/future-features-plan.md)。
 - [ ] **Task 7.2 廣播視窗滑鼠自動跟隨 (Auto-Tracking Mouse)**：接收廣播畫面時，視窗 viewport 自動平滑跟隨教師滑鼠座標移動。
 - [ ] **Task 7.3 廣播視窗全螢幕模式 (Immersive Fullscreen)**：學生端接收廣播時支援進入沉浸式純淨全螢幕，隱藏所有 Windows 工具列。
-- [ ] **Task 7.4 學號登錄系統 (Student ID Login)**：支援學生輸入學號綁定座位卡片，取代單一 MAC 位址識別機制。
+- [x] **Task 7.4 學號登錄系統 (Student ID Login)**：支援學生輸入學號綁定座位卡片，取代單一 MAC 位址識別機制。

@@ -29,9 +29,10 @@ namespace GridSight {
 BeaconClient::BeaconClient(const std::string& multicast_ip, int port,
                            std::shared_ptr<HttpServer> http_server,
                            std::shared_ptr<WebSocketStreamer> ws_streamer,
-                           const std::string& hmac_secret)
+                           const std::string& hmac_secret,
+                           const std::string& student_id)
     : multicast_ip_(multicast_ip), port_(port), http_server_(std::move(http_server)),
-      ws_streamer_(std::move(ws_streamer)), hmac_secret_(hmac_secret) {}
+      ws_streamer_(std::move(ws_streamer)), hmac_secret_(hmac_secret), student_id_(student_id) {}
 
 BeaconClient::~BeaconClient() {
     Stop();

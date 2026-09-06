@@ -93,3 +93,9 @@ graph TD
   - 現行 `rtp_receiver.cpp` 呼叫微軟 `CLSID_CMSH264DecoderMFT` 預設以 CPU 軟解運行，確保所有機種 100% 開箱即用。
   - 未來規劃引入與 `encoder.cpp` 同等的 `MFTEnumEx` 雙層探測機制：優先啟用 GPU 硬體加速（Intel QuickSync / NVIDIA NVDEC / AMD VCN，D3D11VA）達到 0% CPU 解碼；若硬解不可用或環境缺少 GPU，自動無縫回退至 CPU 軟體解碼。
 - [ ] **Task 6.2 AI 離題行為輔助分析**：在邊緣端或教師端整合輕量文字與行為特徵分析，產出課堂專注度視覺化報表。
+
+### 階段 7：進階課堂互動與沉浸體驗 (未來目標)
+- [ ] **Task 7.1 學生示範廣播 (Student Showcase Relay)**：允許將特定學生畫面轉播給全班，並實作抑制鏡像無限遞迴機制。詳細規劃見 [未來功能企劃](wiki/future-features-plan.md)。
+- [ ] **Task 7.2 廣播視窗滑鼠自動跟隨 (Auto-Tracking Mouse)**：接收廣播畫面時，視窗 viewport 自動平滑跟隨教師滑鼠座標移動。
+- [ ] **Task 7.3 廣播視窗全螢幕模式 (Immersive Fullscreen)**：學生端接收廣播時支援進入沉浸式純淨全螢幕，隱藏所有 Windows 工具列。
+- [ ] **Task 7.4 學號登錄系統 (Student ID Login)**：支援學生輸入學號綁定座位卡片，取代單一 MAC 位址識別機制。

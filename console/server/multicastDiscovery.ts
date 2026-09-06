@@ -161,7 +161,7 @@ export class MulticastDiscoveryService {
         try {
           payload = JSON.parse(msg.toString('utf-8'));
         } catch (parseErr) {
-          logger.debug(`[Discovery] Ignoring malformed UDP payload from ${rinfo.address}`);
+          // logger.debug(`[Discovery] Ignoring malformed UDP payload from ${rinfo.address}`);
           return;
         }
         const pType = (payload.type || '').toUpperCase();

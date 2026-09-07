@@ -14,7 +14,7 @@
 | **HTTP Snapshot Fetch** | `TCP 3000` (`GET /api/snapshot/:id`) | 前端瀏覽器 | 教師端 (Console) | 瀏覽器 ➔ 教師 (HTTP GET) | 前端監控面板向教師端後端讀取快取之最新學生縮圖 | 教師端 TCP 3000 入站允許 |
 | **Reverse WebSocket Relay** | `TCP 3000` (`/ws/agent?mac=...&ip=...&token=...`) | 學生端 (Agent) | 教師端 (Console) | 學生 ➔ 教師 (Outbound WS) | 學生端主動向教師端建立反向持久 WS 連線，接收控制指令與傳輸 H.264 串流 | 學生端出站 TCP 3000，可穿越一般客戶端防火牆 |
 | **Teacher Viewer WS** | `TCP 3000` (`/ws/stream/:target`) | 前端瀏覽器 | 教師端 (Console) | 瀏覽器 ➔ 教師 (WS GET) | 前端 30 FPS 焦點調閱播放器連接教師端中繼以接收 H.264 串流 | 教師端 TCP 3000 入站允許 |
-| **Reverse WebSocket Relay** | `TCP 3000` (`/ws/agent`) | 學生端 (Agent) | 教師端 (Server) | 學生 ➔ 教師 (Outbound WS) | 學生端向教師端建立長連線，用於 30 FPS 焦點畫面與指令中繼 | 無需開啟學生端入站防火牆 |
+| **Teacher Input RTP Multicast** | `UDP 239.255.42.100:9002` | 教師端 (TeacherInputRtpStreamer) | 學生端 (InputRTPReceiver) | 教師 ➔ 學生 (UDP Multicast) | 教師即時滑鼠座標 (歸一化 0~65535)、點擊與滾輪事件，用於學生端視窗滑鼠自動跟隨與特效 | 需允許 UDP 9002 入站/出站，交換器需開啟 IGMP Snooping |
 | **RTP Multicast Broadcast** | `239.255.42.100:9000` | 教師端 (FFmpeg/Console) | 學生端 (Agent) | 教師 ➔ 學生 (UDP Multicast) | 教師畫面 H.264 廣播串流，支援三檔品質（高 1080p30/8M、中 720p30/4M、低 480p15/1.5M） | 交換器需開啟 IGMP Snooping 轉發多播封包 |
 
 ---
@@ -258,6 +258,28 @@ sequenceDiagram
 - **`GET /api/assignments/list`**：列出歷史作業收取紀錄。
 - **`POST /api/assignments/upload`**：學生端二進位上傳端點。自動歸檔儲存為 `data/assignments/<ID>/[座號]_[主機名]_[原檔名]`，重複繳交自動覆蓋更新（保持最新版）。
 - **`GET /api/assignments/:id/download-zip`**：純 Node.js 零依賴即時將該作業全部檔案打包為標準 ZIP 串流供教師下載帶走。
+ 
+### 3.12 教師滑鼠與輸入多播協定 (Teacher Input RTP Protocol, Port 9002)
+- **傳輸管道**：`UDP 239.255.42.100:9002`（多播組）
+- **發布端**：教師端 `TeacherInputRtpStreamer`（Node.js / C++ 鉤子）
+- **接收端**：學生端 `InputRTPReceiver`（`gs-agent.exe` 常駐背景接收）
+- **封包結構 (RFC 3550 RTP Header + 20-Byte Payload)**：
+  - **RTP Header (12 Bytes)**：`V=2, P=0, X=0, CC=0, M=0, PT=98 (Dynamic), Sequence Number (uint16), Timestamp (uint32), SSRC (uint32)`。
+  - **Payload 欄位 (21 Bytes)**：
+    ```
+    [0]       uint8   event_type       (1=MouseMove, 2=MouseDown, 3=MouseUp, 4=Scroll, 5=KeyState, 6=Heartbeat)
+    [1..2]    uint16  norm_x           (教師滑鼠 X 歸一化座標 0 ~ 65535, Little-Endian)
+    [3..4]    uint16  norm_y           (教師滑鼠 Y 歸一化座標 0 ~ 65535, Little-Endian)
+    [5]       uint8   button_flags     (bit0=Left, bit1=Right, bit2=Middle)
+    [6..7]    int16   scroll_delta     (滾輪滾動量, 正=向上, 負=向下, Little-Endian)
+    [8]       uint8   modifier_flags   (bit0=Shift, bit1=Ctrl, bit2=Alt, bit3=Win)
+    [9..12]   uint32  key_code         (虛擬按鍵碼 Virtual Key Code, Little-Endian)
+    [13..20]  uint64  timestamp_ms     (時間戳記毫秒數, Little-Endian)
+    ```
+- **核心優勢**：
+  - **超低延遲 (<5ms)**：無 TCP 握手與 ACK 開銷，以 30~60 Hz 極速多播。
+  - **零伺服器轉發負擔**：由交換器 IGMP Snooping 硬體複製至所有學生端，徹底避免 WebSocket 反向中繼通道產生 TCP 隊頭阻塞 (Head-of-Line Blocking)。
+  - **解耦視訊與控制面**：與 Port 9000 視訊串流分離，即便視訊幀短暫緩衝，滑鼠座標平移依然即時平滑。
 
 ---
 

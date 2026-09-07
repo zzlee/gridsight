@@ -17,6 +17,7 @@ Features:
 import os
 import sys
 import time
+import math
 import json
 import socket
 import struct
@@ -67,20 +68,152 @@ def get_primary_ip():
         s.close()
     return ip
 
+def get_cjk_font(pygame, size):
+    """Attempt to locate a CJK TrueType font for native Chinese rendering in Pygame"""
+    font_path = pygame.font.match_font('wqy-zenhei,notosanscjk,sans-serif')
+    if font_path:
+        try:
+            return pygame.font.Font(font_path, size)
+        except:
+            pass
+    return pygame.font.Font(None, size)
+
+def compute_viewport(win_w, win_h, fw, fh, tracking_mode, vp_state, mouse_norm_pos, dt):
+    """
+    Option 2-A Viewport Computation:
+    - 60% Central Deadzone
+    - Spring Damping Smoothing: factor = 1 - exp(-10 * dt)
+    - Velocity Clamping: max 1800 px/s
+    - Boundary Clamping
+    """
+    if win_w <= 0 or win_h <= 0 or fw <= 0 or fh <= 0:
+        return {"is_tracking": False, "dest_x": 0, "dest_y": 0, "dest_w": win_w, "dest_h": win_h, "src_x": 0, "src_y": 0, "src_w": fw, "src_h": fh}
+
+    # Option 3-A: Panorama Fit Mode
+    if not tracking_mode:
+        target_aspect = float(fw) / float(fh)
+        client_aspect = float(win_w) / float(win_h)
+        if client_aspect > target_aspect:
+            dest_h = win_h
+            dest_w = int(win_h * target_aspect)
+            dest_x = (win_w - dest_w) // 2
+            dest_y = 0
+        else:
+            dest_w = win_w
+            dest_h = int(win_w / target_aspect)
+            dest_x = 0
+            dest_y = (win_h - dest_h) // 2
+        return {
+            "is_tracking": False,
+            "dest_x": dest_x, "dest_y": dest_y,
+            "dest_w": dest_w, "dest_h": dest_h,
+            "src_x": 0, "src_y": 0,
+            "src_w": fw, "src_h": fh
+        }
+
+    # Option 2-A: Auto-Tracking Mode
+    if win_w >= fw and win_h >= fh:
+        dest_x = (win_w - fw) // 2
+        dest_y = (win_h - fh) // 2
+        vp_state["src_x"] = 0.0
+        vp_state["src_y"] = 0.0
+        vp_state["target_x"] = 0.0
+        vp_state["target_y"] = 0.0
+        return {
+            "is_tracking": False,
+            "dest_x": dest_x, "dest_y": dest_y,
+            "dest_w": fw, "dest_h": fh,
+            "src_x": 0, "src_y": 0,
+            "src_w": fw, "src_h": fh
+        }
+
+    crop_w = min(win_w, fw)
+    crop_h = min(win_h, fh)
+    dest_x = (win_w - crop_w) // 2
+    dest_y = (win_h - crop_h) // 2
+
+    if mouse_norm_pos:
+        mx = (mouse_norm_pos[0] / 65535.0) * fw
+        my = (mouse_norm_pos[1] / 65535.0) * fh
+    else:
+        mx = fw / 2.0
+        my = fh / 2.0
+
+    # Deadzone: Central 60% (left/right margin 20%, top/bottom margin 20%)
+    dz_left = vp_state["src_x"] + 0.20 * crop_w
+    dz_right = vp_state["src_x"] + 0.80 * crop_w
+    dz_top = vp_state["src_y"] + 0.20 * crop_h
+    dz_bottom = vp_state["src_y"] + 0.80 * crop_h
+
+    if mx < dz_left:
+        vp_state["target_x"] = mx - 0.20 * crop_w
+    elif mx > dz_right:
+        vp_state["target_x"] = mx - 0.80 * crop_w
+
+    if my < dz_top:
+        vp_state["target_y"] = my - 0.20 * crop_h
+    elif my > dz_bottom:
+        vp_state["target_y"] = my - 0.80 * crop_h
+
+    max_x = max(0.0, float(fw - crop_w))
+    max_y = max(0.0, float(fh - crop_h))
+    vp_state["target_x"] = max(0.0, min(max_x, vp_state["target_x"]))
+    vp_state["target_y"] = max(0.0, min(max_y, vp_state["target_y"]))
+
+    diff_x = vp_state["target_x"] - vp_state["src_x"]
+    diff_y = vp_state["target_y"] - vp_state["src_y"]
+
+    # Spring damping smoothing factor
+    factor = 1.0 - math.exp(-10.0 * dt)
+    step_x = diff_x * factor
+    step_y = diff_y * factor
+
+    # Velocity Clamping (Max 1800 px/sec)
+    max_step = 1800.0 * dt
+    step_len = math.sqrt(step_x * step_x + step_y * step_y)
+    if step_len > max_step and step_len > 0.001:
+        step_x = (step_x / step_len) * max_step
+        step_y = (step_y / step_len) * max_step
+
+    if abs(diff_x) < 0.5:
+        vp_state["src_x"] = vp_state["target_x"]
+    else:
+        vp_state["src_x"] += step_x
+
+    if abs(diff_y) < 0.5:
+        vp_state["src_y"] = vp_state["target_y"]
+    else:
+        vp_state["src_y"] += step_y
+
+    vp_state["src_x"] = max(0.0, min(max_x, vp_state["src_x"]))
+    vp_state["src_y"] = max(0.0, min(max_y, vp_state["src_y"]))
+
+    return {
+        "is_tracking": True,
+        "dest_x": dest_x, "dest_y": dest_y,
+        "dest_w": crop_w, "dest_h": crop_h,
+        "src_x": int(vp_state["src_x"]), "src_y": int(vp_state["src_y"]),
+        "src_w": crop_w, "src_h": crop_h
+    }
+
 def run_pygame_player(sdp_path):
-    """Real-time H.264 broadcast player with mouse cursor, click ripples, and scroll indicators composited"""
+    """Real-time H.264 broadcast player with mouse auto-tracking (1:1 crop + 60% deadzone + spring damping), click ripples, and scroll indicators composited"""
     import pygame
     pygame.init()
     pygame.font.init()
 
     win_w, win_h = 1280, 720
     screen = pygame.display.set_mode((win_w, win_h), pygame.RESIZABLE)
-    pygame.display.set_caption("GridSight 教師廣播畫面 (雙擊或按 F 切換全螢幕)")
+    pygame.display.set_caption("GridSight 教師廣播 - 🎯 局部跟隨模式 (1:1清晰 | [T]切換全景 | [F]全螢幕)")
 
     clock = pygame.time.Clock()
-    font_large = pygame.font.Font(None, 28)
-    font_small = pygame.font.Font(None, 18)
+    font_large = get_cjk_font(pygame, 28)
+    font_small = get_cjk_font(pygame, 18)
+    font_osd = get_cjk_font(pygame, 20)
     font_badge = pygame.font.Font(None, 16)
+
+    fw, fh = 1920, 1080
+    frame_bytes = fw * fh * 3
 
     frame_lock = threading.Lock()
     latest_frame = [None]
@@ -96,11 +229,10 @@ def run_pygame_player(sdp_path):
             "-i", sdp_path,
             "-f", "rawvideo",
             "-pix_fmt", "rgb24",
-            "-s", "1280x720",
+            "-s", f"{fw}x{fh}",
             "-"
         ]
         proc = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL)
-        frame_bytes = 1280 * 720 * 3
         while player_running[0]:
             try:
                 raw = proc.stdout.read(frame_bytes)
@@ -204,6 +336,18 @@ def run_pygame_player(sdp_path):
     is_fullscreen = False
     last_click_time = 0
 
+    # Auto-tracking mouse viewport state (Option 2-A & 3-A)
+    tracking_mode = [True]
+    vp_state = {
+        "src_x": 0.0,
+        "src_y": 0.0,
+        "target_x": 0.0,
+        "target_y": 0.0
+    }
+    last_tracking_time = [time.time()]
+    osd_text = ["🎯 廣播滑鼠局部跟隨中 (按 [T] 切換全景)"]
+    osd_expire_time = [time.time() + 2.5]
+
     while player_running[0]:
         for event in pygame.event.get():
             if event.type == pygame.QUIT:
@@ -221,6 +365,17 @@ def run_pygame_player(sdp_path):
                     else:
                         screen = pygame.display.set_mode((1280, 720), pygame.RESIZABLE)
                     win_w, win_h = screen.get_size()
+                elif event.key == pygame.K_t:
+                    tracking_mode[0] = not tracking_mode[0]
+                    if tracking_mode[0]:
+                        pygame.display.set_caption("GridSight 教師廣播 - 🎯 局部跟隨模式 (1:1清晰 | [T]切換全景 | [F]全螢幕)")
+                        osd_text[0] = "🎯 廣播滑鼠局部跟隨中 (按 [T] 切換全景)"
+                        log_event("VIEWPORT", "🎯 Switched to Auto-Tracking Mode (1:1 Native Resolution)", GREEN)
+                    else:
+                        pygame.display.set_caption("GridSight 教師廣播 - 🌐 全景適應模式 ([T]切換跟隨 | [F]全螢幕)")
+                        osd_text[0] = "🌐 廣播全景適應中 (按 [T] 切換跟隨)"
+                        log_event("VIEWPORT", "🌐 Switched to Aspect-Ratio Fit Mode (Panorama)", CYAN)
+                    osd_expire_time[0] = time.time() + 1.8
                 elif event.key == pygame.K_ESCAPE:
                     if is_fullscreen:
                         is_fullscreen = False
@@ -242,50 +397,63 @@ def run_pygame_player(sdp_path):
         win_w, win_h = screen.get_size()
         screen.fill((15, 23, 42))  # Slate-900
 
-        # Calculate Aspect Ratio Fit (16:9)
-        target_aspect = 16.0 / 9.0
-        client_aspect = win_w / max(1, win_h)
-        if client_aspect > target_aspect:
-            view_h = win_h
-            view_w = int(win_h * target_aspect)
-            view_x = (win_w - view_w) // 2
-            view_y = 0
-        else:
-            view_w = win_w
-            view_h = int(win_w / target_aspect)
-            view_x = 0
-            view_y = (win_h - view_h) // 2
+        now = time.time()
+        dt = now - last_tracking_time[0]
+        if dt <= 0.001 or dt > 0.5:
+            dt = 0.033
+        last_tracking_time[0] = now
+
+        mouse_norm = None
+        with input_lock:
+            if input_state["active"] and (now - input_state["last_time"] < 5.0):
+                mouse_norm = (input_state["norm_x"], input_state["norm_y"])
+
+        vp = compute_viewport(win_w, win_h, fw, fh, tracking_mode[0], vp_state, mouse_norm, dt)
 
         # 1. Render Video Frame
         with frame_lock:
             raw = latest_frame[0]
 
         if raw is not None:
-            surf = pygame.image.frombuffer(raw, (1280, 720), "RGB")
-            if (view_w, view_h) != (1280, 720):
-                surf = pygame.transform.scale(surf, (view_w, view_h))
-            screen.blit(surf, (view_x, view_y))
+            surf = pygame.image.frombuffer(raw, (fw, fh), "RGB")
+            if vp["is_tracking"]:
+                crop_rect = pygame.Rect(vp["src_x"], vp["src_y"], vp["src_w"], vp["src_h"])
+                cropped_surf = surf.subsurface(crop_rect)
+                screen.blit(cropped_surf, (vp["dest_x"], vp["dest_y"]))
+            else:
+                scaled_surf = pygame.transform.scale(surf, (vp["dest_w"], vp["dest_h"]))
+                screen.blit(scaled_surf, (vp["dest_x"], vp["dest_y"]))
         else:
-            view_rect = pygame.Rect(view_x, view_y, view_w, view_h)
+            view_rect = pygame.Rect(vp["dest_x"], vp["dest_y"], vp["dest_w"], vp["dest_h"])
             pygame.draw.rect(screen, (30, 41, 59), view_rect)
             pygame.draw.rect(screen, (56, 189, 248), view_rect, 2)
-            title = font_large.render("GridSight Teacher Broadcast (H.264 UDP Multicast)", True, (56, 189, 248))
+            mode_desc = "🎯 1:1 局部跟隨" if vp["is_tracking"] else "🌐 全景適應"
+            title = font_large.render(f"GridSight 教師廣播 ({mode_desc})", True, (56, 189, 248))
             screen.blit(title, title.get_rect(center=view_rect.center))
-            hint = font_small.render("Press [F] / [F11] or double click to toggle Fullscreen (ESC to exit)", True, (148, 163, 184))
+            hint = font_small.render("按 [T] 切換跟隨/全景模式 | 按 [F] / 雙擊切換全螢幕 (ESC 退出)", True, (148, 163, 184))
             hint_rect = hint.get_rect(center=(view_rect.centerx, view_rect.bottom - 28))
             screen.blit(hint, hint_rect)
 
         # 2. Render Overlay Layer
         overlay = pygame.Surface((win_w, win_h), pygame.SRCALPHA)
+        clip_rect = pygame.Rect(vp["dest_x"], vp["dest_y"], vp["dest_w"], vp["dest_h"])
+        overlay.set_clip(clip_rect)
+
+        def map_coord(nx, ny):
+            if vp["is_tracking"]:
+                mx = (nx / 65535.0) * fw
+                my = (ny / 65535.0) * fh
+                return (vp["dest_x"] + int(mx - vp["src_x"]), vp["dest_y"] + int(my - vp["src_y"]))
+            else:
+                return (vp["dest_x"] + int((nx / 65535.0) * vp["dest_w"]), vp["dest_y"] + int((ny / 65535.0) * vp["dest_h"]))
+
         with input_lock:
-            now = time.time()
             cursor_active = input_state["active"] and (now - input_state["last_time"] < 5.0)
 
             # Draw Click Ripple Animations
             for anim in list(input_state["click_anims"]):
                 a = int(max(0, min(255, anim["alpha"])))
-                ax = view_x + int((anim["norm_x"] / 65535.0) * view_w)
-                ay = view_y + int((anim["norm_y"] / 65535.0) * view_h)
+                ax, ay = map_coord(anim["norm_x"], anim["norm_y"])
                 r = max(1, int(anim["radius"]))
 
                 if anim["type"] == 0:  # Left click: Cyan
@@ -307,8 +475,9 @@ def run_pygame_player(sdp_path):
             # Draw Scroll Animations
             for anim in list(input_state["scroll_anims"]):
                 a = int(max(0, min(255, anim["alpha"])))
-                sx = view_x + int((anim["norm_x"] / 65535.0) * view_w) + 14
-                sy = view_y + int((anim["norm_y"] / 65535.0) * view_h) + int(anim["offset_y"]) + 4
+                sx, sy = map_coord(anim["norm_x"], anim["norm_y"])
+                sx += 14
+                sy += int(anim["offset_y"]) + 4
 
                 pygame.draw.circle(overlay, (15, 23, 42, int(a * 0.85)), (sx, sy), 9)
                 pygame.draw.circle(overlay, (56, 189, 248, int(a * 0.6)), (sx, sy), 9, 1)
@@ -326,8 +495,7 @@ def run_pygame_player(sdp_path):
 
             # Draw Vector Mouse Pointer
             if cursor_active:
-                cx = view_x + int((input_state["norm_x"] / 65535.0) * view_w)
-                cy = view_y + int((input_state["norm_y"] / 65535.0) * view_h)
+                cx, cy = map_coord(input_state["norm_x"], input_state["norm_y"])
 
                 shadow_pts = [
                     (cx + 1, cy + 2),
@@ -366,6 +534,31 @@ def run_pygame_player(sdp_path):
                         pygame.draw.rect(overlay, (15, 23, 42, 200), (bx, by, bw + 8, bh + 4), border_radius=3)
                         pygame.draw.rect(overlay, (56, 189, 248, 220), (bx, by, bw + 8, bh + 4), 1, border_radius=3)
                         overlay.blit(badge_txt, (bx + 4, by + 2))
+
+        # Reset clip before drawing OSD so OSD is always fully visible
+        overlay.set_clip(None)
+
+        # 3. Draw OSD Floating Badge (Option 3-A)
+        if now < osd_expire_time[0]:
+            fade = min(1.0, max(0.0, (osd_expire_time[0] - now) / 0.5))
+            alpha_bg = int(220 * fade)
+            alpha_border = int(240 * fade)
+            alpha_text = int(255 * fade)
+
+            osd_surf = font_osd.render(osd_text[0], True, (248, 250, 252))
+            osd_surf.set_alpha(alpha_text)
+            obw, obh = osd_surf.get_size()
+            badge_w = obw + 32
+            badge_h = obh + 16
+            badge_x = (win_w - badge_w) // 2
+            badge_y = 24
+
+            badge_bg = pygame.Surface((badge_w, badge_h), pygame.SRCALPHA)
+            pygame.draw.rect(badge_bg, (11, 17, 32, alpha_bg), (0, 0, badge_w, badge_h), border_radius=18)
+            border_color = (56, 189, 248, alpha_border) if tracking_mode[0] else (245, 158, 11, alpha_border)
+            pygame.draw.rect(badge_bg, border_color, (0, 0, badge_w, badge_h), 2, border_radius=18)
+            badge_bg.blit(osd_surf, (16, 8))
+            overlay.blit(badge_bg, (badge_x, badge_y))
 
         screen.blit(overlay, (0, 0))
         pygame.display.flip()

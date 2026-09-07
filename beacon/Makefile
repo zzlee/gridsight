@@ -46,9 +46,16 @@ test-input-rtp:
 		-o build/test_input_rtp_receiver
 	timeout 30s ./build/test_input_rtp_receiver
 
-test: test-capture test-utils test-input-rtp
+test-viewport:
+	mkdir -p build
+	$(HOST_CXX) -std=c++17 -O2 -Wall -Wextra -pthread -Iinclude \
+		tests/test_auto_tracking_viewport.cpp src/rtp_receiver.cpp src/input_rtp_receiver.cpp src/utils.cpp \
+		-o build/test_auto_tracking_viewport
+	timeout 30s ./build/test_auto_tracking_viewport
+
+test: test-capture test-utils test-input-rtp test-viewport
 
 clean:
-	rm -f src/*.o $(TARGET) gs-agent.exe gs-agent build/test_capture_lifecycle build/test_security_utils build/test_input_rtp_receiver gs-agent.log
+	rm -f src/*.o $(TARGET) gs-agent.exe gs-agent build/test_capture_lifecycle build/test_security_utils build/test_input_rtp_receiver build/test_auto_tracking_viewport gs-agent.log
 
-.PHONY: all clean test test-capture test-utils test-input-rtp
+.PHONY: all clean test test-capture test-utils test-input-rtp test-viewport

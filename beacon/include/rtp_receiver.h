@@ -21,8 +21,24 @@ public:
     void Stop();
     static void RequestCloseOverlay();
 
+    struct ViewportResult {
+        bool is_tracking_active = false;
+        int dest_x = 0;
+        int dest_y = 0;
+        int dest_w = 0;
+        int dest_h = 0;
+        int src_x = 0;
+        int src_y = 0;
+        int src_w = 0;
+        int src_h = 0;
+    };
+
+    bool IsTrackingMode() const { return tracking_mode_; }
+    void SetTrackingMode(bool enabled) { tracking_mode_ = enabled; }
+    ViewportResult ComputeViewport(int client_w, int client_h, int fw, int fh);
+
     void UpdateInputEvent(const InputRTPEvent& event);
-    void RenderMouseOverlay(void* hdc, int view_x, int view_y, int view_w, int view_h);
+    void RenderMouseOverlay(void* hdc, const ViewportResult& vp, int fw, int fh);
     bool AdvanceAnimations();
     bool HasActiveAnimations();
 
@@ -105,6 +121,14 @@ private:
     std::vector<ClickAnimation> click_animations_;
     std::vector<ScrollAnimation> scroll_animations_;
     uint64_t last_cursor_event_time_ = 0;
+ 
+    // Auto-Tracking Mouse Viewport State (Deadzone 60% + Spring Damping)
+    bool tracking_mode_ = true;
+    double viewport_src_x_ = 0.0;
+    double viewport_src_y_ = 0.0;
+    double target_src_x_ = 0.0;
+    double target_src_y_ = 0.0;
+    uint64_t last_tracking_time_ms_ = 0;
 };
 
 } // namespace GridSight

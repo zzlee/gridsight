@@ -640,7 +640,7 @@ export class TeacherBroadcastStreamer {
       return { ok: false, error: reason };
     } 
 
-    if (sourceType === 'screen' && !this.captureProcess) {
+    if (sourceType === 'screen') {
       this.mouseOverlay.start();
       this.inputRtpStreamer.start({
         ...(localaddr ? { localIp: localaddr } : {}),

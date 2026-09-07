@@ -11,6 +11,7 @@
 #include <algorithm>
 #include <limits>
 #include <exception>
+#include <cmath>
 
 #ifdef _WIN32
 #include <winsock2.h>
@@ -22,10 +23,17 @@
 #include <mftransform.h>
 #include <mferror.h>
 #include <wmcodecdsp.h>
-
-static const GUID GS_CLSID_CMSH264DecoderMFT = {0x62ce7e72, 0x4c71, 0x4d20, {0xb1, 0x5d, 0x45, 0x28, 0x31, 0xa8, 0x7d, 0x9d}};
-static const GUID GS_CODECAPI_AVLowLatencyMode = {0x9c27891a, 0xed7a, 0x40e1, {0x88, 0xe1, 0xb2, 0xe4, 0x5b, 0x30, 0x49, 0x11}};
-static const GUID GS_MF_LOW_LATENCY = {0x9c51d740, 0xdc55, 0x4864, {0x9c, 0x41, 0x8b, 0xa4, 0x76, 0xa5, 0xa1, 0xb8}};
+#else
+#include <sys/types.h>
+#include <sys/socket.h>
+#include <netinet/in.h>
+#include <arpa/inet.h>
+#include <unistd.h>
+#define SOCKET int
+#define INVALID_SOCKET -1
+#define SOCKET_ERROR -1
+#define closesocket close
+#endif
 
 
 namespace {
@@ -164,6 +172,11 @@ static bool ParseRTPPacket(
 } // anonymous namespace
 
 namespace GridSight {
+
+#ifdef _WIN32
+static const GUID GS_CLSID_CMSH264DecoderMFT = {0x62ce7e72, 0x4c71, 0x4d20, {0xb1, 0x5d, 0x45, 0x28, 0x31, 0xa8, 0x7d, 0x9d}};
+static const GUID GS_CODECAPI_AVLowLatencyMode = {0x9c27891a, 0xed7a, 0x40e1, {0x88, 0xe1, 0xb2, 0xe4, 0x5b, 0x30, 0x49, 0x11}};
+static const GUID GS_MF_LOW_LATENCY = {0x9c51d740, 0xdc55, 0x4864, {0x9c, 0x41, 0x8b, 0xa4, 0x76, 0xa5, 0xa1, 0xb8}};
 
 // Global shared frame buffer for presentation overlay
 static std::mutex g_frame_mutex;
@@ -546,6 +559,8 @@ static void ToggleFullscreen(HWND hwnd) {
 }
 
 static RTPReceiver* g_rtp_receiver_instance = nullptr;
+static std::wstring g_osd_text = L"";
+static uint64_t g_osd_expire_time = 0;
 
 static LRESULT CALLBACK OverlayWndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) {
     switch (msg) {
@@ -570,7 +585,18 @@ static LRESULT CALLBACK OverlayWndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARA
         return 0;
 
     case WM_KEYDOWN:
-        if (wParam == 'F' || wParam == 'f' || wParam == VK_F11) {
+        if (wParam == 'T' || wParam == 't') {
+            if (g_rtp_receiver_instance) {
+                bool next_mode = !g_rtp_receiver_instance->IsTrackingMode();
+                g_rtp_receiver_instance->SetTrackingMode(next_mode);
+                g_osd_text = next_mode ? L"🎯 局部跟隨模式 (1:1清晰文字)" : L"🌐 全景適應模式 (等比例縮放)";
+                g_osd_expire_time = Utils::GetCurrentTimestampMs() + 2500;
+                SetWindowTextW(hwnd, next_mode ? L"GridSight 教師廣播 - 🎯 局部跟隨 [T:切換模式 | F:全螢幕]"
+                                               : L"GridSight 教師廣播 - 🌐 全景適應 [T:切換模式 | F:全螢幕]");
+                InvalidateRect(hwnd, NULL, FALSE);
+            }
+            return 0;
+        } else if (wParam == 'F' || wParam == 'f' || wParam == VK_F11) {
             ToggleFullscreen(hwnd);
             return 0;
         } else if (wParam == VK_ESCAPE) {
@@ -622,22 +648,16 @@ static LRESULT CALLBACK OverlayWndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARA
             }
         }
 
-        int view_w = client_w, view_h = client_h, view_x = 0, view_y = 0;
+        RTPReceiver::ViewportResult vp;
 
         if (has_frame) {
-            double target_aspect = (double)fw / (double)fh;
-            double client_aspect = (double)client_w / (double)client_h;
-
-            if (client_aspect > target_aspect) {
-                view_h = client_h;
-                view_w = (int)(client_h * target_aspect);
-                view_x = (client_w - view_w) / 2;
-                view_y = 0;
+            if (g_rtp_receiver_instance) {
+                vp = g_rtp_receiver_instance->ComputeViewport(client_w, client_h, fw, fh);
             } else {
-                view_w = client_w;
-                view_h = (int)(client_w / target_aspect);
-                view_x = 0;
-                view_y = (client_h - view_h) / 2;
+                vp.dest_w = client_w;
+                vp.dest_h = client_h;
+                vp.src_w = fw;
+                vp.src_h = fh;
             }
 
             BITMAPINFO bmi = {0};
@@ -649,25 +669,27 @@ static LRESULT CALLBACK OverlayWndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARA
             bmi.bmiHeader.biCompression = BI_RGB;
 
             SetStretchBltMode(memDC, COLORONCOLOR);
-            StretchDIBits(memDC, view_x, view_y, view_w, view_h, 0, 0, fw, fh, frame_copy.data(), &bmi, DIB_RGB_COLORS, SRCCOPY);
+            StretchDIBits(memDC, vp.dest_x, vp.dest_y, vp.dest_w, vp.dest_h,
+                          vp.src_x, vp.src_y, vp.src_w, vp.src_h,
+                          frame_copy.data(), &bmi, DIB_RGB_COLORS, SRCCOPY);
         } else {
             // Draw initial placeholder while waiting for first I-frame
             double target_aspect = 16.0 / 9.0;
             double client_aspect = (double)client_w / (double)client_h;
 
             if (client_aspect > target_aspect) {
-                view_h = client_h;
-                view_w = (int)(client_h * target_aspect);
-                view_x = (client_w - view_w) / 2;
-                view_y = 0;
+                vp.dest_h = client_h;
+                vp.dest_w = (int)(client_h * target_aspect);
+                vp.dest_x = (client_w - vp.dest_w) / 2;
+                vp.dest_y = 0;
             } else {
-                view_w = client_w;
-                view_h = (int)(client_w / target_aspect);
-                view_x = 0;
-                view_y = (client_h - view_h) / 2;
+                vp.dest_w = client_w;
+                vp.dest_h = (int)(client_w / target_aspect);
+                vp.dest_x = 0;
+                vp.dest_y = (client_h - vp.dest_h) / 2;
             }
 
-            RECT view_rc = { view_x, view_y, view_x + view_w, view_y + view_h };
+            RECT view_rc = { vp.dest_x, vp.dest_y, vp.dest_x + vp.dest_w, vp.dest_y + vp.dest_h };
             HBRUSH viewBrush = CreateSolidBrush(RGB(30, 41, 59));
             FillRect(memDC, &view_rc, viewBrush);
             DeleteObject(viewBrush);
@@ -675,7 +697,7 @@ static LRESULT CALLBACK OverlayWndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARA
             HPEN hPen = CreatePen(PS_SOLID, 2, RGB(56, 189, 248));
             HPEN hOldPen = (HPEN)SelectObject(memDC, hPen);
             HBRUSH hOldBrush = (HBRUSH)SelectObject(memDC, GetStockObject(HOLLOW_BRUSH));
-            Rectangle(memDC, view_x, view_y, view_x + view_w, view_y + view_h);
+            Rectangle(memDC, vp.dest_x, vp.dest_y, vp.dest_x + vp.dest_w, vp.dest_y + vp.dest_h);
             SelectObject(memDC, hOldBrush);
             SelectObject(memDC, hOldPen);
             DeleteObject(hPen);
@@ -708,7 +730,7 @@ static LRESULT CALLBACK OverlayWndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARA
 
             RECT hint_rc = view_rc;
             hint_rc.top = hint_rc.bottom - 40;
-            const wchar_t* hint = L"提示：雙擊畫面或按 [F] / [F11] 可切換全螢幕與視窗模式 (ESC 退出全螢幕)";
+            const wchar_t* hint = L"提示：按 [T] 切換滑鼠跟隨/全景適應，按 [F] / 雙擊切換全螢幕與視窗 (ESC 退出)";
             DrawTextW(memDC, hint, -1, &hint_rc, DT_CENTER | DT_SINGLELINE);
 
             SelectObject(memDC, hOldFont);
@@ -718,7 +740,51 @@ static LRESULT CALLBACK OverlayWndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARA
 
         // Overlay teacher mouse cursor and click effects over memDC before blit
         if (g_rtp_receiver_instance) {
-            g_rtp_receiver_instance->RenderMouseOverlay((void*)memDC, view_x, view_y, view_w, view_h);
+            g_rtp_receiver_instance->RenderMouseOverlay((void*)memDC, vp, fw, fh);
+        }
+
+        // Draw floating OSD banner if active
+        uint64_t now_ms = Utils::GetCurrentTimestampMs();
+        if (now_ms < g_osd_expire_time && !g_osd_text.empty()) {
+            Gdiplus::Graphics g(memDC);
+            g.SetSmoothingMode(Gdiplus::SmoothingModeAntiAlias);
+
+            int alpha = 230;
+            if (g_osd_expire_time - now_ms < 500) {
+                alpha = (int)(230.0 * (double)(g_osd_expire_time - now_ms) / 500.0);
+                alpha = std::max(0, std::min(230, alpha));
+            }
+
+            Gdiplus::FontFamily fontFamily(L"Segoe UI");
+            Gdiplus::Font osdFont(&fontFamily, 13, Gdiplus::FontStyleBold, Gdiplus::UnitPixel);
+            Gdiplus::RectF bounds;
+            g.MeasureString(g_osd_text.c_str(), -1, &osdFont, Gdiplus::PointF(0, 0), &bounds);
+
+            float pad_x = 16.0f;
+            float pad_y = 8.0f;
+            float box_w = bounds.Width + pad_x * 2.0f;
+            float box_h = bounds.Height + pad_y * 2.0f;
+            float box_x = (float)(client_w - box_w) / 2.0f;
+            float box_y = 16.0f;
+
+            bool is_tracking = g_rtp_receiver_instance ? g_rtp_receiver_instance->IsTrackingMode() : true;
+            Gdiplus::SolidBrush bgBrush(Gdiplus::Color(alpha, 15, 23, 42));
+            Gdiplus::Pen borderPen(Gdiplus::Color(alpha, is_tracking ? 56 : 148, is_tracking ? 189 : 163, is_tracking ? 248 : 184), 1.6f);
+
+            Gdiplus::GraphicsPath path;
+            float r = 6.0f;
+            path.AddArc(box_x, box_y, r * 2, r * 2, 180, 90);
+            path.AddArc(box_x + box_w - r * 2, box_y, r * 2, r * 2, 270, 90);
+            path.AddArc(box_x + box_w - r * 2, box_y + box_h - r * 2, r * 2, r * 2, 0, 90);
+            path.AddArc(box_x, box_y + box_h - r * 2, r * 2, r * 2, 90, 90);
+            path.CloseFigure();
+
+            g.FillPath(&bgBrush, &path);
+            g.DrawPath(&borderPen, &path);
+
+            Gdiplus::SolidBrush textBrush(Gdiplus::Color(alpha, 241, 245, 249));
+            Gdiplus::PointF textOrigin(box_x + pad_x, box_y + pad_y);
+            g.DrawString(g_osd_text.c_str(), -1, &osdFont, textOrigin, &textBrush);
         }
 
         BitBlt(hdc, 0, 0, client_w, client_h, memDC, 0, 0, SRCCOPY);
@@ -733,15 +799,7 @@ static LRESULT CALLBACK OverlayWndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARA
     return DefWindowProcW(hwnd, msg, wParam, lParam);
 }
 
-} // namespace GridSight
-#else
-#define SOCKET int
-#define INVALID_SOCKET -1
-#define SOCKET_ERROR -1
-#define closesocket close
-#endif
-
-namespace GridSight {
+#endif // _WIN32
 
 void RTPReceiver::RequestCloseOverlay() {
 #ifdef _WIN32
@@ -1626,7 +1684,6 @@ void RTPReceiver::ReceiveLoop() {
 }
 
 void RTPReceiver::UpdateInputEvent(const InputRTPEvent& event) {
-#ifdef _WIN32
     {
         std::lock_guard<std::mutex> lock(input_mutex_);
         has_cursor_ = true;
@@ -1662,12 +1719,147 @@ void RTPReceiver::UpdateInputEvent(const InputRTPEvent& event) {
         }
     }
 
+#ifdef _WIN32
     if (hwnd_overlay_) {
         InvalidateRect((HWND)hwnd_overlay_, NULL, FALSE);
     }
-#else
-    (void)event;
 #endif
+}
+
+RTPReceiver::ViewportResult RTPReceiver::ComputeViewport(int client_w, int client_h, int fw, int fh) {
+    ViewportResult result;
+    if (client_w <= 0 || client_h <= 0 || fw <= 0 || fh <= 0) {
+        return result;
+    }
+
+    if (!tracking_mode_) {
+        double target_aspect = (double)fw / (double)fh;
+        double client_aspect = (double)client_w / (double)client_h;
+
+        if (client_aspect > target_aspect) {
+            result.dest_h = client_h;
+            result.dest_w = (int)(client_h * target_aspect);
+            result.dest_x = (client_w - result.dest_w) / 2;
+            result.dest_y = 0;
+        } else {
+            result.dest_w = client_w;
+            result.dest_h = (int)(client_w / target_aspect);
+            result.dest_x = 0;
+            result.dest_y = (client_h - result.dest_h) / 2;
+        }
+
+        result.is_tracking_active = false;
+        result.src_x = 0;
+        result.src_y = 0;
+        result.src_w = fw;
+        result.src_h = fh;
+        return result;
+    }
+
+    // Option 2-A: Auto-Tracking Mode (1:1 Native Resolution + 60% Deadzone + Spring Damping)
+    if (client_w >= fw && client_h >= fh) {
+        result.is_tracking_active = false;
+        result.dest_w = fw;
+        result.dest_h = fh;
+        result.dest_x = (client_w - fw) / 2;
+        result.dest_y = (client_h - fh) / 2;
+        result.src_x = 0;
+        result.src_y = 0;
+        result.src_w = fw;
+        result.src_h = fh;
+        viewport_src_x_ = 0.0;
+        viewport_src_y_ = 0.0;
+        target_src_x_ = 0.0;
+        target_src_y_ = 0.0;
+        return result;
+    }
+
+    int crop_w = std::min(client_w, fw);
+    int crop_h = std::min(client_h, fh);
+    int dest_x = (client_w - crop_w) / 2;
+    int dest_y = (client_h - crop_h) / 2;
+
+    double mx = 0.0, my = 0.0;
+    {
+        std::lock_guard<std::mutex> lock(input_mutex_);
+        if (has_cursor_) {
+            mx = ((double)cursor_norm_x_ / 65535.0) * fw;
+            my = ((double)cursor_norm_y_ / 65535.0) * fh;
+        } else {
+            mx = (double)fw / 2.0;
+            my = (double)fh / 2.0;
+        }
+    }
+
+    // Deadzone: Central 60% (left/right margin 20%, top/bottom margin 20%)
+    double dz_left = viewport_src_x_ + 0.20 * crop_w;
+    double dz_right = viewport_src_x_ + 0.80 * crop_w;
+    double dz_top = viewport_src_y_ + 0.20 * crop_h;
+    double dz_bottom = viewport_src_y_ + 0.80 * crop_h;
+
+    if (mx < dz_left) {
+        target_src_x_ = mx - 0.20 * crop_w;
+    } else if (mx > dz_right) {
+        target_src_x_ = mx - 0.80 * crop_w;
+    }
+
+    if (my < dz_top) {
+        target_src_y_ = my - 0.20 * crop_h;
+    } else if (my > dz_bottom) {
+        target_src_y_ = my - 0.80 * crop_h;
+    }
+
+    double max_x = std::max(0.0, (double)(fw - crop_w));
+    double max_y = std::max(0.0, (double)(fh - crop_h));
+    target_src_x_ = std::max(0.0, std::min(max_x, target_src_x_));
+    target_src_y_ = std::max(0.0, std::min(max_y, target_src_y_));
+
+    uint64_t now_ms = Utils::GetCurrentTimestampMs();
+    double dt = (last_tracking_time_ms_ > 0) ? (double)(now_ms - last_tracking_time_ms_) / 1000.0 : 0.033;
+    if (dt <= 0.001 || dt > 0.5) dt = 0.033;
+    last_tracking_time_ms_ = now_ms;
+
+    double diff_x = target_src_x_ - viewport_src_x_;
+    double diff_y = target_src_y_ - viewport_src_y_;
+
+    // Spring damping smoothing factor (~0.28 per frame at 30fps)
+    double factor = 1.0 - exp(-10.0 * dt);
+    double step_x = diff_x * factor;
+    double step_y = diff_y * factor;
+
+    // Velocity Clamping (Max 1800 px/sec)
+    double max_step = 1800.0 * dt;
+    double step_len = sqrt(step_x * step_x + step_y * step_y);
+    if (step_len > max_step && step_len > 0.001) {
+        step_x = (step_x / step_len) * max_step;
+        step_y = (step_y / step_len) * max_step;
+    }
+
+    if (fabs(diff_x) < 0.5) {
+        viewport_src_x_ = target_src_x_;
+    } else {
+        viewport_src_x_ += step_x;
+    }
+
+    if (fabs(diff_y) < 0.5) {
+        viewport_src_y_ = target_src_y_;
+    } else {
+        viewport_src_y_ += step_y;
+    }
+
+    viewport_src_x_ = std::max(0.0, std::min(max_x, viewport_src_x_));
+    viewport_src_y_ = std::max(0.0, std::min(max_y, viewport_src_y_));
+
+    result.is_tracking_active = true;
+    result.dest_x = dest_x;
+    result.dest_y = dest_y;
+    result.dest_w = crop_w;
+    result.dest_h = crop_h;
+    result.src_x = (int)viewport_src_x_;
+    result.src_y = (int)viewport_src_y_;
+    result.src_w = crop_w;
+    result.src_h = crop_h;
+    return result;
 }
 
 bool RTPReceiver::AdvanceAnimations() {
@@ -1699,6 +1891,13 @@ bool RTPReceiver::AdvanceAnimations() {
         }
     }
 
+    if (tracking_mode_ && (fabs(target_src_x_ - viewport_src_x_) > 0.5 || fabs(target_src_y_ - viewport_src_y_) > 0.5)) {
+        active = true;
+    }
+    if (g_osd_expire_time > 0 && Utils::GetCurrentTimestampMs() < g_osd_expire_time) {
+        active = true;
+    }
+
     return active;
 #else
     return false;
@@ -1708,27 +1907,41 @@ bool RTPReceiver::AdvanceAnimations() {
 bool RTPReceiver::HasActiveAnimations() {
 #ifdef _WIN32
     std::lock_guard<std::mutex> lock(input_mutex_);
-    return !click_animations_.empty() || !scroll_animations_.empty();
+    bool anim_active = !click_animations_.empty() || !scroll_animations_.empty();
+    bool tracking_moving = tracking_mode_ && (fabs(target_src_x_ - viewport_src_x_) > 0.5 || fabs(target_src_y_ - viewport_src_y_) > 0.5);
+    bool osd_active = (g_osd_expire_time > 0 && Utils::GetCurrentTimestampMs() < g_osd_expire_time);
+    return anim_active || tracking_moving || osd_active;
 #else
     return false;
 #endif
 }
 
-void RTPReceiver::RenderMouseOverlay(void* hdc_ptr, int view_x, int view_y, int view_w, int view_h) {
+void RTPReceiver::RenderMouseOverlay(void* hdc_ptr, const ViewportResult& vp, int fw, int fh) {
 #ifdef _WIN32
     HDC memDC = (HDC)hdc_ptr;
-    if (!memDC) return;
+    if (!memDC || vp.dest_w <= 0 || vp.dest_h <= 0) return;
 
     std::lock_guard<std::mutex> lock(input_mutex_);
-    if (!has_cursor_ || view_w <= 0 || view_h <= 0) return;
+    if (!has_cursor_) return;
 
     uint64_t now_ms = Utils::GetCurrentTimestampMs();
     if (last_cursor_event_time_ > 0 && (now_ms - last_cursor_event_time_ > 5000)) {
         return;
     }
 
-    int cx = view_x + (int)(((double)cursor_norm_x_ / 65535.0) * view_w);
-    int cy = view_y + (int)(((double)cursor_norm_y_ / 65535.0) * view_h);
+    int cx = 0, cy = 0;
+    if (vp.is_tracking_active) {
+        int mx = (int)(((double)cursor_norm_x_ / 65535.0) * fw);
+        int my = (int)(((double)cursor_norm_y_ / 65535.0) * fh);
+        cx = vp.dest_x + (mx - vp.src_x);
+        cy = vp.dest_y + (my - vp.src_y);
+    } else {
+        cx = vp.dest_x + (int)(((double)cursor_norm_x_ / 65535.0) * vp.dest_w);
+        cy = vp.dest_y + (int)(((double)cursor_norm_y_ / 65535.0) * vp.dest_h);
+    }
+
+    bool cursor_visible = (cx >= vp.dest_x && cx <= vp.dest_x + vp.dest_w &&
+                           cy >= vp.dest_y && cy <= vp.dest_y + vp.dest_h);
 
     Gdiplus::Graphics g(memDC);
     g.SetSmoothingMode(Gdiplus::SmoothingModeAntiAlias);
@@ -1736,25 +1949,36 @@ void RTPReceiver::RenderMouseOverlay(void* hdc_ptr, int view_x, int view_y, int 
     // 1. Draw Click Ripple Animations
     for (const auto& anim : click_animations_) {
         int a = (int)std::max(0.0f, std::min(255.0f, anim.alpha));
-        int ex = view_x + (int)(((double)anim.norm_x / 65535.0) * view_w);
-        int ey = view_y + (int)(((double)anim.norm_y / 65535.0) * view_h);
-
-        if (anim.type == 0) {
-            Gdiplus::Pen pen(Gdiplus::Color(a, 0, 229, 255), 2.6f);
-            g.DrawEllipse(&pen, ex - anim.radius, ey - anim.radius, anim.radius * 2.0f, anim.radius * 2.0f);
-            if (anim.radius < 16.0f) {
-                Gdiplus::SolidBrush dotBrush(Gdiplus::Color(a, 0, 229, 255));
-                g.FillEllipse(&dotBrush, ex - 3, ey - 3, 6, 6);
-            }
-        } else if (anim.type == 1) {
-            Gdiplus::Pen pen1(Gdiplus::Color(a, 255, 152, 0), 2.5f);
-            Gdiplus::Pen pen2(Gdiplus::Color((int)(a * 0.7f), 255, 87, 34), 1.5f);
-            g.DrawEllipse(&pen1, ex - anim.radius, ey - anim.radius, anim.radius * 2.0f, anim.radius * 2.0f);
-            float inner_r = std::max(2.0f, anim.radius - 8.0f);
-            g.DrawEllipse(&pen2, ex - inner_r, ey - inner_r, inner_r * 2.0f, inner_r * 2.0f);
+        int ex = 0, ey = 0;
+        if (vp.is_tracking_active) {
+            int anim_x = (int)(((double)anim.norm_x / 65535.0) * fw);
+            int anim_y = (int)(((double)anim.norm_y / 65535.0) * fh);
+            ex = vp.dest_x + (anim_x - vp.src_x);
+            ey = vp.dest_y + (anim_y - vp.src_y);
         } else {
-            Gdiplus::Pen pen(Gdiplus::Color(a, 168, 85, 247), 2.5f);
-            g.DrawEllipse(&pen, ex - anim.radius, ey - anim.radius, anim.radius * 2.0f, anim.radius * 2.0f);
+            ex = vp.dest_x + (int)(((double)anim.norm_x / 65535.0) * vp.dest_w);
+            ey = vp.dest_y + (int)(((double)anim.norm_y / 65535.0) * vp.dest_h);
+        }
+
+        if (ex >= vp.dest_x - 50 && ex <= vp.dest_x + vp.dest_w + 50 &&
+            ey >= vp.dest_y - 50 && ey <= vp.dest_y + vp.dest_h + 50) {
+            if (anim.type == 0) {
+                Gdiplus::Pen pen(Gdiplus::Color(a, 0, 229, 255), 2.6f);
+                g.DrawEllipse(&pen, ex - anim.radius, ey - anim.radius, anim.radius * 2.0f, anim.radius * 2.0f);
+                if (anim.radius < 16.0f) {
+                    Gdiplus::SolidBrush dotBrush(Gdiplus::Color(a, 0, 229, 255));
+                    g.FillEllipse(&dotBrush, ex - 3, ey - 3, 6, 6);
+                }
+            } else if (anim.type == 1) {
+                Gdiplus::Pen pen1(Gdiplus::Color(a, 255, 152, 0), 2.5f);
+                Gdiplus::Pen pen2(Gdiplus::Color((int)(a * 0.7f), 255, 87, 34), 1.5f);
+                g.DrawEllipse(&pen1, ex - anim.radius, ey - anim.radius, anim.radius * 2.0f, anim.radius * 2.0f);
+                float inner_r = std::max(2.0f, anim.radius - 8.0f);
+                g.DrawEllipse(&pen2, ex - inner_r, ey - inner_r, inner_r * 2.0f, inner_r * 2.0f);
+            } else {
+                Gdiplus::Pen pen(Gdiplus::Color(a, 168, 85, 247), 2.5f);
+                g.DrawEllipse(&pen, ex - anim.radius, ey - anim.radius, anim.radius * 2.0f, anim.radius * 2.0f);
+            }
         }
     }
 
@@ -1763,21 +1987,34 @@ void RTPReceiver::RenderMouseOverlay(void* hdc_ptr, int view_x, int view_y, int 
     Gdiplus::Font font(&fontFamily, 9, Gdiplus::FontStyleBold, Gdiplus::UnitPixel);
     for (const auto& anim : scroll_animations_) {
         int a = (int)std::max(0.0f, std::min(255.0f, anim.alpha));
-        int ex = view_x + (int)(((double)anim.norm_x / 65535.0) * view_w) + 14;
-        int ey = view_y + (int)(((double)anim.norm_y / 65535.0) * view_h) + (int)anim.offset_y + 4;
+        int ex = 0, ey = 0;
+        if (vp.is_tracking_active) {
+            int anim_x = (int)(((double)anim.norm_x / 65535.0) * fw);
+            int anim_y = (int)(((double)anim.norm_y / 65535.0) * fh);
+            ex = vp.dest_x + (anim_x - vp.src_x) + 14;
+            ey = vp.dest_y + (anim_y - vp.src_y) + (int)anim.offset_y + 4;
+        } else {
+            ex = vp.dest_x + (int)(((double)anim.norm_x / 65535.0) * vp.dest_w) + 14;
+            ey = vp.dest_y + (int)(((double)anim.norm_y / 65535.0) * vp.dest_h) + (int)anim.offset_y + 4;
+        }
 
-        Gdiplus::SolidBrush bubbleBrush(Gdiplus::Color((int)(a * 0.85f), 15, 23, 42));
-        Gdiplus::SolidBrush textBrush(Gdiplus::Color(a, 56, 189, 248));
-        Gdiplus::Pen bubblePen(Gdiplus::Color((int)(a * 0.6f), 56, 189, 248), 1.0f);
+        if (ex >= vp.dest_x - 30 && ex <= vp.dest_x + vp.dest_w + 30 &&
+            ey >= vp.dest_y - 30 && ey <= vp.dest_y + vp.dest_h + 30) {
+            Gdiplus::SolidBrush bubbleBrush(Gdiplus::Color((int)(a * 0.85f), 15, 23, 42));
+            Gdiplus::SolidBrush textBrush(Gdiplus::Color(a, 56, 189, 248));
+            Gdiplus::Pen bubblePen(Gdiplus::Color((int)(a * 0.6f), 56, 189, 248), 1.0f);
 
-        int bw = 16, bh = 16;
-        g.FillEllipse(&bubbleBrush, ex - bw / 2, ey - bh / 2, bw, bh);
-        g.DrawEllipse(&bubblePen, ex - bw / 2, ey - bh / 2, bw, bh);
+            int bw = 16, bh = 16;
+            g.FillEllipse(&bubbleBrush, ex - bw / 2, ey - bh / 2, bw, bh);
+            g.DrawEllipse(&bubblePen, ex - bw / 2, ey - bh / 2, bw, bh);
 
-        const wchar_t* arrow = anim.is_up ? L"▲" : L"▼";
-        Gdiplus::PointF origin((Gdiplus::REAL)(ex - 5), (Gdiplus::REAL)(ey - 6));
-        g.DrawString(arrow, -1, &font, origin, &textBrush);
+            const wchar_t* arrow = anim.is_up ? L"▲" : L"▼";
+            Gdiplus::PointF origin((Gdiplus::REAL)(ex - 5), (Gdiplus::REAL)(ey - 6));
+            g.DrawString(arrow, -1, &font, origin, &textBrush);
+        }
     }
+
+    if (!cursor_visible) return;
 
     // 3. Draw Vector Arrow Pointer with Shadow
     Gdiplus::Point shadowPts[7] = {
@@ -1786,7 +2023,7 @@ void RTPReceiver::RenderMouseOverlay(void* hdc_ptr, int view_x, int view_y, int 
         Gdiplus::Point(cx + 5, cy + 16),
         Gdiplus::Point(cx + 9, cy + 24),
         Gdiplus::Point(cx + 12, cy + 23),
-        Gdiplus::Point(cx + 8, cy + 15),
+        Gdiplus::Point(cx + 7, cy + 15),
         Gdiplus::Point(cx + 14, cy + 15)
     };
     Gdiplus::SolidBrush shadowBrush(Gdiplus::Color(90, 0, 0, 0));
@@ -1833,7 +2070,7 @@ void RTPReceiver::RenderMouseOverlay(void* hdc_ptr, int view_x, int view_y, int 
         }
     }
 #else
-    (void)hdc_ptr; (void)view_x; (void)view_y; (void)view_w; (void)view_h;
+    (void)hdc_ptr; (void)vp; (void)fw; (void)fh;
 #endif
 }
 
@@ -1874,13 +2111,16 @@ void RTPReceiver::UIThreadLoop() {
     HWND hwnd = CreateWindowExW(
         WS_EX_TOPMOST,
         L"GridSightOverlayClass",
-        L"GridSight 教師廣播畫面 (雙擊或按 F 切換全螢幕)",
+        tracking_mode_ ? L"GridSight 教師廣播 - 🎯 局部跟隨 [T:切換模式 | F:全螢幕]"
+                       : L"GridSight 教師廣播 - 🌐 全景適應 [T:切換模式 | F:全螢幕]",
         WS_OVERLAPPEDWINDOW | WS_VISIBLE,
         x, y, win_w, win_h,
         NULL, NULL, hInstance, NULL
     );
 
     if (hwnd) {
+        g_osd_text = tracking_mode_ ? L"🎯 局部跟隨模式已啟用 (按 [T] 可切換全景)" : L"🌐 全景適應模式 (按 [T] 可切換跟隨)";
+        g_osd_expire_time = Utils::GetCurrentTimestampMs() + 3500;
         hwnd_overlay_ = (void*)hwnd;
         ShowWindow(hwnd, SW_SHOW);
         SetWindowPos(hwnd, HWND_TOPMOST, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE);
@@ -1921,6 +2161,9 @@ void RTPReceiver::RenderFrame(const uint8_t* h264_data, size_t size) {
             InvalidateRect((HWND)hwnd_overlay_, NULL, FALSE);
         }
     }
+#else
+    (void)h264_data;
+    (void)size;
 #endif
 }
 

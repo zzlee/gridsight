@@ -176,6 +176,13 @@ timeline
 - [ ] **學生端 H.264 解碼「GPU 硬解優先 + CPU 軟解無縫降級」雙層管線 (Hardware MFT D3D11VA + Software Fallback)**：
   - **現況機制**：目前學生端接收教師 RTP 廣播畫面時（`rtp_receiver.cpp`），呼叫 Windows Media Foundation 內建之 `CLSID_CMSH264DecoderMFT`。因未綁定 `IMFDXGIDeviceManager`，底層以 CPU SIMD (SSE2/AVX) 軟體解碼運作，確保無獨顯、老舊內顯或虛擬機環境皆具備 100% 開箱即用相容性。
   - **未來目標**：引進與編碼端（`encoder.cpp`）相同的 `MFTEnumEx` 雙層探測機制：優先啟用 GPU 硬體加速解碼（Intel QuickSync / NVIDIA NVDEC / AMD VCN），達成 0% CPU 解碼負載；若機器無硬解支援、初始化失敗或運行於虛擬環境，自動無痛降級至現行 CPU 軟體解碼，並針對 Windows N 版組件缺失提供明確指引日誌。
-- [ ] **學生端檔案分發與作業收取 (File Distribution & Collection)**：利用現有 HTTP/WebSocket 通道實作無痕檔案推送與批次繳交。
-- [ ] **全班螢幕黑屏/禁網鎖定 (Screen & Input Lockout)**：提供課堂專注模式，一鍵廣播黑屏畫面並攔截鍵盤滑鼠操作。
-- [ ] **AI 離題行為輔助分析 (AI Behavioral Insights)**：在邊緣端或教師端整合輕量文字與行為特徵分析，提供課堂專注度視覺化報表。
+- [ ] **課堂即時快問快答與隨堂測驗 (Instant Quiz & Live Polling)**：
+  - 免開瀏覽器、0 外網依賴，教師端一鍵出單選/是非題，學生端彈出原生置頂卡片點選，10 秒內完成全班答題分佈柱狀圖與成績統計。
+- [ ] **學生無聲舉手與求助追蹤系統 (Silent Hand-Raise & Help Desk)**：
+  - 解決電腦教室螢幕高遮擋視線、後排學生不敢舉手的痛點；學生端一鍵無聲求助，教師畫布卡片亮黃色跳動脈衝，頂部排隊清單一鍵導航聚焦。
+- [ ] **上機考試防作弊：一鍵外網切斷（保留教師監控通道）(Exam Network Shield)**：
+  - 考試模式下一鍵阻斷學生端一切外網與跨機通訊，嚴格僅放行往教師 IP（Port 3000、多播 8888/9000）之監控與收作業通道。
+- [ ] **廣播視窗滑鼠自動跟隨 (Auto-Tracking Mouse on Broadcast)**：
+  - 視窗模式下以 1:1 原生解析度顯示，邊界死區觸發與平滑彈簧插值平移，設定最高平移速限，避免劇烈晃動暈眩。
+- [ ] **AI 離題行為輔助分析 (AI Behavioral Insights)**：
+  - 在邊緣端或教師端整合輕量文字與行為特徵分析，產出課堂專注度視覺化報表。

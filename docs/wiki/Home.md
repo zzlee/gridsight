@@ -27,4 +27,4 @@
 9. **[課堂作業批次收取與自動歸檔指南 (Classroom Assignment Dropbox Guide)](classroom-assignment-dropbox.md)**
    - 詳述免開瀏覽器之 Windows 原生 C++ 拖曳視窗、座號自動歸檔、重複繳交最新版覆蓋機制與零依賴純 Node.js ZIP 打包下載流程。
 10. **[未來功能企劃與目標清單 (Future Goals)](future-features-plan.md)**
-    - 規劃「學生示範廣播」、「廣播視窗滑鼠自動跟隨」、「廣播視窗全螢幕模式」與「學號登錄」等未來擴充技術細節。
+    - 記錄已落地之五大核心里程碑，並規劃「課堂快問快答」、「學生無聲舉手」、「考試防作弊外網切斷」與「GPU 硬體加速解碼」等未來推進目標。

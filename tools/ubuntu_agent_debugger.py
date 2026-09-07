@@ -618,7 +618,7 @@ class UbuntuAgentDebugger:
         parts = self.local_ip.split(".")
         subnet = f"{parts[0]}.{parts[1]}.{parts[2]}"
         
-        for host in [72, 79, 185, 201, 100, 1]:
+        for host in [103, 100, 201, 72, 79, 185, 1]:
             target = f"{subnet}.{host}"
             try:
                 s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
@@ -634,8 +634,7 @@ class UbuntuAgentDebugger:
         if self.teacher_ip:
             log_event("DISCOVERY", f"✅ Paired with Teacher Console at {BOLD}{self.teacher_ip}:{self.port}{RESET}", GREEN)
         else:
-            self.teacher_ip = "192.168.190.72"
-            log_event("DISCOVERY", f"⚠️ Defaulting teacher IP to {self.teacher_ip}:{self.port}", YELLOW)
+            log_event("DISCOVERY", "⏳ Waiting for dynamic Token Grant response to auto-pair teacher IP...", YELLOW)
 
     def beacon_loop(self):
         sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
@@ -658,20 +657,21 @@ class UbuntuAgentDebugger:
                         "os": "Ubuntu Linux (x64)",
                         "uptime": 3600,
                         "cpu": {"model": "Intel Core", "cores": 8, "usage_percent": 12.5},
-                        "ram": {"total_mb": 16384, "avail_mb": 10120, "usage_percent": 38.2},
-                        "disk": {"drive": "/", "total_gb": 256, "free_gb": 128, "usage_percent": 50.0}
+                        "ram": {"total_mb": 16384, "used_mb": 4096, "usage_percent": 25.0},
+                        "disk": {"total_gb": 512, "used_gb": 128, "usage_percent": 25.0}
                     }
-                }).encode("utf-8")
+                })
+                # Broadcast beacon
+                sock.sendto(payload.encode("utf-8"), ("255.255.255.255", MCAST_BEACON_PORT))
                 
-                sock.sendto(payload, (MCAST_BEACON_IP, MCAST_BEACON_PORT))
-                if self.teacher_ip:
-                    sock.sendto(payload, (self.teacher_ip, MCAST_BEACON_PORT))
-
                 # Listen for TOKEN_GRANT response
                 try:
                     resp_data, resp_addr = sock.recvfrom(2048)
                     resp_json = json.loads(resp_data.decode("utf-8", errors="ignore"))
                     if resp_json.get("type") == "TOKEN_GRANT":
+                        if resp_addr and resp_addr[0] and self.teacher_ip != resp_addr[0]:
+                            self.teacher_ip = resp_addr[0]
+                            log_event("DISCOVERY", f"🎯 Auto-paired with Teacher Console at {BOLD}{self.teacher_ip}:{self.port}{RESET}", BOLD + GREEN)
                         new_token = resp_json.get("token", "")
                         if new_token and new_token != self.token:
                             self.token = new_token
@@ -884,14 +884,13 @@ class UbuntuAgentDebugger:
 
     def ws_command_loop(self):
         """Connects reverse WebSocket to teacher console and logs all received events"""
-        log_event("WS_CLIENT", f"Preparing reverse WebSocket to ws://{self.teacher_ip}:{self.port}/ws/agent...", CYAN)
-        
         while self.running:
-            if not self.token:
-                time.sleep(1.0)
+            if not self.token or not self.teacher_ip:
+                time.sleep(0.5)
                 continue
 
             try:
+                log_event("WS_CLIENT", f"Preparing reverse WebSocket to ws://{self.teacher_ip}:{self.port}/ws/agent...", CYAN)
                 # Basic WebSocket Client handshake
                 s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
                 s.settimeout(4.0)

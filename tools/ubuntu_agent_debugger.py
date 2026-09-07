@@ -639,6 +639,10 @@ class UbuntuAgentDebugger:
     def beacon_loop(self):
         sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
         sock.setsockopt(socket.SOL_SOCKET, socket.SO_BROADCAST, 1)
+        try:
+            sock.setsockopt(socket.IPPROTO_IP, socket.IP_MULTICAST_TTL, 2)
+        except:
+            pass
         sock.settimeout(2.0)
         
         while self.running:
@@ -661,8 +665,18 @@ class UbuntuAgentDebugger:
                         "disk": {"total_gb": 512, "used_gb": 128, "usage_percent": 25.0}
                     }
                 })
-                # Broadcast beacon
-                sock.sendto(payload.encode("utf-8"), ("255.255.255.255", MCAST_BEACON_PORT))
+                raw_payload = payload.encode("utf-8")
+                # Broadcast and Multicast beacon (matching C++ gs-agent discovery)
+                sock.sendto(raw_payload, ("255.255.255.255", MCAST_BEACON_PORT))
+                try:
+                    sock.sendto(raw_payload, (MCAST_BEACON_IP, MCAST_BEACON_PORT))
+                except:
+                    pass
+                if self.teacher_ip:
+                    try:
+                        sock.sendto(raw_payload, (self.teacher_ip, MCAST_BEACON_PORT))
+                    except:
+                        pass
                 
                 # Listen for TOKEN_GRANT response
                 try:
@@ -972,6 +986,21 @@ class UbuntuAgentDebugger:
             elif action == "STOP_BROADCAST":
                 log_event("EVENT_BCAST", "🛑 Teacher clicked STOP_BROADCAST", YELLOW)
                 self.close_player()
+            elif action == "LOCK_SCREEN":
+                msg = data.get("message", "請專心聽課")
+                log_event("EVENT_LOCK", f"🔒 Teacher ordered LOCK_SCREEN (Message: {BOLD}{msg}{RESET})", BOLD + YELLOW)
+            elif action == "UNLOCK_SCREEN":
+                log_event("EVENT_LOCK", "🔓 Teacher ordered UNLOCK_SCREEN", BOLD + GREEN)
+            elif action == "COLLECT_ASSIGNMENT":
+                title = data.get("assignmentTitle", "課堂作業")
+                exts = data.get("allowedExts", "*")
+                log_event("EVENT_ASSIGN", f"📁 Teacher initiated Assignment Collection: {BOLD}{title}{RESET} (Exts: {exts})", BOLD + GREEN)
+            elif action == "STOP_COLLECT_ASSIGNMENT":
+                log_event("EVENT_ASSIGN", "📁 Teacher stopped Assignment Collection", YELLOW)
+            elif action == "START_SHOWCASE":
+                log_event("EVENT_SHOWCASE", "📡 Teacher selected this student for Showcase Relay to entire class!", BOLD + MAGENTA)
+            elif action == "STOP_SHOWCASE":
+                log_event("EVENT_SHOWCASE", "⏹️ Teacher ended Showcase Relay", MAGENTA)
             else:
                 log_event("EVENT_OTHER", f"📩 Received: {raw_json}", DIM)
         except Exception as e:

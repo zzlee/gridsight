@@ -286,7 +286,15 @@ export class TeacherBroadcastStreamer {
     if (sourceType === 'student-relay') {
       this.relayMac = options.relayMac?.toLowerCase() || null;
       logger.info(`[Broadcast] Starting student screen relay for MAC: ${this.relayMac}`);
-      inputArgs = ['-r', String(fps), '-f', 'h264', '-i', '-'];
+      inputArgs = [
+        '-fflags', 'nobuffer',
+        '-flags', 'low_delay',
+        '-probesize', '32',
+        '-analyzeduration', '0',
+        '-r', String(fps),
+        '-f', 'h264',
+        '-i', '-',
+      ];
       mediaConstraints = [];
     } else if (sourceType === 'file' || sourceType === 'url') {
       // Media broadcast test: stream a local file or remote URL over the same
@@ -494,13 +502,13 @@ export class TeacherBroadcastStreamer {
         '-maxrate', `${bitrate}k`,
         '-bufsize', `${Math.floor(bitrate / 2)}k`,
         '-pix_fmt', 'yuv420p',
-        '-g', String(fps),
-        '-keyint_min', String(fps),
+        '-g', String(Math.max(10, Math.floor(fps / 2))),
+        '-keyint_min', String(Math.max(10, Math.floor(fps / 2))),
         '-sc_threshold', '0',
         '-slices', '1',
         '-bf', '0',
         '-flags', '+low_delay+global_header',
-        '-x264-params', 'repeat-headers=1:sliced-threads=0:force-cfr=1',
+        '-x264-params', 'repeat-headers=1:sliced-threads=0:force-cfr=1:sync-lookahead=0:rc-lookahead=0',
       ];
 
       if (audioArgs.length > 0) {
@@ -537,13 +545,13 @@ export class TeacherBroadcastStreamer {
         '-maxrate', `${bitrate}k`,
         '-bufsize', `${Math.floor(bitrate / 2)}k`,
         '-pix_fmt', 'yuv420p',
-        '-g', String(fps),
-        '-keyint_min', String(fps),
+        '-g', String(Math.max(10, Math.floor(fps / 2))),
+        '-keyint_min', String(Math.max(10, Math.floor(fps / 2))),
         '-sc_threshold', '0',
         '-slices', '1',
         '-bf', '0',
         '-flags', '+low_delay+global_header',
-        '-x264-params', 'repeat-headers=1:sliced-threads=0:force-cfr=1',
+        '-x264-params', 'repeat-headers=1:sliced-threads=0:force-cfr=1:sync-lookahead=0:rc-lookahead=0',
         '-an',
         '-f', 'rtp',
         rtpUrl
@@ -551,6 +559,8 @@ export class TeacherBroadcastStreamer {
     }
 
     const ffmpegArgs = [
+      '-fflags', 'nobuffer',
+      '-flags', 'low_delay',
       ...inputArgs,
       ...audioArgs,
       ...mediaConstraints,

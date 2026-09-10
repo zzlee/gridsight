@@ -2159,6 +2159,7 @@ void RTPReceiver::RenderFrame(const uint8_t* h264_data, size_t size) {
         }
         if (hwnd_overlay_) {
             InvalidateRect((HWND)hwnd_overlay_, NULL, FALSE);
+            UpdateWindow((HWND)hwnd_overlay_);
         }
     }
 #else

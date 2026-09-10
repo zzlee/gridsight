@@ -18,6 +18,7 @@ import { AlertSettingsModal } from './components/Toolbar/AlertSettingsModal';
 import { ShareUrlModal } from './components/Toolbar/ShareUrlModal';
 import { ShareFileModal } from './components/Toolbar/ShareFileModal';
 import { BroadcastTestModal } from './components/Toolbar/BroadcastTestModal';
+import { BroadcastBenchmarkModal } from './components/Toolbar/BroadcastBenchmarkModal';
 import { ShutdownModal } from './components/Toolbar/ShutdownModal';
 import { TeacherRecordModal } from './components/Toolbar/TeacherRecordModal';
 import { LockScreenModal } from './components/Toolbar/LockScreenModal';
@@ -52,6 +53,7 @@ export const App: React.FC = () => {
   const [isShareUrlOpen, setIsShareUrlOpen] = useState(false);
   const [isShareFileOpen, setIsShareFileOpen] = useState(false);
   const [isBroadcastTestOpen, setIsBroadcastTestOpen] = useState(false);
+  const [isBroadcastBenchmarkOpen, setIsBroadcastBenchmarkOpen] = useState(false);
   const [isShutdownOpen, setIsShutdownOpen] = useState(false);
   const [isTeacherRecordOpen, setIsTeacherRecordOpen] = useState(false);
   const [isLockScreenOpen, setIsLockScreenOpen] = useState(false);
@@ -683,6 +685,7 @@ export const App: React.FC = () => {
         onOpenShareUrl={() => setIsShareUrlOpen(true)}
         onOpenShareFile={() => setIsShareFileOpen(true)}
         onOpenBroadcastTest={() => setIsBroadcastTestOpen(true)}
+        onOpenBroadcastBenchmark={() => setIsBroadcastBenchmarkOpen(true)}
         onOpenTeacherRecord={() => setIsTeacherRecordOpen(true)}
         onOpenShutdown={() => setIsShutdownOpen(true)}
         onOpenLockScreen={() => setIsLockScreenOpen(true)}
@@ -871,6 +874,13 @@ export const App: React.FC = () => {
       <BroadcastTestModal
         isOpen={isBroadcastTestOpen}
         onClose={() => setIsBroadcastTestOpen(false)}
+      />
+
+      {/* Broadcast Latency Benchmark Modal */}
+      <BroadcastBenchmarkModal
+        isOpen={isBroadcastBenchmarkOpen}
+        onClose={() => setIsBroadcastBenchmarkOpen(false)}
+        devices={layout.seats.concat(unassignedDevices)}
       />
 
       {/* Screen Lockout Modal (Feature 1) */}

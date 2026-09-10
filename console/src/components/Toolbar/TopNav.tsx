@@ -26,6 +26,7 @@ import {
   Download,
   Upload,
   MoreHorizontal,
+  Timer,
 } from 'lucide-react';
 
 type BroadcastQuality = 'high' | 'medium' | 'low';
@@ -51,6 +52,7 @@ interface TopNavProps {
   onOpenShareUrl?: () => void;
   onOpenShareFile?: () => void;
   onOpenBroadcastTest?: () => void;
+  onOpenBroadcastBenchmark?: () => void;
   onOpenTeacherRecord?: () => void;
   onOpenShutdown?: () => void;
   onOpenLockScreen?: () => void;
@@ -78,6 +80,7 @@ export const TopNav: React.FC<TopNavProps> = ({
   onOpenShareUrl,
   onOpenShareFile,
   onOpenBroadcastTest,
+  onOpenBroadcastBenchmark,
   onOpenTeacherRecord,
   onOpenShutdown,
   onOpenLockScreen,
@@ -571,6 +574,18 @@ export const TopNav: React.FC<TopNavProps> = ({
                       >
                         <Clapperboard className="w-3.5 h-3.5 text-fuchsia-400 shrink-0" />
                         <span>廣播測試</span>
+                      </button>
+                    )}
+
+                    {/* Broadcast Latency Benchmark */}
+                    {onOpenBroadcastBenchmark && (
+                      <button
+                        onClick={() => { setMoreMenuOpen(false); onOpenBroadcastBenchmark(); }}
+                        className="w-full flex items-center space-x-2.5 px-3.5 py-2 text-left text-xs font-medium text-slate-300 hover:bg-slate-800/80 hover:text-teal-300 transition-colors"
+                        title="廣播延遲量測：基準毫秒碼錶 + 學生螢幕截圖閉環回傳對比"
+                      >
+                        <Timer className="w-3.5 h-3.5 text-teal-400 shrink-0" />
+                        <span>延遲量測</span>
                       </button>
                     )}
 

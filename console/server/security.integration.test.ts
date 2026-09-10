@@ -78,6 +78,65 @@ try {
   assert.equal(acceptedRead.status, 200);
   assert.equal(acceptedRead.headers.get('content-type'), 'image/jpeg');
 
+  // --- Batch Snapshot API Integration Tests ---
+  const rejectedBatch = await fetch(`${baseHttp}/api/snapshots/batch`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ requests: [{ id: mac }] }),
+  });
+  assert.equal(rejectedBatch.status, 401, 'unauthenticated batch snapshot request rejected with 401');
+
+  const invalidBatch = await fetch(`${baseHttp}/api/snapshots/batch`, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      Authorization: `Bearer ${teacherToken}`,
+    },
+    body: JSON.stringify({ requests: 'invalid_type' }),
+  });
+  assert.equal(invalidBatch.status, 400, 'non-array requests format returns 400');
+
+  // Initial fetch: should return fresh snapshot with base64 data
+  const acceptedBatch = await fetch(`${baseHttp}/api/snapshots/batch`, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      Authorization: `Bearer ${teacherToken}`,
+    },
+    body: JSON.stringify({ requests: [{ id: mac }] }),
+  });
+  assert.equal(acceptedBatch.status, 200);
+  const batchData = (await acceptedBatch.json()) as {
+    results: Array<{ id: string; notModified: boolean; timestamp?: number; data?: string }>;
+  };
+  assert.equal(batchData.results.length, 1);
+  assert.equal(batchData.results[0].id, mac);
+  assert.equal(batchData.results[0].notModified, false);
+  assert.ok(batchData.results[0].timestamp);
+  assert.ok(batchData.results[0].data);
+  const decodedBuf = Buffer.from(batchData.results[0].data!, 'base64');
+  assert.deepEqual(decodedBuf, jpeg);
+
+  // Subsequent fetch with 'since' timestamp: delta check should return notModified: true
+  const deltaBatch = await fetch(`${baseHttp}/api/snapshots/batch`, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      Authorization: `Bearer ${teacherToken}`,
+    },
+    body: JSON.stringify({
+      requests: [{ id: mac, since: batchData.results[0].timestamp }],
+    }),
+  });
+  assert.equal(deltaBatch.status, 200);
+  const deltaData = (await deltaBatch.json()) as {
+    results: Array<{ id: string; notModified: boolean; timestamp?: number; data?: string }>;
+  };
+  assert.equal(deltaData.results.length, 1);
+  assert.equal(deltaData.results[0].id, mac);
+  assert.equal(deltaData.results[0].notModified, true);
+  assert.equal(deltaData.results[0].data, undefined, 'notModified response payload must not contain data');
+
   // --- Regression: malformed MAC percent-encoding must never crash the server ---
   // URLSearchParams already decodes %25 -> '%', and decodeURIComponent('%')
   // throws. normalizeTarget must not let that exception escape the (pre-auth)

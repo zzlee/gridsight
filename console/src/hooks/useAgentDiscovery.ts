@@ -149,29 +149,65 @@ export function useAgentDiscovery({
     if (mode === 'MONITOR' && !isLocked) {
       pollingManager.startPolling(
         () => layoutRef.current.seats,
-        (updated) => {
-          setLayout((prev) => ({
-            ...prev,
-            seats: prev.seats.map((s) => {
-              if (s.id !== updated.id) return s;
-              const activeWindow = updated.activeWindow || s.activeWindow || '桌面 (Desktop)';
+        null,
+        1000,
+        () => visibleDeviceIdsRef.current,
+        (stats) => setTrafficStats(stats),
+        (batchedUpdates) => {
+          if (batchedUpdates.length === 0) return;
+          const updateMap = new Map<string, Partial<StudentDevice> & { id: string }>();
+          for (const u of batchedUpdates) {
+            updateMap.set(u.id, u);
+          }
+
+          setLayout((prev) => {
+            let anyChanged = false;
+            const updatedSeats = prev.seats.map((s) => {
+              const u = updateMap.get(s.id);
+              if (!u) return s;
+
+              const activeWindow = u.activeWindow || s.activeWindow || '桌面 (Desktop)';
               const isOff = alertsEnabled && isOffTaskMatch(activeWindow, offTaskKeywords);
-              return { ...s, ...updated, activeWindow, isOffTask: isOff };
-            }),
-          }));
+
+              const thumbChanged = u.thumbnailUrl && u.thumbnailUrl !== s.thumbnailUrl;
+              const statusChanged = u.status && u.status !== s.status;
+              const windowChanged = activeWindow !== s.activeWindow;
+              const offChanged = isOff !== s.isOffTask;
+              const latencyDiff = Math.abs((u.latencyMs ?? s.latencyMs ?? 0) - (s.latencyMs ?? 0));
+              const latencyChanged = latencyDiff > 15;
+
+              if (!thumbChanged && !statusChanged && !windowChanged && !offChanged && !latencyChanged) {
+                return s; // Keep reference to prevent React.memo re-render
+              }
+
+              anyChanged = true;
+              return {
+                ...s,
+                ...u,
+                activeWindow,
+                isOffTask: isOff,
+              };
+            });
+
+            return anyChanged ? { ...prev, seats: updatedSeats } : prev;
+          });
 
           // Keep active modal device state up-to-date
           setFocusDevice((prev) => {
-            if (!prev || prev.id !== updated.id) return prev;
-            const activeWindow = updated.activeWindow || prev.activeWindow || '桌面 (Desktop)';
+            if (!prev) return prev;
+            const u = updateMap.get(prev.id);
+            if (!u) return prev;
+            const activeWindow = u.activeWindow || prev.activeWindow || '桌面 (Desktop)';
             const isOff = alertsEnabled && isOffTaskMatch(activeWindow, offTaskKeywords);
-            return { ...prev, ...updated, activeWindow, isOffTask: isOff };
+            return { ...prev, ...u, activeWindow, isOffTask: isOff };
           });
-          setSpecsDevice((prev) => (prev && prev.id === updated.id ? { ...prev, ...updated } : prev));
-        },
-        1000,
-        () => visibleDeviceIdsRef.current,
-        (stats) => setTrafficStats(stats)
+
+          setSpecsDevice((prev) => {
+            if (!prev) return prev;
+            const u = updateMap.get(prev.id);
+            return u ? { ...prev, ...u } : prev;
+          });
+        }
       );
     } else {
       pollingManager.stopPolling();

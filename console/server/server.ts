@@ -1967,6 +1967,74 @@ app.get(['/api/snapshot/:id', '/api/snapshot'], requireTeacherAuth, async (req, 
   res.status(404).json({ error: 'No snapshot available' });
 });
 
+// Route: Batch fetch cached JPEG snapshots for visible student agents (with 'since' delta-check)
+app.post('/api/snapshots/batch', requireTeacherAuth, async (req, res) => {
+  pruneSnapshotCache();
+  const requests = req.body?.requests;
+  if (!Array.isArray(requests)) {
+    return res.status(400).json({ error: 'Invalid requests format: expected array' });
+  }
+
+  const results: Array<{
+    id: string;
+    notModified: boolean;
+    timestamp?: number;
+    data?: string;
+    activeWindow?: string;
+    status?: 'online' | 'offline';
+  }> = [];
+
+  for (const item of requests) {
+    const rawId = String(item?.id || '');
+    if (!rawId) continue;
+    const since = typeof item.since === 'number' ? item.since : 0;
+    const normalizedId = normalizeTarget(rawId);
+
+    const dev = discoveryService.findDevice(rawId) || discoveryService.findDevice(normalizedId);
+    const targetMac = dev?.mac ? normalizeTarget(dev.mac) : normalizedId;
+    const targetIp = dev?.ip;
+    const activeWindow = dev?.activeWindow;
+    const isOnline = dev ? dev.status !== 'offline' : true;
+
+    const cachedEntry =
+      getSnapshotCached(targetMac) ||
+      getSnapshotCached(normalizedId) ||
+      (targetIp ? getSnapshotCached(targetIp) : undefined) ||
+      getSnapshotCached(rawId);
+
+    if (cachedEntry) {
+      if (since > 0 && cachedEntry.timestamp <= since) {
+        results.push({
+          id: rawId,
+          notModified: true,
+          timestamp: cachedEntry.timestamp,
+          activeWindow,
+          status: isOnline ? 'online' : 'offline',
+        });
+      } else {
+        results.push({
+          id: rawId,
+          notModified: false,
+          timestamp: cachedEntry.timestamp,
+          data: cachedEntry.buffer.toString('base64'),
+          activeWindow,
+          status: isOnline ? 'online' : 'offline',
+        });
+      }
+    } else {
+      results.push({
+        id: rawId,
+        notModified: true,
+        activeWindow,
+        status: isOnline ? 'online' : 'offline',
+      });
+    }
+  }
+
+  res.setHeader('Cache-Control', 'no-cache, no-store, must-revalidate');
+  return res.json({ results });
+});
+
 // Route: Fetch/Proxy failure logs from student agent
 app.get(['/api/agent/:id/logs', '/api/agent/logs'], requireTeacherAuth, async (req, res) => {
   const rawId = req.params.id || (req.query.id as string) || (req.query.mac as string) || (req.query.ip as string) || '';

@@ -314,7 +314,7 @@ export const StudentCard = React.memo(StudentCardComponent, (prevProps, nextProp
     prev.hostname !== next.hostname ||
     prev.ip !== next.ip ||
     prev.status !== next.status ||
-    prev.latencyMs !== next.latencyMs ||
+    Math.abs((prev.latencyMs || 0) - (next.latencyMs || 0)) > 15 ||
     prev.activeWindow !== next.activeWindow ||
     prev.isOffTask !== next.isOffTask ||
     prev.isLocked !== next.isLocked ||

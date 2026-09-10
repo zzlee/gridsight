@@ -225,7 +225,7 @@ export const TopNav: React.FC<TopNavProps> = ({
   };
 
   return (
-    <header className="h-14 bg-slate-950 border-b border-slate-800 px-2 sm:px-4 flex items-center justify-between z-30 select-none overflow-x-auto no-scrollbar gap-2">
+    <header className="h-14 bg-slate-950 border-b border-slate-800 px-2 sm:px-4 flex items-center justify-between z-30 select-none relative gap-2">
       {/* Left: Brand Title & Classroom Title */}
       <div className="flex items-center space-x-2 sm:space-x-3 shrink-0">
         <div className="flex items-center space-x-2">
@@ -516,7 +516,7 @@ export const TopNav: React.FC<TopNavProps> = ({
               </button>
 
               {moreMenuOpen && (
-                <div className="absolute top-full right-0 mt-1.5 w-52 rounded-xl bg-slate-900 border border-slate-800 shadow-2xl z-40 overflow-hidden py-1 divide-y divide-slate-800/60 animate-in fade-in slide-in-from-top-1 duration-150">
+                <div className="absolute top-full right-0 mt-1.5 w-52 rounded-xl bg-slate-900 border border-slate-800 shadow-2xl z-50 overflow-hidden py-1 divide-y divide-slate-800/60 animate-in fade-in slide-in-from-top-1 duration-150">
                   {/* Secondary Tools Group */}
                   <div className="py-1">
                     {/* Share URL */}

@@ -416,9 +416,50 @@ export const FocusModal: React.FC<FocusModalProps> = ({ device, onClose }) => {
           isFullscreen ? 'h-full max-w-none rounded-none border-none' : 'max-w-5xl h-[85vh]'
         }`}
       >
-        {/* Header */}
-        <div className="flex items-center justify-between px-3 sm:px-4 py-2.5 bg-slate-950 border-b border-slate-800 gap-2">
-          {/* Left: Device Info */}
+        {/* 1. OS-Style Window Title Bar (最上方視窗標題列) */}
+        <div className="h-8 bg-slate-950 border-b border-slate-800/80 px-3 flex items-center justify-between select-none shrink-0 gap-2">
+          {/* Left: Window Icon & Active Window Title */}
+          <div className="flex items-center space-x-2 min-w-0 flex-1">
+            {device.isOffTask ? (
+              <AlertTriangle className="w-3.5 h-3.5 text-rose-400 shrink-0 animate-bounce" />
+            ) : (
+              <AppWindow className="w-3.5 h-3.5 text-sky-400 shrink-0" />
+            )}
+            <span className="text-xs font-semibold text-slate-200 truncate">
+              {device.activeWindow || 'Windows 桌面'}
+            </span>
+            {device.isOffTask && (
+              <span className="px-1.5 py-0.2 rounded bg-rose-600/30 text-rose-300 border border-rose-500/40 text-[10px] font-bold whitespace-nowrap shrink-0 animate-pulse">
+                ⚠️ 離題程式
+              </span>
+            )}
+            <span className="text-[11px] text-slate-500 font-mono hidden md:inline truncate">
+              — [座號 {device.seatNo || '未分配'}] {device.hostname}
+            </span>
+          </div>
+
+          {/* Right: Window Controls (Fullscreen & Close) */}
+          <div className="flex items-center space-x-1 shrink-0">
+            <button
+              onClick={handleToggleFullscreen}
+              className="p-1 rounded text-slate-400 hover:text-white hover:bg-slate-800 transition-colors"
+              title={isFullscreen ? '退出全螢幕' : '全螢幕 (F11)'}
+            >
+              {isFullscreen ? <Minimize className="w-3.5 h-3.5" /> : <Maximize className="w-3.5 h-3.5" />}
+            </button>
+            <button
+              onClick={onClose}
+              className="p-1 rounded text-slate-400 hover:text-white hover:bg-rose-600 transition-colors"
+              title="關閉視窗"
+            >
+              <X className="w-3.5 h-3.5" />
+            </button>
+          </div>
+        </div>
+
+        {/* 2. Action Toolbar (教學操作與管制工具列) */}
+        <div className="h-11 bg-slate-900 border-b border-slate-800 px-3 sm:px-4 flex items-center justify-between gap-2 select-none shrink-0">
+          {/* Left: Device Info (Seat No, Hostname, IP, Auth) */}
           <div className="flex items-center space-x-2 sm:space-x-3 shrink min-w-0">
             <span className={`px-2 py-0.5 rounded font-mono font-bold text-xs sm:text-sm border whitespace-nowrap shrink-0 ${
               device.isOffTask
@@ -427,37 +468,24 @@ export const FocusModal: React.FC<FocusModalProps> = ({ device, onClose }) => {
             }`}>
               座號 {device.seatNo || '未分配'}
             </span>
-            <span className="font-bold text-slate-100 text-sm sm:text-base whitespace-nowrap shrink-0">{device.hostname}</span>
-            <span className="text-xs text-slate-400 font-mono hidden lg:inline whitespace-nowrap shrink-0">({device.ip})</span>
-            {device.activeWindow && (
-              <div
-                className={`flex items-center space-x-1 text-xs px-2 py-0.5 rounded border max-w-[120px] sm:max-w-[160px] md:max-w-[200px] truncate shrink min-w-0 ${
-                  device.isOffTask
-                    ? 'bg-rose-500/20 border-rose-500/40 text-rose-300 animate-pulse font-semibold'
-                    : 'bg-slate-900 border-slate-800 text-slate-300'
-                }`}
-                title={`目前操作程式：${device.activeWindow}`}
-              >
-                {device.isOffTask ? (
-                  <AlertTriangle className="w-3.5 h-3.5 text-rose-400 shrink-0" />
-                ) : (
-                  <AppWindow className="w-3.5 h-3.5 text-sky-400 shrink-0" />
-                )}
-                <span className="truncate">{device.activeWindow}</span>
-              </div>
-            )}
+            <span className="font-bold text-slate-100 text-sm sm:text-base whitespace-nowrap shrink-0">
+              {device.hostname}
+            </span>
+            <span className="text-xs text-slate-400 font-mono whitespace-nowrap shrink-0">
+              ({device.ip})
+            </span>
             <div className="flex items-center space-x-1 text-emerald-400 text-xs px-2 py-0.5 bg-emerald-500/10 rounded border border-emerald-500/30 whitespace-nowrap shrink-0">
               <ShieldCheck className="w-3.5 h-3.5" />
-              <span className="hidden xl:inline">鑑權生效</span>
+              <span className="hidden sm:inline">鑑權生效</span>
             </div>
           </div>
 
-          {/* Right: Actions and Tools */}
+          {/* Right: Actions (Showcase, Lock, Snapshot, Record, Diagnostic) */}
           <div className="flex items-center space-x-1.5 sm:space-x-2 shrink-0">
             {/* Student Showcase Relay Button (Feature 3) */}
             <button
               onClick={handleToggleShowcase}
-              className={`p-1.5 rounded-lg border transition-all active:scale-95 flex items-center space-x-1 text-xs font-semibold px-2 whitespace-nowrap shrink-0 ${
+              className={`p-1.5 rounded-lg border transition-all active:scale-95 flex items-center space-x-1 text-xs font-semibold px-2.5 whitespace-nowrap shrink-0 ${
                 isShowcasing
                   ? 'bg-purple-600 border-purple-500 text-white ring-2 ring-purple-500/50 shadow-lg animate-pulse'
                   : 'bg-slate-800 border-slate-700 text-purple-400 hover:bg-purple-500/20 hover:border-purple-500/40'
@@ -465,14 +493,13 @@ export const FocusModal: React.FC<FocusModalProps> = ({ device, onClose }) => {
               title={isShowcasing ? '點擊停止全班轉播此學生畫面' : '轉播此學生畫面給全班 (示範操作)'}
             >
               <Radio className="w-3.5 h-3.5" />
-              <span className="hidden sm:inline">{isShowcasing ? '轉播中 [停止]' : '轉播給全班'}</span>
-              <span className="sm:hidden">{isShowcasing ? '轉播中' : '轉播'}</span>
+              <span>{isShowcasing ? '轉播中 [停止]' : '轉播給全班'}</span>
             </button>
 
             {/* Screen Curtain Lockout Button (Feature 1) */}
             <button
               onClick={handleToggleLock}
-              className={`p-1.5 rounded-lg border transition-all active:scale-95 flex items-center space-x-1 text-xs font-semibold px-2 whitespace-nowrap shrink-0 ${
+              className={`p-1.5 rounded-lg border transition-all active:scale-95 flex items-center space-x-1 text-xs font-semibold px-2.5 whitespace-nowrap shrink-0 ${
                 isDeviceLocked
                   ? 'bg-amber-600 border-amber-500 text-white ring-2 ring-amber-500/50 shadow-lg animate-pulse'
                   : 'bg-slate-800 border-slate-700 text-amber-400 hover:bg-amber-500/20 hover:border-amber-500/40'
@@ -480,19 +507,18 @@ export const FocusModal: React.FC<FocusModalProps> = ({ device, onClose }) => {
               title={isDeviceLocked ? '點擊解除此學生機螢幕鎖定' : '黑屏鎖定此機螢幕與鍵鼠'}
             >
               {isDeviceLocked ? <Unlock className="w-3.5 h-3.5" /> : <Lock className="w-3.5 h-3.5" />}
-              <span className="hidden sm:inline">{isDeviceLocked ? '已鎖定 [解鎖]' : '黑屏鎖定'}</span>
-              <span className="sm:hidden">{isDeviceLocked ? '已鎖定' : '鎖定'}</span>
+              <span>{isDeviceLocked ? '已鎖定 [解鎖]' : '黑屏鎖定'}</span>
             </button>
 
             {/* Combined Snapshot & Format Selector */}
             <div className="flex items-center rounded-lg bg-slate-800 border border-slate-700 overflow-hidden shrink-0 text-xs shadow-sm">
               <button
                 onClick={handleTakeSnapshot}
-                className="px-2 py-1.5 hover:bg-sky-600 text-slate-300 hover:text-white transition-colors flex items-center space-x-1 whitespace-nowrap"
+                className="px-2.5 py-1.5 hover:bg-sky-600 text-slate-300 hover:text-white transition-colors flex items-center space-x-1 whitespace-nowrap"
                 title={`畫面截圖存檔 (下載 ${snapshotFormat.toUpperCase()})`}
               >
                 <Camera className="w-3.5 h-3.5 text-sky-400" />
-                <span className="hidden sm:inline">截圖</span>
+                <span>截圖</span>
               </button>
               <button
                 onClick={() => setSnapshotFormat((f) => (f === 'jpeg' ? 'png' : 'jpeg'))}
@@ -506,7 +532,7 @@ export const FocusModal: React.FC<FocusModalProps> = ({ device, onClose }) => {
             {/* Student Screen Recording */}
             <button
               onClick={handleToggleStudentRecord}
-              className={`p-1.5 sm:px-2 py-1.5 rounded-lg border transition-all active:scale-95 flex items-center space-x-1 text-xs font-semibold whitespace-nowrap shrink-0 ${
+              className={`p-1.5 sm:px-2.5 py-1.5 rounded-lg border transition-all active:scale-95 flex items-center space-x-1 text-xs font-semibold whitespace-nowrap shrink-0 ${
                 isRecordingStudent
                   ? 'bg-red-600 border-red-500 text-white ring-2 ring-red-500/50 shadow-lg animate-pulse'
                   : 'bg-slate-800 border-slate-700 text-red-400 hover:bg-red-500/20 hover:border-red-500/40'
@@ -517,7 +543,7 @@ export const FocusModal: React.FC<FocusModalProps> = ({ device, onClose }) => {
               {isRecordingStudent ? (
                 <span>{formatRecordTime(studentRecordTime)}</span>
               ) : (
-                <span className="hidden sm:inline">錄影</span>
+                <span>錄影</span>
               )}
             </button>
 
@@ -525,7 +551,7 @@ export const FocusModal: React.FC<FocusModalProps> = ({ device, onClose }) => {
             <div ref={toolMenuRef} className="relative shrink-0">
               <button
                 onClick={() => setToolMenuOpen((v) => !v)}
-                className={`p-1.5 sm:px-2 py-1.5 rounded-lg border text-xs font-semibold flex items-center space-x-1 transition-all shadow-sm active:scale-95 whitespace-nowrap ${
+                className={`p-1.5 sm:px-2.5 py-1.5 rounded-lg border text-xs font-semibold flex items-center space-x-1 transition-all shadow-sm active:scale-95 whitespace-nowrap ${
                   showDebugHud || showSpecsHud
                     ? 'bg-sky-950/40 border-sky-500/50 text-sky-300'
                     : toolMenuOpen
@@ -535,7 +561,7 @@ export const FocusModal: React.FC<FocusModalProps> = ({ device, onClose }) => {
                 title="診斷與工具（串流品質 HUD、硬體規格 HUD、抓取日誌）"
               >
                 <Activity className="w-3.5 h-3.5 text-slate-400" />
-                <span className="hidden md:inline">診斷</span>
+                <span>診斷</span>
                 <ChevronDown className={`w-3 h-3 text-slate-400 transition-transform ${toolMenuOpen ? 'rotate-180' : ''}`} />
               </button>
 
@@ -584,26 +610,6 @@ export const FocusModal: React.FC<FocusModalProps> = ({ device, onClose }) => {
                 </div>
               )}
             </div>
-
-            <div className="h-4 w-px bg-slate-800 shrink-0 mx-0.5" />
-
-            {/* Toggle Fullscreen */}
-            <button
-              onClick={handleToggleFullscreen}
-              className="p-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-300 hover:text-white transition-colors shrink-0"
-              title={isFullscreen ? '退出全螢幕' : '全螢幕 (F11)'}
-            >
-              {isFullscreen ? <Minimize className="w-4 h-4" /> : <Maximize className="w-4 h-4" />}
-            </button>
-
-            {/* Close */}
-            <button
-              onClick={onClose}
-              className="p-1.5 rounded-lg bg-rose-500/20 hover:bg-rose-500/30 text-rose-400 border border-rose-500/30 transition-colors shrink-0"
-              title="關閉"
-            >
-              <X className="w-4 h-4" />
-            </button>
           </div>
         </div>
 

@@ -1,6 +1,6 @@
 # 📚 GridSight Knowledge Base & Wiki
 
-歡迎來到 **GridSight（70人電腦教室螢幕監控與實時廣播系統）** 官方技術知識庫與 Wiki。
+歡迎來到 **GridSight（電腦教室螢幕監控與實時廣播系統）** 官方技術知識庫與 Wiki。
 
 ---
 

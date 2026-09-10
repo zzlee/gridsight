@@ -1,6 +1,6 @@
 # 📖 GridSight 系統完整開發歷程與技術演進全紀錄 (Development History)
 
-本文檔詳細記錄 **GridSight（70人電腦教室螢幕監控與實時廣播系統）** 從最初架構設計、原型驗證，歷經多次重大效能突破、跨平台踩坑與重構，直至當前生產穩定版的完整開發歷程與關鍵技術決策。
+本文檔詳細記錄 **GridSight（電腦教室螢幕監控與實時廣播系統）** 從最初架構設計、原型驗證，歷經多次重大效能突破、跨平台踩坑與重構，直至當前生產穩定版的完整開發歷程與關鍵技術決策。
 
 ---
 
@@ -169,6 +169,7 @@ timeline
 | **v5.8.9** | 2026-09 | `beacon/`, `server.ts`, `zipPacker.ts`, `AssignmentModal.tsx`, `LockScreenModal.tsx` | 課堂三大進階功能實作：(1) 螢幕黑屏置頂與低階鍵鼠攔截鎖定（防重連繞過）；(2) 學生畫面示範轉播全班（30 FPS 零拷貝直推 RTP、防鏡像遞迴抑制）；(3) 免外網作業批次收取箱（學生端 C++ 原生拖曳視窗、自動覆蓋最新版歸檔、零外部依賴純 Node.js ZIP 打包串流下載、全維度座位卡片狀態與即時名冊） |
 | **v5.8.10** | 2026-09 | `audioDevices.ts`, `broadcastStreamer.ts`, `server.ts`, `TeacherRecordModal.tsx` | 教師螢幕錄影自選音訊裝置錄製：(1) DirectShow (Windows) / Pulse (Linux) 實體與虛擬音效卡自動探測（含麥克風、立體聲混音、純畫面）；(2) AAC 128kbps 立體聲影音精準混流同步 (`aresample=async=1000`)；(3) 雙軌多播強隔離（多播廣播嚴格過濾阻斷聲音 `-an` 與 `select=v`，100% 杜絕全班喇叭回音嘯叫，音訊僅寫入本機 MP4）；(4) 錄音偏好持久化記憶與全套無腦手冊整合 |
 | **v5.8.11** | 2026-09 | `broadcastStreamer.ts`, `rtp_receiver.cpp`, `pollingManager.ts`, `BroadcastBenchmarkModal.tsx` | 廣播極致低延遲調優與閉環量測工具：(1) 教師端 FFmpeg x264 消除 lookahead 緩衝 (`sync-lookahead=0:rc-lookahead=0`)、GOP 縮短為 0.5 秒、全域 `-fflags nobuffer -flags low_delay`，徹底消除 1.3+ 秒編碼積壓；(2) 學生端 `rtp_receiver.cpp` 渲染解碼引入 `UpdateWindow` 強制即時繪圖，消除 Windows 訊息隊列等待；(3) 多機快照批次聚合端點 (`POST /api/snapshots/batch`) 與 `since` 差量比對（靜態畫面 0 載荷、React 70次降至1次批次更新）；(4) 新增「⏱️ 廣播延遲量測工具 (Benchmark)」：60 FPS 基準毫秒碼錶 + 250ms 循環色塊 + 學生畫面即時閉環回傳視覺同屏毫秒對比 |
+| **v5.8.12** | 2026-09 | `TopNav.tsx`, `index.html`, `README.md`, `docs/*` | 介面版號直觀呈現與全專案通用化修訂：(1) 在教師端 Console 頂部導航列品牌標題旁與「更多工具」下拉選單底部加入系統版號徽章；(2) 全面淡化並通用化專案文檔與介面中對單一固定人數（「70人/70台」）之特定描述，強調通用電腦教室規模與高併發支援 |
 
 ---
 

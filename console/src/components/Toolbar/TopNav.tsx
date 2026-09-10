@@ -236,7 +236,12 @@ export const TopNav: React.FC<TopNavProps> = ({
             GS
           </div>
           <div>
-            <div className="font-bold text-slate-100 text-xs sm:text-sm tracking-wide">GridSight</div>
+            <div className="font-bold text-slate-100 text-xs sm:text-sm tracking-wide flex items-center gap-1.5">
+              <span>GridSight</span>
+              <span className="text-[10px] font-mono font-normal text-slate-400 bg-slate-900/90 px-1.5 py-0.5 rounded border border-slate-800 leading-none">
+                v{__APP_VERSION__}
+              </span>
+            </div>
             <div className="hidden xl:block text-[10px] text-slate-400 font-medium">電腦教室螢幕即時監控系統</div>
           </div>
         </div>
@@ -613,6 +618,12 @@ export const TopNav: React.FC<TopNavProps> = ({
                       </button>
                     </div>
                   )}
+
+                  {/* Version Footer */}
+                  <div className="px-3.5 py-1.5 border-t border-slate-800/80 bg-slate-950/40 flex items-center justify-between text-[10px] text-slate-500 font-mono">
+                    <span>GridSight</span>
+                    <span>v{__APP_VERSION__}</span>
+                  </div>
                 </div>
               )}
             </div>

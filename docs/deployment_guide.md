@@ -1,6 +1,6 @@
 # GridSight 部署與維運指南 (Deployment Guide)
 
-GridSight 針對 70 台具備還原卡之電腦教室設計了「零母機維護」的雲端熱拉取部署模式。
+GridSight 針對具備還原卡之電腦教室設計了「零母機維護」的雲端熱拉取部署模式。
 
 ---
 

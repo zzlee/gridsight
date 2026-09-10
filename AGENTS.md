@@ -6,7 +6,7 @@
 
 ## 📌 1. 系統架構與專案全覽 (Architecture Overview)
 
-GridSight 專為 70 台具備還原卡之 Windows 電腦教室打造，兼顧極簡部署、低頻寬常態監看、30 FPS 焦點調閱與全體廣播。
+GridSight 專為具備還原卡之 Windows 電腦教室打造，兼顧極簡部署、低頻寬常態監看、30 FPS 焦點調閱與全體廣播。
 
 ### 模組架構
 - **`beacon/`（學生端代理 - `gs-agent.exe`）**：
@@ -17,7 +17,7 @@ GridSight 專為 70 台具備還原卡之 Windows 電腦教室打造，兼顧極
   - 後端：Node.js Express + WebSocket Relay + UDP 多播探索服務（Port 3000）。
   - 獨立單檔版：`release/gs-console.exe`（內建 Node.js 執行期環境與 Web 靜態資源，雙擊即啟動）。
 - **`tools/`（測試、特效與除錯工具）**：
-  - `mock_agents.py`：支援一鍵模擬 70+ 台學生機心跳宣告與虛擬螢幕縮圖。
+  - `mock_agents.py`：支援一鍵模擬多台學生機心跳宣告與虛擬螢幕縮圖。
   - `ubuntu_agent_debugger.py`：支援 Ubuntu Linux 環境下即時多播解碼播放視窗（`ffplay`）與全彩即時事件除錯。
   - `mouse_overlay.cpp`（編譯為 `bin/GridSightMouseOverlay.exe`）：Windows 原生獨立滑鼠特效模組（32-bit ARGB True Alpha 逐像素透明混合、GDI+ 真實游標圖示、左右鍵與滾輪微光波紋動畫）。
 

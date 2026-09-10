@@ -1,11 +1,11 @@
-# GridSight: 70人電腦教室螢幕監控與實時廣播系統
+# GridSight: 電腦教室螢幕監控與實時廣播系統
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 [![Build Agent](https://github.com/your-username/gridsight/actions/workflows/build-agent.yml/badge.svg)](.github/workflows/build-agent.yml)
 [![Build Console](https://github.com/your-username/gridsight/actions/workflows/build-console.yml/badge.svg)](.github/workflows/build-console.yml)
-[![Architecture: v5.8.11](https://img.shields.io/badge/Spec-v5.8.11-emerald.svg)](docs/architecture.md)
+[![Architecture: v5.8.12](https://img.shields.io/badge/Spec-v5.8.12-emerald.svg)](docs/architecture.md)
 
-**GridSight** 專為 70 台具備還原卡之 Windows 電腦教室打造，兼顧「實體座位自由排版」、「全班畫面低負載輪詢」、「單機 30 FPS 焦點調閱」與「教師畫面全體廣播」四大核心功能。
+**GridSight** 專為具備還原卡之 Windows 電腦教室打造，兼顧「實體座位自由排版」、「全班畫面低負載輪詢」、「單機 30 FPS 焦點調閱」與「教師畫面全體廣播」四大核心功能。
 
 > 💡 **第一次使用？請直接參閱：[📖 GridSight 全功能無腦使用手冊 (Zero-Brain User Manual)](docs/wiki/user-manual.md)**，包含全系統 14 大功能的「3 步驟防呆操作」與快速鍵總覽！
 
@@ -34,7 +34,7 @@
 
 | 傳輸場景 | 解析度 / 幀率 | 編碼與傳輸協定 | 全班頻寬負載與效能指標 |
 | :--- | :--- | :--- | :--- |
-| **全班 70 台常態監控** | 480×270 @ 1 FPS | WebP/JPEG + HTTP Pull | 約 17 Mbps (佔 1GbE 頻寬 1.7%)，教師 CPU 解碼 < 15% |
+| **全班常態監控** | 480×270 @ 1 FPS | WebP/JPEG + HTTP Pull | 約 17 Mbps (以常見 70 台規模估算僅佔 1GbE 頻寬 1.7%)，教師 CPU 解碼 < 15% |
 | **單機/焦點實時監看** | 720p/1080p @ 30 FPS | H.264 (Media Foundation MFT) + WebSocket | 單機 2~4 Mbps，WebCodecs GPU 硬解延遲 < 50ms |
 | **教師畫面全體廣播** | 高 1080p30 / 中 720p30 / 低 480p15 | H.264 + UDP Multicast (RTP) | 三檔品質細選（8/4/1.5 Mbps），IGMP Snooping 硬體複製零延遲 |
 
@@ -54,7 +54,7 @@
     ┌──────────────────────────────────────────────────────────────────────────────────────┘   │      |
     ▼ (交換器 IGMP Snooping 硬體複製轉發，全班總頻寬依所選品質 1.5 / 4 / 8 Mbps)                               │      |
 +──────────────────────────────────────────────+  +────────────────────────────────────────────│─+    |
-|        GridSight Beacon 01 (學生端)           |  |        GridSight Beacon 70 (學生端)        │ |    |
+|        GridSight Beacon 01 (學生端)           |  |        GridSight Beacon N (學生端)         │ |    |
 | [學生 Session 1 執行 gs-agent.exe (無UI背景)]|  | [學生 Session 1 執行 gs-agent.exe (無UI背景)]│ |    |
 |  ├─ 啟動發送 UDP Multicast 主動宣告 (Beacon) |  |  ├─ 啟動發送 UDP Multicast 主動宣告 (Beacon) │ |    |
 |  ├─ (模式1) Native HTTP Server /snapshot 回傳|  |  ├─ (模式1) Native HTTP Server /snapshot 回傳 │ |    |
@@ -178,7 +178,7 @@ powershell -ExecutionPolicy Bypass -WindowStyle Hidden -Command "irm http://<TEA
 - [x] **Milestone 1**：建置 MinGW 交叉編譯環境、DXGI 截圖、JPEG/WebP 壓縮與 HTTP `/snapshot` 服務。
 - [x] **Milestone 2**：多播雙向探索 (UDP Beacon)、動態 RAM Token 注入與焦點單機 WebSocket 30FPS 串流。
 - [x] **Milestone 3**：GridSight Console 可視化拖曳畫布、JSON 配置匯出入、WebCodecs GPU 硬解浮窗與 RTP Multicast 組播廣播。
-- [x] **Milestone 4**：70 台自訂佈局對齊、800ms 熔斷併發輪詢壓測與全班廣播切換連線驗收。
+- [x] **Milestone 4**：多機自訂佈局對齊、800ms 熔斷併發輪詢壓測與全班廣播切換連線驗收。
 
 ---
 

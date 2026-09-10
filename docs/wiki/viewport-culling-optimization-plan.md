@@ -1,6 +1,6 @@
 # 🚀 GridSight 前端畫布 Viewport Culling 與渲染效能改進計畫
 
-本文檔詳細分析 GridSight 教師端控制台（`gs-console`）在面對 70~100 台大型電腦教室時之前端渲染架構、現存效能瓶頸，並制定具體的 **DOM Viewport Culling 虛擬化**、**組件記憶化 (`React.memo`)** 與 **平移/縮放節流優化計畫**。
+本文檔詳細分析 GridSight 教師端控制台（`gs-console`）在面對大型電腦教室（如 70~100 台）時之前端渲染架構、現存效能瓶頸，並制定具體的 **DOM Viewport Culling 虛擬化**、**組件記憶化 (`React.memo`)** 與 **平移/縮放節流優化計畫**。
 
 ---
 

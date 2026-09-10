@@ -474,9 +474,11 @@ export const FocusModal: React.FC<FocusModalProps> = ({ device, onClose }) => {
             <span className="text-xs text-slate-400 font-mono whitespace-nowrap shrink-0">
               ({device.ip})
             </span>
-            <div className="flex items-center space-x-1 text-emerald-400 text-xs px-2 py-0.5 bg-emerald-500/10 rounded border border-emerald-500/30 whitespace-nowrap shrink-0">
+            <div
+              className="flex items-center text-emerald-400 text-xs px-1.5 py-0.5 bg-emerald-500/10 rounded border border-emerald-500/30 shrink-0"
+              title="安全鑑權已生效（HMAC-SHA256 雙向金鑰校驗）"
+            >
               <ShieldCheck className="w-3.5 h-3.5" />
-              <span className="hidden sm:inline">鑑權生效</span>
             </div>
           </div>
 

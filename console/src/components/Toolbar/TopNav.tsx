@@ -25,6 +25,7 @@ import {
   Video,
   Download,
   Upload,
+  MoreHorizontal,
 } from 'lucide-react';
 
 type BroadcastQuality = 'high' | 'medium' | 'low';
@@ -98,7 +99,9 @@ export const TopNav: React.FC<TopNavProps> = ({
   const [broadcastBitrateKbps, setBroadcastBitrateKbps] = useState<number>(0);
   const [isServerRecording, setIsServerRecording] = useState(false);
   const [qualityMenuOpen, setQualityMenuOpen] = useState(false);
+  const [moreMenuOpen, setMoreMenuOpen] = useState(false);
   const qualityMenuRef = useRef<HTMLDivElement>(null);
+  const moreMenuRef = useRef<HTMLDivElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
 
@@ -173,11 +176,14 @@ export const TopNav: React.FC<TopNavProps> = ({
     return () => clearInterval(interval);
   }, []);
 
-  // Close the quality menu on outside click
+  // Close the quality menu and more menu on outside click
   useEffect(() => {
     const onMouseDown = (e: MouseEvent) => {
       if (qualityMenuRef.current && !qualityMenuRef.current.contains(e.target as Node)) {
         setQualityMenuOpen(false);
+      }
+      if (moreMenuRef.current && !moreMenuRef.current.contains(e.target as Node)) {
+        setMoreMenuOpen(false);
       }
     };
     document.addEventListener('mousedown', onMouseDown);
@@ -219,60 +225,63 @@ export const TopNav: React.FC<TopNavProps> = ({
   };
 
   return (
-    <header className="h-14 bg-slate-950 border-b border-slate-800 px-4 flex items-center justify-between z-30 select-none">
+    <header className="h-14 bg-slate-950 border-b border-slate-800 px-2 sm:px-4 flex items-center justify-between z-30 select-none overflow-x-auto no-scrollbar gap-2">
       {/* Left: Brand Title & Classroom Title */}
-      <div className="flex items-center space-x-3 shrink-0">
+      <div className="flex items-center space-x-2 sm:space-x-3 shrink-0">
         <div className="flex items-center space-x-2">
-          <div className="w-8 h-8 rounded-lg bg-sky-600 flex items-center justify-center font-bold text-white shadow-md shadow-sky-600/30">
+          <div className="w-7 h-7 sm:w-8 sm:h-8 rounded-lg bg-sky-600 flex items-center justify-center font-bold text-white shadow-md shadow-sky-600/30 text-xs sm:text-sm">
             GS
           </div>
           <div>
-            <div className="font-bold text-slate-100 text-sm tracking-wide">GridSight</div>
-            <div className="text-[10px] text-slate-400 font-medium">電腦教室螢幕即時監控系統</div>
+            <div className="font-bold text-slate-100 text-xs sm:text-sm tracking-wide">GridSight</div>
+            <div className="hidden xl:block text-[10px] text-slate-400 font-medium">電腦教室螢幕即時監控系統</div>
           </div>
         </div>
 
-        <div className="h-5 w-px bg-slate-800" />
+        <div className="h-5 w-px bg-slate-800 hidden sm:block" />
 
-        <div className="text-xs font-semibold text-slate-300 bg-slate-900 px-2.5 py-1 rounded border border-slate-800 flex items-center space-x-1.5">
-          <span>{layout.name}</span>
-          <span className="text-[10px] text-sky-400 font-mono">({activeSeatCount}席位)</span>
+        <div className="text-xs font-semibold text-slate-300 bg-slate-900 px-2 sm:px-2.5 py-1 rounded border border-slate-800 flex items-center space-x-1 sm:space-x-1.5">
+          <span className="max-w-[70px] sm:max-w-[120px] md:max-w-none truncate">{layout.name}</span>
+          <span className="text-[10px] text-sky-400 font-mono hidden md:inline">({activeSeatCount}席位)</span>
+          <span className="text-[10px] text-sky-400 font-mono md:hidden">({activeSeatCount})</span>
         </div>
       </div>
 
       {/* Center: Mode Switcher & Mode-Specific Actions */}
-      <div className="flex items-center space-x-3">
+      <div className="flex items-center space-x-2 sm:space-x-3 shrink-0">
         {/* Mode Switcher */}
-        <div className="flex rounded-lg bg-slate-900 p-0.5 border border-slate-800">
+        <div className="flex rounded-lg bg-slate-900 p-0.5 border border-slate-800 shrink-0">
           <button
             onClick={() => setMode('MONITOR')}
-            className={`flex items-center space-x-1.5 px-3 py-1 rounded-md text-xs font-semibold transition-all ${
+            className={`flex items-center space-x-1 sm:space-x-1.5 px-2 sm:px-3 py-1 rounded-md text-xs font-semibold whitespace-nowrap transition-all ${
               mode === 'MONITOR'
                 ? 'bg-sky-600 text-white shadow-md shadow-sky-600/30'
                 : 'text-slate-400 hover:text-slate-200'
             }`}
           >
             <Eye className="w-3.5 h-3.5" />
-            <span>監看模式</span>
+            <span className="hidden sm:inline">監看模式</span>
+            <span className="sm:hidden">監看</span>
           </button>
           <button
             onClick={() => setMode('EDIT_LAYOUT')}
-            className={`flex items-center space-x-1.5 px-3 py-1 rounded-md text-xs font-semibold transition-all ${
+            className={`flex items-center space-x-1 sm:space-x-1.5 px-2 sm:px-3 py-1 rounded-md text-xs font-semibold whitespace-nowrap transition-all ${
               mode === 'EDIT_LAYOUT'
                 ? 'bg-indigo-600 text-white shadow-md shadow-indigo-600/30'
                 : 'text-slate-400 hover:text-slate-200'
             }`}
           >
             <Edit3 className="w-3.5 h-3.5" />
-            <span>佈局編輯</span>
+            <span className="hidden sm:inline">佈局編輯</span>
+            <span className="sm:hidden">佈局</span>
           </button>
         </div>
 
-        <div className="h-5 w-px bg-slate-800" />
+        <div className="h-5 w-px bg-slate-800 shrink-0" />
 
         {/* === SCENARIO A: MONITOR MODE (Daily Classroom Teaching) === */}
         {mode === 'MONITOR' && (
-          <div className="flex items-center space-x-2.5 animate-in fade-in duration-200">
+          <div className="flex items-center space-x-1.5 sm:space-x-2 animate-in fade-in duration-200">
             {/* Real-time Network Traffic HUD */}
             {trafficStats && (() => {
               const bcastBytesPerSec = isBroadcasting
@@ -281,12 +290,12 @@ export const TopNav: React.FC<TopNavProps> = ({
               const totalBps = (trafficStats.bytesPerSec || 0) + bcastBytesPerSec;
               return (
                 <div
-                  className="flex items-center space-x-2 px-2.5 py-1 bg-slate-900/90 border border-slate-800 rounded-lg text-xs font-mono shadow-inner"
+                  className="flex items-center space-x-1.5 sm:space-x-2 px-2 sm:px-2.5 py-1 bg-slate-900/90 border border-slate-800 rounded-lg text-xs font-mono shadow-inner whitespace-nowrap shrink-0"
                   title={isBroadcasting
                     ? `監看縮圖: ${Math.round((trafficStats.bytesPerSec || 0) / 1024)} KB/s + 全體廣播: ${Math.round(bcastBytesPerSec / 1024)} KB/s`
                     : '常態縮圖監看流量'}
                 >
-                  <div className="flex items-center space-x-1.5">
+                  <div className="flex items-center space-x-1 sm:space-x-1.5">
                     <span
                       className={`w-2 h-2 rounded-full ${
                         totalBps > 0
@@ -294,10 +303,10 @@ export const TopNav: React.FC<TopNavProps> = ({
                           : 'bg-slate-600'
                       }`}
                     />
-                    <span className="text-slate-400 text-[11px]">流量:</span>
+                    <span className="text-slate-400 text-[11px] hidden sm:inline">流量:</span>
                     <span className={`font-bold ${isBroadcasting ? 'text-purple-300' : 'text-emerald-400'}`}>
                       {totalBps >= 1048576
-                        ? `${(totalBps / 1048576).toFixed(2)} MB/s`
+                        ? `${(totalBps / 1048576).toFixed(1)} MB/s`
                         : `${Math.round(totalBps / 1024)} KB/s`}
                     </span>
                     {isBroadcasting && (
@@ -306,8 +315,8 @@ export const TopNav: React.FC<TopNavProps> = ({
                       </span>
                     )}
                   </div>
-                  <span className="text-slate-700">|</span>
-                  <div className="text-[11px] text-slate-400">
+                  <span className="text-slate-700 hidden lg:inline">|</span>
+                  <div className="text-[11px] text-slate-400 hidden lg:block">
                     視口: <b className="text-sky-400">{trafficStats.polledCount}</b>/{trafficStats.onlineCount}
                   </div>
                 </div>
@@ -315,13 +324,13 @@ export const TopNav: React.FC<TopNavProps> = ({
             })()}
 
             {/* H.264 RTP Multicast Screen Broadcast Button + Quality Selector */}
-            <div ref={qualityMenuRef} className="relative flex items-center">
+            <div ref={qualityMenuRef} className="relative flex items-center shrink-0">
               {/* Quality drop-down (locked while broadcasting) */}
               <div className="relative">
                 <button
                   onClick={() => setQualityMenuOpen((v) => !v)}
                   disabled={isBroadcasting || broadcastLoading}
-                  className="flex items-center space-x-1 px-2 py-2.5 rounded-l-lg border border-r-0 border-purple-500/40 bg-purple-950/40 hover:bg-purple-900/60 text-purple-300 hover:text-purple-200 text-xs font-semibold transition-all active:scale-95 disabled:opacity-50 disabled:cursor-not-allowed"
+                  className="flex items-center space-x-1 px-1.5 sm:px-2 py-1.5 rounded-l-lg border border-r-0 border-purple-500/40 bg-purple-950/40 hover:bg-purple-900/60 text-purple-300 hover:text-purple-200 text-xs font-semibold transition-all active:scale-95 disabled:opacity-50 disabled:cursor-not-allowed whitespace-nowrap"
                   title={`廣播品質：${QUALITY_PRESETS[broadcastQuality].desc}${isBroadcasting ? '（廣播中無法切換）' : ''}`}
                 >
                   <span>{QUALITY_PRESETS[broadcastQuality].label}</span>
@@ -355,7 +364,7 @@ export const TopNav: React.FC<TopNavProps> = ({
               <button
                 onClick={handleToggleBroadcast}
                 disabled={broadcastLoading}
-                className={`flex items-center space-x-1.5 px-3 py-2.5 rounded-r-lg border text-xs font-semibold transition-all active:scale-95 ${
+                className={`flex items-center space-x-1 sm:space-x-1.5 px-2 sm:px-3 py-1.5 rounded-r-lg border text-xs font-semibold transition-all active:scale-95 whitespace-nowrap ${
                   isBroadcasting
                     ? 'bg-red-600 hover:bg-red-700 border-red-500 text-white ring-2 ring-red-500/50 shadow-lg shadow-red-950/50 animate-pulse'
                     : 'bg-purple-950/40 hover:bg-purple-900/60 border border-purple-500/40 text-purple-300 hover:text-purple-200'
@@ -367,12 +376,14 @@ export const TopNav: React.FC<TopNavProps> = ({
                 {isBroadcasting ? (
                   <>
                     <Square className="w-3.5 h-3.5 fill-current text-white animate-bounce" />
-                    <span>停止廣播</span>
+                    <span className="hidden sm:inline">停止廣播</span>
+                    <span className="sm:hidden">停止</span>
                   </>
                 ) : (
                   <>
                     <Radio className="w-3.5 h-3.5 text-purple-400" />
-                    <span>廣播畫面</span>
+                    <span className="hidden sm:inline">廣播畫面</span>
+                    <span className="sm:hidden">廣播</span>
                   </>
                 )}
               </button>
@@ -387,23 +398,12 @@ export const TopNav: React.FC<TopNavProps> = ({
                     setShowcaseStudent({ active: false, studentName: null, studentMac: null });
                   } catch {}
                 }}
-                className="flex items-center space-x-1.5 px-3 py-1.5 rounded-lg bg-purple-600 hover:bg-purple-700 text-white text-xs font-semibold shadow-lg shadow-purple-950/50 animate-pulse transition active:scale-95"
+                className="flex items-center space-x-1 sm:space-x-1.5 px-2 sm:px-3 py-1.5 rounded-lg bg-purple-600 hover:bg-purple-700 text-white text-xs font-semibold shadow-lg shadow-purple-950/50 animate-pulse transition active:scale-95 whitespace-nowrap shrink-0"
                 title="目前正在向全班轉播該學生的示範操作，點擊立即停止轉播"
               >
                 <Radio className="w-3.5 h-3.5 text-purple-200" />
-                <span>轉播中: {showcaseStudent.studentName || '學生機'} [停止]</span>
-              </button>
-            )}
-
-            {/* Broadcast Test Button (media file/URL -> RTP multicast) */}
-            {onOpenBroadcastTest && (
-              <button
-                onClick={onOpenBroadcastTest}
-                className="flex items-center space-x-1.5 px-3 py-1.5 rounded-lg bg-fuchsia-950/40 hover:bg-fuchsia-900/60 border border-fuchsia-500/40 text-xs font-semibold text-fuchsia-300 hover:text-fuchsia-200 transition-all shadow-sm active:scale-95"
-                title="廣播測試：選定媒體檔案或網址，以 RTP Multicast 串流給學生端測試接收"
-              >
-                <Clapperboard className="w-3.5 h-3.5 text-fuchsia-400" />
-                <span>廣播測試</span>
+                <span className="hidden sm:inline">轉播中: {showcaseStudent.studentName || '學生機'} [停止]</span>
+                <span className="sm:hidden">轉播中 [停]</span>
               </button>
             )}
 
@@ -411,7 +411,7 @@ export const TopNav: React.FC<TopNavProps> = ({
             {onOpenLockScreen && (
               <button
                 onClick={onOpenLockScreen}
-                className={`flex items-center space-x-1.5 px-3 py-1.5 rounded-lg border text-xs font-semibold transition-all shadow-sm active:scale-95 ${
+                className={`flex items-center space-x-1 sm:space-x-1.5 px-2 sm:px-3 py-1.5 rounded-lg border text-xs font-semibold transition-all shadow-sm active:scale-95 whitespace-nowrap shrink-0 ${
                   lockedCount > 0
                     ? 'bg-amber-500/20 text-amber-300 border-amber-500/50 hover:bg-amber-500/30 animate-pulse shadow-md shadow-amber-950/60'
                     : 'bg-slate-900 hover:bg-slate-800 text-slate-300 border-slate-800 hover:border-slate-700'
@@ -419,7 +419,19 @@ export const TopNav: React.FC<TopNavProps> = ({
                 title={lockedCount > 0 ? `目前有 ${lockedCount} 台學生機被鎖定，點擊解鎖或管理` : '鎖定全班或選定學生螢幕與鍵鼠'}
               >
                 <Lock className={`w-3.5 h-3.5 ${lockedCount > 0 ? 'text-amber-400' : 'text-slate-400'}`} />
-                <span>{lockedCount > 0 ? `螢幕鎖定 (${lockedCount})` : '黑屏鎖定'}</span>
+                <span>
+                  {lockedCount > 0 ? (
+                    <>
+                      <span className="hidden sm:inline">螢幕鎖定 </span>
+                      <span>({lockedCount})</span>
+                    </>
+                  ) : (
+                    <>
+                      <span className="hidden sm:inline">黑屏鎖定</span>
+                      <span className="sm:hidden">鎖定</span>
+                    </>
+                  )}
+                </span>
               </button>
             )}
 
@@ -427,7 +439,7 @@ export const TopNav: React.FC<TopNavProps> = ({
             {onOpenAssignment && (
               <button
                 onClick={onOpenAssignment}
-                className={`flex items-center space-x-1.5 px-3 py-1.5 rounded-lg border text-xs font-semibold transition-all shadow-sm active:scale-95 ${
+                className={`flex items-center space-x-1 sm:space-x-1.5 px-2 sm:px-3 py-1.5 rounded-lg border text-xs font-semibold transition-all shadow-sm active:scale-95 whitespace-nowrap shrink-0 ${
                   activeAssignment?.active
                     ? 'bg-emerald-500/20 text-emerald-300 border-emerald-500/50 hover:bg-emerald-500/30 animate-pulse shadow-md shadow-emerald-950/60'
                     : 'bg-slate-900 hover:bg-slate-800 text-slate-300 border-slate-800 hover:border-slate-700'
@@ -440,73 +452,18 @@ export const TopNav: React.FC<TopNavProps> = ({
               >
                 <FolderDown className={`w-3.5 h-3.5 ${activeAssignment?.active ? 'text-emerald-400' : 'text-slate-400'}`} />
                 <span>
-                  {activeAssignment?.active
-                    ? `收取中 (${activeAssignment.submissions.length})`
-                    : '收取作業'}
+                  {activeAssignment?.active ? (
+                    <>
+                      <span className="hidden sm:inline">收取中 </span>
+                      <span>({activeAssignment.submissions.length})</span>
+                    </>
+                  ) : (
+                    <>
+                      <span className="hidden sm:inline">收取作業</span>
+                      <span className="sm:hidden">作業</span>
+                    </>
+                  )}
                 </span>
-              </button>
-            )}
-
-
-            {/* Teacher Screen Recording Button */}
-            {onOpenTeacherRecord && (
-              <button
-                onClick={onOpenTeacherRecord}
-                className={`flex items-center space-x-1.5 px-3 py-1.5 rounded-lg border text-xs font-semibold transition-all shadow-sm active:scale-95 ${
-                  isServerRecording
-                    ? 'bg-red-600 hover:bg-red-700 border-red-500 text-white animate-pulse shadow-md shadow-red-950'
-                    : 'bg-red-950/40 hover:bg-red-900/60 border-red-500/40 text-red-300 hover:text-red-200'
-                }`}
-                title="服務端 DXGI 原生螢幕錄影 (自帶真實游標、光環波紋與滾輪氣泡，0ms 幀同步)"
-              >
-                <Video className={`w-3.5 h-3.5 ${isServerRecording ? 'fill-current text-white' : 'text-red-400'}`} />
-                <span>{isServerRecording ? '錄影中' : '螢幕錄影'}</span>
-              </button>
-            )}
-
-            {/* Share URL Button */}
-            {onOpenShareUrl && (
-              <button
-                onClick={onOpenShareUrl}
-                className="flex items-center space-x-1.5 px-3 py-1.5 rounded-lg bg-sky-950/40 hover:bg-sky-900/60 border border-sky-500/40 text-xs font-semibold text-sky-300 hover:text-sky-200 transition-all shadow-sm active:scale-95"
-                title="廣播傳送網址給學生端 (自動開啟預設瀏覽器)"
-              >
-                <Globe className="w-3.5 h-3.5 text-sky-400" />
-                <span>分享網址</span>
-              </button>
-            )}
-
-            {/* Share File Button */}
-            {onOpenShareFile && (
-              <button
-                onClick={onOpenShareFile}
-                className="flex items-center space-x-1.5 px-3 py-1.5 rounded-lg bg-amber-950/40 hover:bg-amber-900/60 border border-amber-500/40 text-xs font-semibold text-amber-300 hover:text-amber-200 transition-all shadow-sm active:scale-95"
-                title="廣播傳送檔案給學生端 (下載至 Downloads 並開啟檔案總管)"
-              >
-                <FolderUp className="w-3.5 h-3.5 text-amber-400" />
-                <span>分享檔案</span>
-              </button>
-            )}
-
-            {/* Quick Student Connect / Join Instruction Modal */}
-            <button
-              onClick={onOpenStudentConnect}
-              className="flex items-center space-x-1.5 px-3 py-1.5 rounded-lg bg-emerald-950/40 hover:bg-emerald-900/60 border border-emerald-500/40 text-xs font-semibold text-emerald-300 hover:text-emerald-200 transition-all shadow-sm active:scale-95"
-              title="學生端一鍵連線指引 (Win + R 快速加入)"
-            >
-              <UserPlus className="w-3.5 h-3.5 text-emerald-400" />
-              <span>學生端連線</span>
-            </button>
-
-            {/* Broadcast Shutdown Button */}
-            {onOpenShutdown && (
-              <button
-                onClick={onOpenShutdown}
-                className="flex items-center space-x-1.5 px-3 py-1.5 rounded-lg bg-rose-950/40 hover:bg-rose-900/60 border border-rose-500/40 text-xs font-semibold text-rose-300 hover:text-rose-200 transition-all shadow-sm active:scale-95"
-                title="廣播關閉學生端電腦 (觸發倒數計時關機畫面)"
-              >
-                <Power className="w-3.5 h-3.5 text-rose-400" />
-                <span>廣播關機</span>
               </button>
             )}
 
@@ -514,7 +471,7 @@ export const TopNav: React.FC<TopNavProps> = ({
             {onOpenAlertSettings && (
               <button
                 onClick={onOpenAlertSettings}
-                className={`flex items-center space-x-1.5 px-3 py-1.5 rounded-lg border text-xs font-semibold transition-all active:scale-95 ${
+                className={`flex items-center space-x-1 sm:space-x-1.5 px-2 sm:px-3 py-1.5 rounded-lg border text-xs font-semibold transition-all active:scale-95 whitespace-nowrap shrink-0 ${
                   offTaskCount > 0
                     ? 'bg-rose-600/25 hover:bg-rose-600/35 border-rose-500 text-rose-200 ring-2 ring-rose-500/30 shadow-lg shadow-rose-950 animate-pulse'
                     : 'bg-amber-950/30 hover:bg-amber-900/50 border-amber-500/40 text-amber-300 hover:text-amber-200'
@@ -522,34 +479,144 @@ export const TopNav: React.FC<TopNavProps> = ({
                 title="課堂離題關鍵字警示管理 (點擊自訂關鍵字或查看違規名單)"
               >
                 <AlertTriangle className={`w-4 h-4 ${offTaskCount > 0 ? 'text-rose-400 animate-bounce' : 'text-amber-400'}`} />
-                <span className="font-bold">離題警示</span>
+                <span className="font-bold hidden sm:inline">離題警示</span>
+                <span className="font-bold sm:hidden">離題</span>
                 {offTaskCount > 0 ? (
-                  <span className="px-2 py-0.2 rounded-full bg-rose-600 text-white font-mono text-[11px] font-extrabold shadow">
+                  <span className="px-1.5 py-0.2 rounded-full bg-rose-600 text-white font-mono text-[11px] font-extrabold shadow">
                     {offTaskCount} 台
                   </span>
                 ) : (
-                  <span className="text-[10px] text-amber-400/80 font-mono font-medium">
+                  <span className="hidden md:inline text-[10px] text-amber-400/80 font-mono font-medium">
                     (正常)
                   </span>
                 )}
               </button>
             )}
+
+            {/* === MORE TOOLS DROPDOWN === */}
+            <div ref={moreMenuRef} className="relative shrink-0">
+              <button
+                onClick={() => setMoreMenuOpen((v) => !v)}
+                className={`flex items-center space-x-1 sm:space-x-1.5 px-2 sm:px-3 py-1.5 rounded-lg border text-xs font-semibold transition-all shadow-sm active:scale-95 whitespace-nowrap ${
+                  isServerRecording
+                    ? 'bg-red-950/40 hover:bg-red-900/60 border-red-500/50 text-red-300'
+                    : moreMenuOpen
+                    ? 'bg-slate-800 border-slate-700 text-white'
+                    : 'bg-slate-900 hover:bg-slate-800 border-slate-800 hover:border-slate-700 text-slate-300 hover:text-white'
+                }`}
+                title="更多課堂輔助工具（分享網址/檔案、螢幕錄影、廣播測試、學生連線、廣播關機）"
+              >
+                <MoreHorizontal className="w-3.5 h-3.5 text-slate-400" />
+                <span className="hidden sm:inline">更多工具</span>
+                <span className="sm:hidden">更多</span>
+                {isServerRecording && (
+                  <span className="w-2 h-2 rounded-full bg-red-500 animate-pulse" title="螢幕錄影進行中" />
+                )}
+                <ChevronDown className={`w-3 h-3 text-slate-400 transition-transform ${moreMenuOpen ? 'rotate-180' : ''}`} />
+              </button>
+
+              {moreMenuOpen && (
+                <div className="absolute top-full right-0 mt-1.5 w-52 rounded-xl bg-slate-900 border border-slate-800 shadow-2xl z-40 overflow-hidden py-1 divide-y divide-slate-800/60 animate-in fade-in slide-in-from-top-1 duration-150">
+                  {/* Secondary Tools Group */}
+                  <div className="py-1">
+                    {/* Share URL */}
+                    {onOpenShareUrl && (
+                      <button
+                        onClick={() => { setMoreMenuOpen(false); onOpenShareUrl(); }}
+                        className="w-full flex items-center space-x-2.5 px-3.5 py-2 text-left text-xs font-medium text-slate-300 hover:bg-slate-800/80 hover:text-sky-300 transition-colors"
+                        title="廣播傳送網址給學生端 (自動開啟預設瀏覽器)"
+                      >
+                        <Globe className="w-3.5 h-3.5 text-sky-400 shrink-0" />
+                        <span>分享網址</span>
+                      </button>
+                    )}
+
+                    {/* Share File */}
+                    {onOpenShareFile && (
+                      <button
+                        onClick={() => { setMoreMenuOpen(false); onOpenShareFile(); }}
+                        className="w-full flex items-center space-x-2.5 px-3.5 py-2 text-left text-xs font-medium text-slate-300 hover:bg-slate-800/80 hover:text-amber-300 transition-colors"
+                        title="廣播傳送檔案給學生端 (下載至 Downloads 並開啟檔案總管)"
+                      >
+                        <FolderUp className="w-3.5 h-3.5 text-amber-400 shrink-0" />
+                        <span>分享檔案</span>
+                      </button>
+                    )}
+
+                    {/* Teacher Screen Recording */}
+                    {onOpenTeacherRecord && (
+                      <button
+                        onClick={() => { setMoreMenuOpen(false); onOpenTeacherRecord(); }}
+                        className="w-full flex items-center justify-between px-3.5 py-2 text-left text-xs font-medium text-slate-300 hover:bg-slate-800/80 hover:text-red-300 transition-colors"
+                        title="服務端 DXGI 原生螢幕錄影 (自帶真實游標、光環波紋與滾輪氣泡，0ms 幀同步)"
+                      >
+                        <div className="flex items-center space-x-2.5">
+                          <Video className={`w-3.5 h-3.5 shrink-0 ${isServerRecording ? 'text-red-500 fill-current' : 'text-red-400'}`} />
+                          <span>螢幕錄影</span>
+                        </div>
+                        {isServerRecording && (
+                          <span className="px-1.5 py-0.2 rounded bg-red-600 text-white text-[10px] font-bold animate-pulse">
+                            錄影中
+                          </span>
+                        )}
+                      </button>
+                    )}
+
+                    {/* Broadcast Test */}
+                    {onOpenBroadcastTest && (
+                      <button
+                        onClick={() => { setMoreMenuOpen(false); onOpenBroadcastTest(); }}
+                        className="w-full flex items-center space-x-2.5 px-3.5 py-2 text-left text-xs font-medium text-slate-300 hover:bg-slate-800/80 hover:text-fuchsia-300 transition-colors"
+                        title="廣播測試：選定媒體檔案或網址，以 RTP Multicast 串流給學生端測試接收"
+                      >
+                        <Clapperboard className="w-3.5 h-3.5 text-fuchsia-400 shrink-0" />
+                        <span>廣播測試</span>
+                      </button>
+                    )}
+
+                    {/* Quick Student Connect */}
+                    <button
+                      onClick={() => { setMoreMenuOpen(false); onOpenStudentConnect(); }}
+                      className="w-full flex items-center space-x-2.5 px-3.5 py-2 text-left text-xs font-medium text-slate-300 hover:bg-slate-800/80 hover:text-emerald-300 transition-colors"
+                      title="學生端一鍵連線指引 (Win + R 快速加入)"
+                    >
+                      <UserPlus className="w-3.5 h-3.5 text-emerald-400 shrink-0" />
+                      <span>學生端連線</span>
+                    </button>
+                  </div>
+
+                  {/* Destructive Actions Group */}
+                  {onOpenShutdown && (
+                    <div className="py-1">
+                      <button
+                        onClick={() => { setMoreMenuOpen(false); onOpenShutdown(); }}
+                        className="w-full flex items-center space-x-2.5 px-3.5 py-2 text-left text-xs font-medium text-rose-400 hover:bg-rose-950/40 transition-colors"
+                        title="廣播關閉學生端電腦 (觸發倒數計時關機畫面)"
+                      >
+                        <Power className="w-3.5 h-3.5 text-rose-400 shrink-0" />
+                        <span>廣播關機</span>
+                      </button>
+                    </div>
+                  )}
+                </div>
+              )}
+            </div>
           </div>
         )}
 
         {/* === SCENARIO B: EDIT LAYOUT MODE (Initial Setup & Customization) === */}
         {mode === 'EDIT_LAYOUT' && (
-          <div className="flex items-center space-x-2 animate-in fade-in duration-200">
+          <div className="flex items-center space-x-1.5 sm:space-x-2 animate-in fade-in duration-200">
 
             {/* Export & Import */}
             {onExportLayout && (
               <button
                 onClick={onExportLayout}
-                className="flex items-center space-x-1.5 px-2.5 py-1.5 rounded-lg bg-slate-900 hover:bg-slate-800 border border-slate-700 text-xs text-slate-200 hover:text-white transition-colors"
+                className="flex items-center space-x-1 sm:space-x-1.5 px-2 sm:px-2.5 py-1.5 rounded-lg bg-slate-900 hover:bg-slate-800 border border-slate-700 text-xs text-slate-200 hover:text-white transition-colors whitespace-nowrap shrink-0"
                 title="匯出設定與配置"
               >
                 <Download className="w-3.5 h-3.5 text-emerald-400" />
-                <span>匯出</span>
+                <span className="hidden sm:inline">匯出</span>
               </button>
             )}
 
@@ -557,11 +624,11 @@ export const TopNav: React.FC<TopNavProps> = ({
               <>
                 <button
                   onClick={() => fileInputRef.current?.click()}
-                  className="flex items-center space-x-1.5 px-2.5 py-1.5 rounded-lg bg-slate-900 hover:bg-slate-800 border border-slate-700 text-xs text-slate-200 hover:text-white transition-colors"
+                  className="flex items-center space-x-1 sm:space-x-1.5 px-2 sm:px-2.5 py-1.5 rounded-lg bg-slate-900 hover:bg-slate-800 border border-slate-700 text-xs text-slate-200 hover:text-white transition-colors whitespace-nowrap shrink-0"
                   title="匯入設定與配置"
                 >
                   <Upload className="w-3.5 h-3.5 text-purple-400" />
-                  <span>匯入</span>
+                  <span className="hidden sm:inline">匯入</span>
                 </button>
                 <input
                   type="file"
@@ -576,41 +643,44 @@ export const TopNav: React.FC<TopNavProps> = ({
             {/* Matrix Dimensions Button (X × Y Standard Matrix) */}
             <button
               onClick={onOpenMatrixConfig}
-              className="flex items-center space-x-1.5 px-2.5 py-1.5 rounded-lg bg-slate-900 hover:bg-slate-800 border border-slate-700 text-xs text-slate-200 hover:text-white transition-colors"
+              className="flex items-center space-x-1 sm:space-x-1.5 px-2 sm:px-2.5 py-1.5 rounded-lg bg-slate-900 hover:bg-slate-800 border border-slate-700 text-xs text-slate-200 hover:text-white transition-colors whitespace-nowrap shrink-0"
               title="自訂 X × Y 矩陣尺寸"
             >
               <Sliders className="w-3.5 h-3.5 text-sky-400" />
-              <span>矩陣 ({cols}×{rows})</span>
+              <span className="hidden md:inline">矩陣 </span>
+              <span>({cols}×{rows})</span>
             </button>
 
             {/* Aisles Division Configuration */}
             <button
               onClick={onOpenAisleConfig}
-              className="flex items-center space-x-1.5 px-2.5 py-1.5 rounded-lg bg-slate-900 hover:bg-slate-800 border border-slate-700 text-xs text-slate-200 hover:text-white transition-colors"
+              className="flex items-center space-x-1 sm:space-x-1.5 px-2 sm:px-2.5 py-1.5 rounded-lg bg-slate-900 hover:bg-slate-800 border border-slate-700 text-xs text-slate-200 hover:text-white transition-colors whitespace-nowrap shrink-0"
               title="走道劃分設定 (Aisles)"
             >
               <Footprints className="w-3.5 h-3.5 text-sky-400" />
-              <span>走道 ({layout.aisles?.length || 0})</span>
+              <span className="hidden md:inline">走道 </span>
+              <span>({layout.aisles?.length || 0})</span>
             </button>
 
             {/* Obstacles & Teacher Podium Configuration */}
             <button
               onClick={onOpenObstacleModal}
-              className="flex items-center space-x-1.5 px-2.5 py-1.5 rounded-lg bg-slate-900 hover:bg-slate-800 border border-slate-700 text-xs text-slate-200 hover:text-white transition-colors"
+              className="flex items-center space-x-1 sm:space-x-1.5 px-2 sm:px-2.5 py-1.5 rounded-lg bg-slate-900 hover:bg-slate-800 border border-slate-700 text-xs text-slate-200 hover:text-white transition-colors whitespace-nowrap shrink-0"
               title="講台與障礙物管理 (Obstacles)"
             >
               <Landmark className="w-3.5 h-3.5 text-amber-400" />
-              <span>講台/障礙物 ({layout.obstacles?.length || 0})</span>
+              <span className="hidden lg:inline">講台/</span>
+              <span>障礙物 ({layout.obstacles?.length || 0})</span>
             </button>
 
             {/* Device Pool Button with unassigned badge */}
             <button
               onClick={onOpenDevicePool}
-              className="flex items-center space-x-1.5 px-2.5 py-1.5 rounded-lg bg-slate-900 hover:bg-slate-800 border border-slate-700 text-xs text-slate-200 hover:text-white relative"
+              className="flex items-center space-x-1 sm:space-x-1.5 px-2 sm:px-2.5 py-1.5 rounded-lg bg-slate-900 hover:bg-slate-800 border border-slate-700 text-xs text-slate-200 hover:text-white relative whitespace-nowrap shrink-0"
               title="開啟待分配設備池"
             >
               <HardDrive className="w-3.5 h-3.5 text-indigo-400" />
-              <span>設備池</span>
+              <span className="hidden sm:inline">設備池</span>
               {unassignedCount > 0 && (
                 <span className="px-1.5 py-0.2 rounded-full bg-amber-500 text-slate-950 font-bold text-[10px]">
                   {unassignedCount}
@@ -622,23 +692,24 @@ export const TopNav: React.FC<TopNavProps> = ({
       </div>
 
       {/* Right: Security PIN settings & Lock Console */}
-      <div className="flex items-center space-x-2 shrink-0">
+      <div className="flex items-center space-x-1.5 sm:space-x-2 shrink-0">
         <button
           onClick={onOpenChangePin}
-          className="flex items-center space-x-1.5 px-2.5 py-1.5 rounded-lg bg-slate-900 hover:bg-slate-800 border border-slate-800 text-slate-300 hover:text-white transition-colors text-xs font-semibold"
+          className="flex items-center space-x-1 sm:space-x-1.5 px-2 sm:px-2.5 py-1.5 rounded-lg bg-slate-900 hover:bg-slate-800 border border-slate-800 text-slate-300 hover:text-white transition-colors text-xs font-semibold whitespace-nowrap shrink-0"
           title="修改教師安全 PIN 碼"
         >
           <KeyRound className="w-3.5 h-3.5 text-amber-400" />
-          <span>PIN 碼設定</span>
+          <span className="hidden md:inline">PIN 碼</span>
         </button>
 
         <button
           onClick={onLock}
-          className="flex items-center space-x-1.5 px-3 py-1.5 rounded-lg bg-rose-950/40 hover:bg-rose-900/60 border border-rose-800/60 text-rose-300 text-xs font-semibold transition-all shadow-sm"
+          className="flex items-center space-x-1 sm:space-x-1.5 px-2 sm:px-3 py-1.5 rounded-lg bg-rose-950/40 hover:bg-rose-900/60 border border-rose-800/60 text-rose-300 text-xs font-semibold transition-all shadow-sm whitespace-nowrap shrink-0"
           title="離開座位鎖定控制台"
         >
           <Lock className="w-3.5 h-3.5 text-rose-400" />
-          <span>鎖定控制台</span>
+          <span className="hidden lg:inline">鎖定控制台</span>
+          <span className="hidden sm:inline lg:hidden">鎖定</span>
         </button>
       </div>
     </header>

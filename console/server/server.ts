@@ -157,7 +157,7 @@ const requireTeacherAuth: express.RequestHandler = (req, res, next) => {
 };
 
 // Bounded in-memory JPEG cache for authenticated outbound student pushes.
-const snapshotCache = new Map<string, { buffer: Buffer; timestamp: number }>();
+const snapshotCache = new Map<string, { buffer: Buffer; timestamp: number; captureTimeMs?: number }>();
 const SNAPSHOT_CACHE_MAX_KEYS = 256;
 const SNAPSHOT_CACHE_TTL_MS = 30_000;
 
@@ -212,7 +212,7 @@ const pruneSnapshotCache = (now = Date.now()) => {
   }
 };
 
-const storeSnapshot = (key: string, entry: { buffer: Buffer; timestamp: number }) => {
+const storeSnapshot = (key: string, entry: { buffer: Buffer; timestamp: number; captureTimeMs?: number }) => {
   if (!key) return;
   snapshotCache.delete(key);
   snapshotCache.set(key, entry);
@@ -225,7 +225,7 @@ const storeSnapshot = (key: string, entry: { buffer: Buffer; timestamp: number }
  * insertion order (FIFO), letting a continuously polled seat flush out
  * cold-but-never-hot entries unfairly.
  */
-const getSnapshotCached = (key: string): { buffer: Buffer; timestamp: number } | undefined => {
+const getSnapshotCached = (key: string): { buffer: Buffer; timestamp: number; captureTimeMs?: number } | undefined => {
   const entry = snapshotCache.get(key);
   if (entry === undefined) return undefined;
   snapshotCache.delete(key);
@@ -1898,6 +1898,7 @@ app.post(
     const rawMac = (req.headers['x-agent-mac'] as string) || '';
     const ip = (req.headers['x-agent-ip'] as string) || req.ip?.replace(/^.*:/, '') || '';
     const rawWin = (req.headers['x-active-window'] as string) || '';
+    const rawCaptureTime = (req.headers['x-capture-time'] as string) || '';
     const mac = normalizeTarget(rawMac);
     const buffer = req.body as Buffer;
 
@@ -1912,7 +1913,14 @@ app.post(
     }
 
     if (buffer && buffer.length > 0) {
-      const entry = { buffer, timestamp: Date.now() };
+        let captureTimeMs: number | undefined;
+        if (rawCaptureTime) {
+          const parsed = parseInt(rawCaptureTime, 10);
+          if (!isNaN(parsed)) {
+            captureTimeMs = parsed;
+          }
+        }
+        const entry = { buffer, timestamp: Date.now(), captureTimeMs };
       storeSnapshot(mac, entry);
       storeSnapshot(ip, entry);
       res.status(200).json({ status: 'ok' });
@@ -1928,6 +1936,8 @@ app.get(['/api/snapshot/:id', '/api/snapshot'], requireTeacherAuth, async (req, 
   const rawId = req.params.id || (req.query.id as string) || (req.query.mac as string) || (req.query.ip as string) || '';
   const normalizedId = normalizeTarget(rawId);
   const wantsHighRes = req.query.full === '1' || req.query.highres === '1';
+
+  res.set('Access-Control-Expose-Headers', 'X-Capture-Time');
 
   if (wantsHighRes) {
     const dev = discoveryService.findDevice(rawId) || discoveryService.findDevice(normalizedId);
@@ -1961,6 +1971,9 @@ app.get(['/api/snapshot/:id', '/api/snapshot'], requireTeacherAuth, async (req, 
   if (cachedEntry) {
     res.setHeader('Content-Type', 'image/jpeg');
     res.setHeader('Cache-Control', 'no-cache, no-store, must-revalidate');
+    if (cachedEntry.captureTimeMs) {
+      res.set('X-Capture-Time', cachedEntry.captureTimeMs.toString());
+    }
     return res.send(cachedEntry.buffer);
   }
 

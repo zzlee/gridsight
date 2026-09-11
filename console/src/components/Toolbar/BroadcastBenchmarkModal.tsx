@@ -35,6 +35,7 @@ export const BroadcastBenchmarkModal: React.FC<BroadcastBenchmarkModalProps> = (
   const [refreshingSnapshot, setRefreshingSnapshot] = useState<boolean>(false);
   const [customThumbUrl, setCustomThumbUrl] = useState<string | null>(null);
   const [snapshotTimestamp, setSnapshotTimestamp] = useState<string>('無');
+  const [agentCaptureTimestamp, setAgentCaptureTimestamp] = useState<string>('無');
   const rafRef = useRef<number | null>(null);
 
   // Online devices available for monitoring
@@ -136,12 +137,25 @@ export const BroadcastBenchmarkModal: React.FC<BroadcastBenchmarkModalProps> = (
       const targetId = targetDevice.mac || targetDevice.ip;
       const resp = await AuthService.fetchWithAuth(`/api/snapshot/${encodeURIComponent(targetId)}?t=${Date.now()}`);
       if (resp.ok) {
+        const captureTimeHeader = resp.headers.get('x-capture-time');
         const blob = await resp.blob();
         const url = URL.createObjectURL(blob);
         setCustomThumbUrl(url);
         const now = new Date();
         const pad = (n: number) => String(n).padStart(2, '0');
         setSnapshotTimestamp(`${pad(now.getHours())}:${pad(now.getMinutes())}:${pad(now.getSeconds())}.${String(now.getMilliseconds()).padStart(3, '0')}`);
+
+        if (captureTimeHeader) {
+          const capTimeMs = parseInt(captureTimeHeader, 10);
+          if (!isNaN(capTimeMs)) {
+            const capDate = new Date(capTimeMs);
+            setAgentCaptureTimestamp(`${pad(capDate.getHours())}:${pad(capDate.getMinutes())}:${pad(capDate.getSeconds())}.${String(capDate.getMilliseconds()).padStart(3, '0')}`);
+          } else {
+            setAgentCaptureTimestamp('無法解析');
+          }
+        } else {
+          setAgentCaptureTimestamp('未提供');
+        }
       }
     } catch {
     } finally {
@@ -370,8 +384,12 @@ export const BroadcastBenchmarkModal: React.FC<BroadcastBenchmarkModalProps> = (
                   <span className="font-mono">{targetDevice?.ip || 'N/A'}</span>
                 </div>
                 <div className="flex justify-between">
-                  <span className="text-slate-500">最後截圖時間:</span>
-                  <span className="font-mono text-sky-300">{snapshotTimestamp}</span>
+                  <span className="text-slate-500">本機接收時間:</span>
+                  <span className="font-mono text-slate-400">{snapshotTimestamp}</span>
+                </div>
+                <div className="flex justify-between">
+                  <span className="text-slate-500 font-bold text-sky-300">學生端截圖瞬間:</span>
+                  <span className="font-mono text-sky-300 font-bold">{agentCaptureTimestamp}</span>
                 </div>
               </div>
             </div>

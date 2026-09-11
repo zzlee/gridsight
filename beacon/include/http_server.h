@@ -20,7 +20,7 @@ public:
 
 private:
     void SnapshotWorkerLoop();
-    void PushSnapshotToTeacher(const std::vector<uint8_t>& jpeg_data);
+    void PushSnapshotToTeacher(const std::vector<uint8_t>& jpeg_data, uint64_t capture_time_ms);
 
     std::shared_ptr<ScreenCapturer> capturer_;
     std::atomic<bool> running_{false};

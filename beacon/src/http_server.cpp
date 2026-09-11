@@ -63,7 +63,7 @@ void HttpServer::SetTeacherHost(const std::string& host, int port) {
     Utils::Log("INFO", "HttpServer updated teacher destination for outbound push: " + host + ":" + std::to_string(port));
 }
 
-void HttpServer::PushSnapshotToTeacher(const std::vector<uint8_t>& jpeg_data) {
+void HttpServer::PushSnapshotToTeacher(const std::vector<uint8_t>& jpeg_data, uint64_t capture_time_ms) {
     std::string host;
     int port = 3000;
     {
@@ -103,6 +103,7 @@ void HttpServer::PushSnapshotToTeacher(const std::vector<uint8_t>& jpeg_data) {
             << "X-Agent-IP: " << net.ip << "\r\n"
             << "X-Auth-Token: " << session_token << "\r\n"
             << "X-Active-Window: " << win_b64 << "\r\n"
+            << "X-Capture-Time: " << capture_time_ms << "\r\n"
             << "Content-Type: image/jpeg\r\n"
             << "Content-Length: " << jpeg_data.size() << "\r\n"
             << "Connection: close\r\n\r\n";
@@ -132,12 +133,14 @@ void HttpServer::SnapshotWorkerLoop() {
             std::vector<uint8_t> jpeg_data;
             if (ImageEncoder::EncodeToJPEG(frame.bgra_buffer.data(), frame.width, frame.height, 480, 270, 70, jpeg_data)) {
                 Utils::UpdateHeartbeat("snapshot-encode");
+                uint64_t capture_timestamp = 0;
                 {
                     std::lock_guard<std::mutex> lock(snapshot_mutex_);
                     cached_jpeg_data_ = jpeg_data;
                     cached_jpeg_timestamp_ = Utils::GetCurrentTimestampMs();
+                    capture_timestamp = cached_jpeg_timestamp_;
                 }
-                PushSnapshotToTeacher(jpeg_data);
+                PushSnapshotToTeacher(jpeg_data, capture_timestamp);
             }
         }
         Utils::SleepMs(1000); // 1 FPS polling cadence

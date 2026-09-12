@@ -130,6 +130,15 @@ npm run dev
 npm run server
 ```
 
+**方式 C：建置 Windows 綠色便攜包（官方推薦發布形式）**
+```bash
+# 一鍵完整建置：自動安裝前後端相依套件、編譯學生端代理並打包
+npm run build:portable:full
+
+# 產物：release/gridsight-console-portable.zip（內嵌官方簽名 node.exe，零 Defender 誤報）
+# 詳細步驟見 docs/deployment_guide.md §2.4
+```
+
 ### 2. 學生端輕量代理 (GridSight Beacon) 交叉編譯 (標準 Docker Builder)
 為確保不同作業系統與開發環境具備一致的 MinGW-w64 工具鏈與靜態相依性，**專案標準採用 Docker Builder 容器化編譯**：
 

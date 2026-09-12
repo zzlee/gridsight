@@ -97,8 +97,16 @@ powershell -WindowStyle Hidden -c "irm http://<教師IP>:3000/install-agent.ps1|
   - 佈局自動儲存於同層 `data/seats.json`。
 
 ### 4.2 Windows 官方簽名綠色便攜包 (`gridsight-console-portable.zip`) ⭐【零防毒誤報推薦】
-- **打包指令**：
+- **一鍵完整建置（推薦，自動安裝相依套件並編譯學生端代理）**：
   ```bash
+  npm run build:portable:full
+  # 或 ./scripts/build-portable.sh
+  ```
+- **手動逐步建置**：
+  ```bash
+  npm install --prefix console            # 前置：前端相依（缺少時 tsc 報錯）
+  npm install --prefix console/server     # 前置：後端相依（缺少時 esbuild 無法解析 cors/ws）
+  ./scripts/build-docker.sh               # 前置：交叉編譯 beacon/gs-agent.exe（若尚未產出）
   npm run build:portable
   # 或 node scripts/build-windows-portable.js
   ```
@@ -107,6 +115,7 @@ powershell -WindowStyle Hidden -c "irm http://<教師IP>:3000/install-agent.ps1|
   - **100% 絕不觸發 Windows Defender / SmartScreen 警告**。
   - 內嵌微軟 / OpenJS 官方認證數位簽章之原生 `node.exe`。
   - 支援多網卡終端機互動挑選與自動啟動，包含 `start-console.bat`（一鍵啟動並自動開啟瀏覽器）與 `stop-console.bat`（一鍵停止）。
+- **陷阱**：若 `console/node_modules` 或 `console/server/node_modules` 尚未安裝，`build:portable` 會以「tsc: not found」與「Could not resolve 'cors'/'ws'」失敗；請先執行上述前置之 npm install。
 
 ### 4.3 Linux Docker 容器部署
 - **啟動與重構**：

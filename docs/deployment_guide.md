@@ -68,6 +68,39 @@ npm run dev
 npm run server
 ```
 
+### 2.4 Windows 綠色便攜包建置 (`gridsight-console-portable.zip`) ⭐【零防毒誤報推薦】
+教師端最推薦的發布形式為官方簽名綠色便攜包，內嵌微軟/OpenJS 官方認證數位簽章之 `node.exe`，**100% 絕不觸發 Windows Defender / SmartScreen 誤報**。
+
+**系統需求（建置機）**：
+- Node.js 20+（`npm`）
+- Docker（僅在 `beacon/gs-agent.exe` 尚未編譯時需要，用於交叉編譯學生端）
+- 建置機需具備外網連線（下載官方簽名 `node.exe` 與靜態 `ffmpeg.exe`，下載後快取於 `./.cache`）
+
+**方式 A：一鍵完整建置（推薦，自動完成所有前置步驟）**
+```bash
+npm run build:portable:full
+# 或 ./scripts/build-portable.sh
+```
+此腳本會依序自動：安裝 `console` 與 `console/server` 的 npm 相依套件、若缺少 `beacon/gs-agent.exe` 則用 Docker Builder 交叉編譯、最後執行官方打包器。
+
+**方式 B：手動逐步建置**
+```bash
+# 1. 安裝教師端前後端相依套件（缺少時 `tsc` 與打包器會報錯）
+npm install --prefix console
+npm install --prefix console/server
+
+# 2. 確認學生端代理已交叉編譯（未產出時執行）
+./scripts/build-docker.sh
+
+# 3. 執行官方 Packager
+npm run build:portable
+# 或 node scripts/build-windows-portable.js
+```
+
+**產物**：
+- 暫存目錄：`release/gridsight-console-windows/`（內含 `bin/node.exe`、`bin/ffmpeg.exe`、`server/server.cjs`、`dist/`、`beacon/gs-agent.exe`、`start-console.bat`）
+- 發布壓縮檔：`release/gridsight-console-portable.zip`
+
 ---
 
 ## 3. 學生端 `gs-agent.exe` 容器化交叉編譯 (Docker Builder)

@@ -31,6 +31,14 @@ interface RecordingFile {
   downloadUrl: string;
 }
 
+
+type RecordQuality = 'high' | 'medium' | 'low';
+const QUALITY_PRESETS: Record<RecordQuality, { label: string; desc: string }> = {
+  high:   { label: '高',   desc: '1080p · 30FPS · 8Mbps' },
+  medium: { label: '中',   desc: '720p · 30FPS · 4Mbps' },
+  low:    { label: '低',   desc: '480p · 15FPS · 1.5Mbps' },
+};
+
 interface ServerRecordStatus {
   isRecording: boolean;
   isRecordOnly: boolean;
@@ -75,6 +83,11 @@ export const TeacherRecordModal: React.FC<TeacherRecordModalProps> = ({
     return localStorage.getItem('gridsight_record_audio_device') || 'default';
   });
   const [audioLoading, setAudioLoading] = useState(false);
+
+  const [recordQuality, setRecordQuality] = useState<RecordQuality>(() => {
+    return (localStorage.getItem('gridsight_record_quality') as RecordQuality) || 'high';
+  });
+
 
   const [autoRecordBroadcast, setAutoRecordBroadcast] = useState<boolean>(() => {
     return localStorage.getItem('gridsight_auto_record_broadcast') === 'true';
@@ -175,7 +188,7 @@ export const TeacherRecordModal: React.FC<TeacherRecordModalProps> = ({
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          quality: 'high',
+          quality: recordQuality,
           audioDevice: selectedAudioDevice,
         }),
       });
@@ -443,6 +456,34 @@ export const TeacherRecordModal: React.FC<TeacherRecordModalProps> = ({
                         <div className="text-[11px] text-slate-400 leading-relaxed">
                           💡 選擇「立體聲混音 (Stereo Mix)」可錄入電腦播放的音樂；選擇「麥克風」可錄入老師講課聲音；選「不錄製」則為純畫面。
                         </div>
+                      </div>
+
+                      {/* Quality Selection */}
+                      <div className="text-left p-3.5 bg-slate-900 border border-slate-700/80 rounded-lg space-y-2 max-w-md mx-auto mt-3">
+                        <label className="text-xs font-semibold text-slate-200 flex items-center space-x-1.5">
+                          <Video className="w-3.5 h-3.5 text-purple-400" />
+                          <span>錄影畫質選項</span>
+                        </label>
+                        {isBroadcasting ? (
+                          <div className="text-[11px] text-slate-400 bg-slate-950 px-2.5 py-2 rounded-lg border border-slate-800">
+                            💡 目前正在全體廣播，為節省系統資源，錄影將直接錄製廣播內容，不另外編碼。
+                          </div>
+                        ) : (
+                          <select
+                            value={recordQuality}
+                            onChange={(e) => {
+                              setRecordQuality(e.target.value as RecordQuality);
+                              localStorage.setItem('gridsight_record_quality', e.target.value);
+                            }}
+                            className="w-full bg-slate-950 border border-slate-700 rounded-lg px-2.5 py-1.5 text-xs text-slate-200 focus:outline-none focus:border-purple-500 cursor-pointer"
+                          >
+                            {(Object.keys(QUALITY_PRESETS) as RecordQuality[]).map((key) => (
+                              <option key={key} value={key}>
+                                {QUALITY_PRESETS[key].label} ({QUALITY_PRESETS[key].desc})
+                              </option>
+                            ))}
+                          </select>
+                        )}
                       </div>
 
                       <button

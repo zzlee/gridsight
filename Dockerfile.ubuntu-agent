@@ -29,5 +29,5 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 
 WORKDIR /workspace
 
-# Default: build the native gs-agent ELF, then run the host-side test-suite.
-CMD ["bash", "-lc", "make -C beacon CXX=g++ TARGET=gs-agent && make -C beacon test"]
+# Default: clean, build the native gs-agent ELF, then run the host-side test-suite.
+CMD ["bash", "-lc", "make -C beacon clean && make -C beacon CXX=g++ TARGET=gs-agent && make -C beacon test"]

@@ -18,6 +18,8 @@ const baseWs = `ws://127.0.0.1:${address.port}`;
 const auth = { Authorization: `Bearer ${teacherToken}` };
 
 let agent: WebSocket | null = null;
+let agent2: WebSocket | null = null;
+
 try {
   agent = new WebSocket(`${baseWs}/ws/agent?mac=${encodeURIComponent(mac)}&ip=127.0.0.1`);
   await once(agent, 'open');
@@ -49,8 +51,22 @@ try {
   const lockedStatus = await lockedStatusResp.json() as { lockedCount: number; lockedMacs: string[] };
   assert.equal(lockedStatus.lockedMacs.includes(mac.toLowerCase()), true);
 
-  // 4. Unlock screen
-  const unlockPromise = once(agent, 'message');
+  // 4. Anti-Bypass test: Reconnect while locked
+  // Student restarts gs-agent or reboots; newly connected agent must be auto-relocked
+  agent.close();
+  await new Promise((r) => setTimeout(r, 100));
+
+  agent2 = new WebSocket(`${baseWs}/ws/agent?mac=${encodeURIComponent(mac)}&ip=127.0.0.1`);
+  const reconnectLockPromise = once(agent2, 'message');
+  await once(agent2, 'open');
+
+  const reconnectLockMsg = JSON.parse((await reconnectLockPromise)[0].toString());
+  assert.equal(reconnectLockMsg.action, 'LOCK_SCREEN');
+  assert.equal(reconnectLockMsg.message, '專心聽講');
+  console.log('✅ PASS: Anti-bypass verified - Agent auto-relocked upon reconnection');
+
+  // 5. Unlock screen
+  const unlockPromise = once(agent2, 'message');
   const unlockResp = await fetch(`${baseHttp}/api/screen/unlock`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json', ...auth },
@@ -64,14 +80,61 @@ try {
   const unlockMsg = JSON.parse((await unlockPromise)[0].toString());
   assert.equal(unlockMsg.action, 'UNLOCK_SCREEN');
 
-  // 5. Check showcase status endpoint
+  // 6. Check showcase status endpoint
   const showcaseStatusResp = await fetch(`${baseHttp}/api/broadcast/showcase/status`, { headers: auth });
   assert.equal(showcaseStatusResp.status, 200);
   const showcaseStatus = await showcaseStatusResp.json() as { active: boolean; studentMac: string | null };
   assert.equal(showcaseStatus.active, false);
 
-  console.log('✅ PASS: Screen lockout and showcase integration tests completed successfully!');
+  // 7. Test Showcase Start & Stop
+  const showcaseMessages: any[] = [];
+  agent2.on('message', (data) => {
+    try {
+      showcaseMessages.push(JSON.parse(data.toString()));
+    } catch {}
+  });
+
+  const startShowcaseResp = await fetch(`${baseHttp}/api/broadcast/showcase/start`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', ...auth },
+    body: JSON.stringify({ mac }),
+  });
+  assert.equal(startShowcaseResp.status, 200);
+  const startShowcaseData = await startShowcaseResp.json() as { ok: boolean; status: string };
+  assert.equal(startShowcaseData.ok, true);
+  assert.equal(startShowcaseData.status, 'showcase_streaming');
+
+  // Wait a moment for WS commands to be received
+  await new Promise((r) => setTimeout(r, 200));
+  assert(showcaseMessages.some((m) => m.action === 'SHOWCASE_START'), 'SHOWCASE_START received');
+  assert(showcaseMessages.some((m) => m.action === 'START_STREAM'), 'START_STREAM received');
+
+  const activeShowcaseResp = await fetch(`${baseHttp}/api/broadcast/showcase/status`, { headers: auth });
+  const activeShowcase = await activeShowcaseResp.json() as { active: boolean; studentMac: string | null };
+  assert.equal(activeShowcase.active, true);
+  assert.equal(activeShowcase.studentMac, mac.toLowerCase());
+
+  // Stop Showcase
+  showcaseMessages.length = 0;
+  const stopShowcaseResp = await fetch(`${baseHttp}/api/broadcast/showcase/stop`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', ...auth },
+    body: JSON.stringify({ mac }),
+  });
+  assert.equal(stopShowcaseResp.status, 200);
+
+  await new Promise((r) => setTimeout(r, 200));
+  assert(showcaseMessages.some((m) => m.action === 'SHOWCASE_STOP'), 'SHOWCASE_STOP received');
+  assert(showcaseMessages.some((m) => m.action === 'STOP_STREAM'), 'STOP_STREAM received');
+
+  const finalShowcaseResp = await fetch(`${baseHttp}/api/broadcast/showcase/status`, { headers: auth });
+  const finalShowcase = await finalShowcaseResp.json() as { active: boolean };
+  assert.equal(finalShowcase.active, false);
+  console.log('✅ PASS: Student showcase start and stop lifecycle verified');
+
+  console.log('✅ PASS: Screen lockout, anti-bypass, and showcase integration tests completed successfully!');
 } finally {
   agent?.close();
+  agent2?.close();
   server.close();
 }

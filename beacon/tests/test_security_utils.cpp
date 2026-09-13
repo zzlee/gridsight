@@ -56,6 +56,39 @@ int main() {
     std::string log_contents((std::istreambuf_iterator<char>(log_file)), std::istreambuf_iterator<char>());
     assert(log_contents.find("Testing log output functionality") != std::string::npos);
 
-    std::cout << "✅ All Utils security, token-grant, heartbeat, and logging tests passed!" << std::endl;
+    // Test Base64 Encoding
+    std::string sample = "Hello GridSight";
+    std::string b64 = GridSight::Utils::Base64Encode((const uint8_t*)sample.data(), sample.size());
+    assert(b64 == "SGVsbG8gR3JpZFNpZ2h0" && "Base64 encoding failed");
+
+    // Test JsonEscape
+    std::string unescaped = "Hello \"GridSight\"\\Test\nNewline";
+    std::string escaped = GridSight::Utils::JsonEscape(unescaped);
+    assert(escaped.find("\\\"GridSight\\\"") != std::string::npos && "JsonEscape quote failed");
+    assert(escaped.find("\\n") != std::string::npos && "JsonEscape newline failed");
+
+    // Test ScreenLock State Transitions
+    assert(!GridSight::Utils::IsScreenLocked() && "Screen should be unlocked initially");
+    GridSight::Utils::LockScreen("課堂專注模式");
+    assert(GridSight::Utils::IsScreenLocked() && "Screen should be locked after LockScreen()");
+    GridSight::Utils::UnlockScreen();
+    assert(!GridSight::Utils::IsScreenLocked() && "Screen should be unlocked after UnlockScreen()");
+
+    // Test Showcase Toast State Transitions
+    assert(!GridSight::Utils::IsShowcaseActive() && "Showcase should be inactive initially");
+    GridSight::Utils::SetShowcaseToast(true);
+    assert(GridSight::Utils::IsShowcaseActive() && "Showcase should be active after SetShowcaseToast(true)");
+    GridSight::Utils::SetShowcaseToast(false);
+    assert(!GridSight::Utils::IsShowcaseActive() && "Showcase should be inactive after SetShowcaseToast(false)");
+
+    // Test Student ID & Roll Call State
+    GridSight::Utils::SetStudentId("B1103001");
+    assert(GridSight::Utils::GetStudentId() == "B1103001" && "Student ID setter/getter failed");
+
+    // Test Assignment State Transitions
+    GridSight::Utils::HideAssignmentDropZone();
+    assert(!GridSight::Utils::IsAssignmentActive() && "Assignment should be inactive after HideAssignmentDropZone()");
+
+    std::cout << "✅ All Utils security, Base64, JSON, ScreenLock, Showcase, and StudentID tests passed!" << std::endl;
     return 0;
 }

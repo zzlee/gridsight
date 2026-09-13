@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { generateTeacherToken, server, tokenAuth } from './server.js';
+import { generateTeacherToken, server } from './server.js';
 
 console.log('Running Batch Snapshot and Delta Polling integration tests...');
 
@@ -17,14 +17,13 @@ const baseHttp = `http://127.0.0.1:${address.port}`;
 try {
   // 1. Setup 20 mock student devices with snapshots
   const agentCount = 20;
-  const agents: Array<{ mac: string; ip: string; token: string }> = [];
+  const agents: Array<{ mac: string; ip: string }> = [];
 
   for (let i = 1; i <= agentCount; i++) {
     const hex = i.toString(16).padStart(2, '0');
     const mac = `AA:BB:CC:DD:01:${hex}`;
     const ip = `192.168.1.${100 + i}`;
-    const token = tokenAuth.generateToken(mac, ip);
-    agents.push({ mac, ip, token });
+    agents.push({ mac, ip });
 
     // Mock realistic JPEG header & content
     const mockJpeg = Buffer.from([0xff, 0xd8, 0xff, 0xe0, 0x00, 0x10, 0x4a, 0x46, 0x49, 0x46, i, 0xff, 0xd9]);
@@ -34,7 +33,6 @@ try {
         'Content-Type': 'image/jpeg',
         'X-Agent-MAC': mac,
         'X-Agent-IP': ip,
-        'X-Auth-Token': token,
         'X-Active-Window': Buffer.from(`App #${i}`).toString('base64'),
       },
       body: mockJpeg,
@@ -106,7 +104,7 @@ try {
   console.log(`✅ Delta batch query verified: 20/20 agents returned notModified: true with 0 bytes image payload`);
 
   // 4. Partial Change Simulation: 2 agents update their screen
-  const changedAgents = [agents[3], agents[7]];
+  const changedAgents = [agents[3]!, agents[7]!];
   for (const chg of changedAgents) {
     await new Promise((r) => setTimeout(r, 5));
     const newJpeg = Buffer.from([0xff, 0xd8, 0xff, 0xe0, 0x99, 0xff, 0xd9]);
@@ -116,7 +114,6 @@ try {
         'Content-Type': 'image/jpeg',
         'X-Agent-MAC': chg.mac,
         'X-Agent-IP': chg.ip,
-        'X-Auth-Token': chg.token,
       },
       body: newJpeg,
     });

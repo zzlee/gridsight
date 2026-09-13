@@ -38,27 +38,7 @@ def test_agent_snapshot_push_and_fetch():
     b64_window = base64.b64encode(test_window_title.encode("utf-8")).decode("utf-8")
     dummy_jpeg = b"\xff\xd8\xff\xe0\x00\x10JFIF\x00\x01\x01\x01\x00`\x00`\x00\x00\xff\xd9"
 
-    import socket
-    import urllib.parse
-
-    parsed_base = urllib.parse.urlparse(BASE_URL)
-    target_host = parsed_base.hostname or "127.0.0.1"
-
-    # Obtain a valid token via UDP multicast announcement simulation
-    udp_sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-    udp_sock.settimeout(2.0)
-    beacon_payload = json.dumps({"type": "BEACON", "mac": test_mac, "hostname": "MockAgentTest"})
-    udp_sock.sendto(beacon_payload.encode(), (target_host, 8888))
-    try:
-        resp, _ = udp_sock.recvfrom(2048)
-        grant = json.loads(resp.decode())
-        agent_token = grant["token"]
-    except Exception as e:
-        raise AssertionError(f"Failed to acquire valid agent token via UDP beacon: {e}")
-    finally:
-        udp_sock.close()
-
-    # 1. Test POST /api/agent/snapshot
+    # 1. Test POST /api/agent/snapshot (no HMAC/X-Auth-Token in experimental phase)
     push_url = f"{BASE_URL}/api/agent/snapshot"
     req = urllib.request.Request(
         push_url,
@@ -67,7 +47,6 @@ def test_agent_snapshot_push_and_fetch():
             "X-Agent-MAC": test_mac,
             "X-Agent-IP": test_ip,
             "X-Active-Window": b64_window,
-            "X-Auth-Token": agent_token,
             "Content-Type": "image/jpeg"
         },
         method="POST"
@@ -104,29 +83,14 @@ def test_install_script():
     print("✅ GET /install-agent.ps1 test passed.")
 
 def test_agent_logs():
-    # 1. Test unauthorized request without auth token
-    url = f"{BASE_URL}/api/agent/UNKNOWN_MAC/logs"
+    # 1. Test logs for a non-existent agent (no auth token required in experimental phase)
+    url = f"{BASE_URL}/api/agent/NON_EXISTENT_AGENT/logs"
     req = urllib.request.Request(url)
     try:
         with urllib.request.urlopen(req, timeout=3) as resp:
-            assert False, "Expected 401 Unauthorized for logs endpoint without token"
+            assert False, "Expected 404 for non-existent agent"
     except urllib.error.HTTPError as err:
-        assert err.code == 401, f"Expected 401, got {err.code}"
-
-    # 2. Test authorized request with PIN login
-    login_url = f"{BASE_URL}/api/auth/login"
-    login_payload = json.dumps({"pin": "888888"}).encode("utf-8")
-    login_req = urllib.request.Request(login_url, data=login_payload, headers={"Content-Type": "application/json"}, method="POST")
-    with urllib.request.urlopen(login_req, timeout=3) as resp:
-        token = json.loads(resp.read().decode("utf-8")).get("token")
-
-    auth_logs_url = f"{BASE_URL}/api/agent/NON_EXISTENT_AGENT/logs"
-    auth_req = urllib.request.Request(auth_logs_url, headers={"Authorization": f"Bearer {token}"})
-    try:
-        with urllib.request.urlopen(auth_req, timeout=3) as resp:
-            assert False, "Expected 404 for non-existent agent logs"
-    except urllib.error.HTTPError as err:
-        assert err.code == 404, f"Expected 404 for non-existent agent, got {err.code}"
+        assert err.code == 404, f"Expected 404, got {err.code}"
 
     print("✅ GET /api/agent/:id/logs test passed.")
 

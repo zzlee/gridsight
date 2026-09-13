@@ -24,7 +24,7 @@
   3. **教師全體廣播**：H.264 + UDP Multicast (RTP)，內建 True Alpha 原生滑鼠光圈與點擊波紋特效，支援三檔品質快速切換（高 1080p30/8M、中 720p30/4M、低 480p15/1.5M）
 - 🔒 **輕量無感部署與安全鑑權 (Zero-Maintenance & Security)**
   - **雲端熱拉取**：PowerShell 單行指令下載至 `%TEMP%` 於 Session 1 執行，避開 Session 0 隔離，還原卡零殘留
-  - **RAM Dynamic Token**：啟動發送 UDP Multicast 主動宣告 (Beacon)，動態 Token 僅存放於記憶體，防範同儕偷窺
+  - **RAM Session Token**：教師端定期 UDP Multicast 廣播「教師在線」探索 (Discovery)，學生端監聽後以共用 Session Token（僅存放於記憶體）建立唯一出站反向 WebSocket，防範同儕偷窺
   - **強健底層**：DXGI `ACCESS_LOST` 自動重連、Per-Monitor DPI 自適應原生擷取、-mwindows 無視窗無痕執行
   - **課堂電源與派送控制**：支援遠端關機 30 秒倒數與一鍵撤銷關機 (`CANCEL_SHUTDOWN`)、網址/檔案分發與失敗重試
 
@@ -56,7 +56,7 @@
 +──────────────────────────────────────────────+  +────────────────────────────────────────────│─+    |
 |        GridSight Beacon 01 (學生端)           |  |        GridSight Beacon N (學生端)         │ |    |
 | [學生 Session 1 執行 gs-agent.exe (無UI背景)]|  | [學生 Session 1 執行 gs-agent.exe (無UI背景)]│ |    |
-|  ├─ 啟動發送 UDP Multicast 主動宣告 (Beacon) |  |  ├─ 啟動發送 UDP Multicast 主動宣告 (Beacon) │ |    |
+|  ├─ 監聽教師端多播探索 (Discovery) 後建立反向 WS |  |  ├─ 監聽教師端多播探索 (Discovery) 後建立反向 WS   │ |    |
 |  ├─ (模式1) Native HTTP Server /snapshot 回傳|  |  ├─ (模式1) Native HTTP Server /snapshot 回傳 │ |    |
 |  ├─ (模式2) 按需啟動 MFT H.264 WS 串流推流 ──┼──┼─ (模式2) [雙擊選中時] 啟動 30FPS 推流 ───────┘ │    |
 |  └─ (模式3) Win32 GDI 全螢幕置頂廣播接收     |  |  └─ (模式3) Win32 GDI 全螢幕置頂廣播接收 ◀────────────┘    |
@@ -85,7 +85,7 @@ gridsight/
 │   │   ├── components/Viewer/   # WebCodecs GPU 硬體解碼 30FPS 焦點播放器
 │   │   ├── services/            # 1 FPS 縮圖輪詢 (800ms 熔斷)、座位表儲存
 │   │   └── types/               # TypeScript 資料型別定義
-│   └── server/                  # 教師端探索監聽、Token 發放與 FFmpeg RTP 串流服務
+│   └── server/                  # 教師端多播探索廣播、Session Token 派發與 FFmpeg RTP 串流服務
 ├── docs/                     # 系統架構、通訊協定、部署與開發歷史
 │   ├── wiki/                 # 📚 官方 Wiki 知識庫 (含完整開發歷程全紀錄)
 │   │   ├── Home.md
@@ -185,7 +185,7 @@ powershell -ExecutionPolicy Bypass -WindowStyle Hidden -Command "irm http://<TEA
 ## 📅 開發進度規劃 (Milestones)
 
 - [x] **Milestone 1**：建置 MinGW 交叉編譯環境、DXGI 截圖、JPEG/WebP 壓縮與 HTTP `/snapshot` 服務。
-- [x] **Milestone 2**：多播雙向探索 (UDP Beacon)、動態 RAM Token 注入與焦點單機 WebSocket 30FPS 串流。
+- [x] **Milestone 2**：教師端多播探索 (UDP Discovery)、共用 Session Token 與焦點單機 WebSocket 30FPS 串流。
 - [x] **Milestone 3**：GridSight Console 可視化拖曳畫布、JSON 配置匯出入、WebCodecs GPU 硬解浮窗與 RTP Multicast 組播廣播。
 - [x] **Milestone 4**：多機自訂佈局對齊、800ms 熔斷併發輪詢壓測與全班廣播切換連線驗收。
 

@@ -7,13 +7,14 @@ Used for benchmarking teacher console rendering, network multicast, and snapshot
 
 import argparse
 import asyncio
+import base64
 import json
 import os
 import random
 import socket
-import struct
 import sys
 import time
+import urllib.parse
 from pathlib import Path
 from typing import List
 
@@ -111,18 +112,18 @@ class MockAgent:
         # Pre-cache JPEG in RAM for instant 0% CPU delivery
         self.jpeg_cache = create_sample_jpeg(self.index, self.hostname)
 
-    def get_beacon_payload(self) -> dict:
+    def get_register_payload(self) -> dict:
         # Simulate slight dynamic fluctuation in telemetry metrics
         self.metrics["cpu"] = max(5, min(95, self.metrics["cpu"] + random.randint(-2, 2)))
         self.metrics["ram"] = max(20, min(90, self.metrics["ram"] + random.randint(-1, 1)))
 
         return {
-            "type": "BEACON",
+            "action": "AGENT_INFO_REGISTER",
             "version": APP_VERSION,
             "hostname": self.hostname,
+            "username": self.username,
             "ip": self.ip,
             "mac": self.mac,
-            "username": self.username,
             "active_window": self.active_window,
             "timestamp": int(time.time() * 1000),
             "specs": {
@@ -267,98 +268,120 @@ def get_default_local_ip() -> str:
     return ip
 
 
-async def beacon_broadcast_loop(agents: List[MockAgent], multicast_ip: str, multicast_port: int, teacher_ip: str, local_ip: str, interval: float):
-    """Sends multicast UDP discovery beacons for all simulated agents."""
-    sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM, socket.IPPROTO_UDP)
-    sock.setsockopt(socket.IPPROTO_IP, socket.IP_MULTICAST_TTL, struct.pack('b', 4))
+def _ws_mask_frame(payload: bytes) -> bytes:
+    """RFC 6455 client frame (text, masked)."""
+    mask = os.urandom(4)
+    n = len(payload)
+    if n < 126:
+        header = bytes([0x81, 0x80 | n])
+    elif n < 65536:
+        header = bytes([0x81, 0x80 | 126]) + n.to_bytes(2, 'big')
+    else:
+        header = bytes([0x81, 0x80 | 127]) + n.to_bytes(8, 'big')
+    masked = bytes(b ^ mask[i % 4] for i, b in enumerate(payload))
+    return header + mask + masked
 
-    # Bind multicast outgoing interface to local IP to ensure Windows routes through LAN card
+
+async def ws_agent_connection(teacher_ip: str, teacher_port: int, agent: MockAgent):
+    """Connects the mock agent to the teacher console over a single outbound
+    reverse WebSocket (/ws/agent) and sends AGENT_INFO_REGISTER + periodic
+    re-registration. Mirrors the real gs-agent flow in the new architecture."""
+    key = base64.b64encode(os.urandom(16)).decode()
+    query = "?mac=" + urllib.parse.quote(agent.mac) + "&ip=" + urllib.parse.quote(agent.ip)
     try:
-        sock.setsockopt(socket.IPPROTO_IP, socket.IP_MULTICAST_IF, socket.inet_aton(local_ip))
-    except Exception as e:
-        print(f"[Beacon Note] IP_MULTICAST_IF bind note: {e}")
+        reader, writer = await asyncio.open_connection(teacher_ip, teacher_port)
+    except Exception:
+        await asyncio.sleep(3)
+        return
 
-    print(f"[Beacon] Multicast active -> {multicast_ip}:{multicast_port} ({len(agents)} agents, interval: {interval}s)")
-    if teacher_ip:
-        print(f"[Beacon] Direct unicast backup -> {teacher_ip}:{multicast_port}")
+    try:
+        req = (
+            f"GET /ws/agent{query} HTTP/1.1\r\n"
+            f"Host: {teacher_ip}:{teacher_port}\r\n"
+            "Upgrade: websocket\r\n"
+            "Connection: Upgrade\r\n"
+            f"Sec-WebSocket-Key: {key}\r\n"
+            "Sec-WebSocket-Version: 13\r\n\r\n"
+        )
+        writer.write(req.encode())
+        await writer.drain()
+
+        # Read handshake response headers
+        resp = b""
+        while b"\r\n\r\n" not in resp:
+            chunk = await reader.read(4096)
+            if not chunk:
+                writer.close()
+                return
+            resp += chunk
+        if b"101" not in resp.split(b"\r\n", 1)[0]:
+            writer.close()
+            return
+
+        print(f"[WS] {agent.hostname} ({agent.mac}) registered -> ws://{teacher_ip}:{teacher_port}/ws/agent")
+        last_register = 0.0
+        while True:
+            now = time.monotonic()
+            if now - last_register >= 10:
+                payload = json.dumps(agent.get_register_payload()).encode('utf-8')
+                writer.write(_ws_mask_frame(payload))
+                await writer.drain()
+                last_register = now
+
+            try:
+                b0, b1 = await asyncio.wait_for(reader.readexactly(2), timeout=2.0)
+            except asyncio.TimeoutError:
+                continue
+            except Exception:
+                break
+            opcode = b0 & 0x0f
+            length = b1 & 0x7f
+            if length == 126:
+                length = int.from_bytes(await reader.readexactly(2), 'big')
+            elif length == 127:
+                length = int.from_bytes(await reader.readexactly(8), 'big')
+            if opcode == 8:  # close
+                break
+            if opcode == 9:  # ping -> pong (echo payload)
+                frame_payload = await reader.readexactly(length) if length else b""
+                if length:
+                    writer.write(bytes([0x8A, 0x80 | length]) + os.urandom(4) + frame_payload)
+                else:
+                    writer.write(b'\x8a\x80' + os.urandom(4))
+                await writer.drain()
+            elif opcode == 10:  # pong
+                if length:
+                    await reader.readexactly(length)
+            else:
+                if length:
+                    await reader.readexactly(length)  # ignore bulk (e.g. video) messages
+    except Exception:
+        pass
+    finally:
+        try:
+            writer.close()
+            await writer.wait_closed()
+        except Exception:
+            pass
+
+
+async def ws_register_loop(agents: List[MockAgent], teacher_ip: str, teacher_port: int = 3000, interval: float = 1.0):
+    """Connects every simulated agent to the teacher console via reverse WS
+    and registers its identity (replaces the old BEACON broadcast)."""
+    if not teacher_ip:
+        print("[WS] No --teacher-ip provided; skipping WebSocket registration (HTTP snapshot pushes still feed the roster).")
+        return
+
+    print(f"[WS] Reverse WebSocket registration loop -> ws://{teacher_ip}:{teacher_port}/ws/agent ({len(agents)} agents)")
 
     while True:
-        try:
-            for agent in agents:
-                payload = agent.get_beacon_payload()
-                data = json.dumps(payload).encode('utf-8')
-
-                # 1. Multicast broadcast
-                try:
-                    sock.sendto(data, (multicast_ip, multicast_port))
-                except Exception:
-                    pass
-
-                # 2. Unicast direct backup (if teacher-ip provided)
-                if teacher_ip:
-                    try:
-                        sock.sendto(data, (teacher_ip, multicast_port))
-                    except Exception:
-                        pass
-
-                # Slight micro-sleep between packets to avoid UDP burst drops
-                await asyncio.sleep(0.002)
-
-        except Exception as e:
-            print(f"[Beacon Warning] Failed to send beacon packet: {e}")
-
+        tasks = [ws_agent_connection(teacher_ip, teacher_port, agent) for agent in agents]
+        await asyncio.gather(*tasks, return_exceptions=True)
         await asyncio.sleep(interval)
-
-
-async def get_agent_token_async(teacher_ip: str, agent: MockAgent) -> str:
-    """Asynchronously acquires an agent token via UDP beacon."""
-    token = getattr(agent, 'token', None)
-    if token:
-        return token
-
-    class UdpProtocol(asyncio.DatagramProtocol):
-        def __init__(self):
-            self.transport = None
-            self.future = asyncio.get_running_loop().create_future()
-
-        def connection_made(self, transport):
-            self.transport = transport
-            payload = agent.get_beacon_payload()
-            self.transport.sendto(json.dumps(payload).encode('utf-8'), (teacher_ip, 8888))
-
-        def datagram_received(self, data, addr):
-            try:
-                grant = json.loads(data.decode('utf-8'))
-                if "token" in grant and not self.future.done():
-                    self.future.set_result(grant["token"])
-            except Exception as e:
-                pass
-
-        def error_received(self, exc):
-            if not self.future.done():
-                self.future.set_exception(exc)
-
-    loop = asyncio.get_running_loop()
-    transport, protocol = await loop.create_datagram_endpoint(
-        lambda: UdpProtocol(),
-        local_addr=('0.0.0.0', 0)
-    )
-
-    try:
-        token = await asyncio.wait_for(protocol.future, timeout=2.0)
-        agent.token = token
-        return token
-    except Exception:
-        return ""
-    finally:
-        transport.close()
 
 
 async def push_single_snapshot(teacher_ip: str, teacher_port: int, agent: MockAgent):
     """Sends a single HTTP POST snapshot asynchronously via raw TCP socket."""
-    # Ensure token is acquired before pushing
-    token = await get_agent_token_async(teacher_ip, agent)
-
     try:
         reader, writer = await asyncio.open_connection(teacher_ip, teacher_port)
         req_headers = (
@@ -368,7 +391,6 @@ async def push_single_snapshot(teacher_ip: str, teacher_port: int, agent: MockAg
             f"x-agent-mac: {agent.mac}\r\n"
             f"x-agent-ip: {agent.ip}\r\n"
             f"x-agent-hostname: {agent.hostname}\r\n"
-            + (f"x-auth-token: {token}\r\n" if token else "") +
             f"Content-Length: {len(agent.jpeg_cache)}\r\n"
             f"Connection: close\r\n"
             f"\r\n"
@@ -408,7 +430,7 @@ async def main():
     parser.add_argument("--teacher-port", type=int, default=3000, help="Teacher console HTTP port (default: 3000)")
     parser.add_argument("--multicast-ip", type=str, default="239.255.42.99", help="Multicast IP group (default: 239.255.42.99)")
     parser.add_argument("--multicast-port", type=int, default=8888, help="Multicast UDP port (default: 8888)")
-    parser.add_argument("--interval", type=float, default=1.0, help="Beacon broadcast interval in seconds (default: 1.0)")
+    parser.add_argument("--interval", type=float, default=1.0, help="Reconnect/register interval in seconds (default: 1.0)")
     args = parser.parse_args()
 
     local_ip = args.local_ip if args.local_ip else get_default_local_ip()
@@ -417,7 +439,6 @@ async def main():
     print(f"🚀 GridSight Mock Agent Cluster Initializing")
     print(f"   • Total Agents: {args.count} instances (MOCK-01 ~ MOCK-{args.count:02d})")
     print(f"   • Local Host IP: {local_ip}")
-    print(f"   • Multicast Target: {args.multicast_ip}:{args.multicast_port}")
     if args.teacher_ip:
         print(f"   • Teacher Console: http://{args.teacher_ip}:{args.teacher_port}")
     print(f"   • Pillow Rendering: {'Enabled (Realistic Thumbnails)' if HAS_PIL else 'Disabled (Minimal JPEG)'}")
@@ -447,9 +468,9 @@ async def main():
 
     print(f"[HTTP] All {args.count} agents listening successfully (Ports: {agents[0].port} ~ {agents[-1].port})!")
 
-    # Start Beacon Broadcaster Task
-    beacon_task = asyncio.create_task(
-        beacon_broadcast_loop(agents, args.multicast_ip, args.multicast_port, args.teacher_ip, local_ip, args.interval)
+    # Start Reverse WebSocket Registration Tasks (new architecture: no BEACON)
+    ws_task = asyncio.create_task(
+        ws_register_loop(agents, args.teacher_ip, args.teacher_port, args.interval)
     )
 
     # If teacher IP specified, start async parallel snapshot push loop
@@ -460,7 +481,7 @@ async def main():
     print(f"\n[Ready] Press Ctrl+C at any time to terminate the mock cluster.\n")
 
     try:
-        await asyncio.gather(beacon_task, push_task if push_task else beacon_task)
+        await asyncio.gather(ws_task, push_task if push_task else ws_task)
     except asyncio.CancelledError:
         pass
     finally:

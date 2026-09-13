@@ -1,0 +1,58 @@
+# ==============================================================================
+# GridSight Two-Container Independent Docker Test Cluster
+# Simulates full network topology (Multicast Discovery, Reverse WebSocket,
+# 1 FPS Snapshot push, and RTP Multicast Broadcast) between gs-console and gs-agent.
+# ==============================================================================
+services:
+  test-console:
+    build:
+      context: .
+      dockerfile: Dockerfile.console
+    image: gridsight-console:latest
+    container_name: gs-test-console
+    cap_add:
+      - NET_ADMIN
+    environment:
+      - NODE_ENV=production
+      - API_PORT=3000
+      - API_HOST=0.0.0.0
+      - USE_TEST_SOURCE=true
+      - TEACHER_PIN=888888
+      - TEACHER_IP=172.28.0.10
+    networks:
+      testnet:
+        ipv4_address: 172.28.0.10
+    volumes:
+      - ./data:/data
+    command: >
+      sh -c "ip route add 224.0.0.0/4 dev eth0 2>/dev/null || true;
+             exec npm run start"
+
+  test-agent:
+    image: gridsight-ubuntu-agent:latest
+    container_name: gs-test-agent
+    cap_add:
+      - NET_ADMIN
+    mac_address: 02:42:ac:1c:00:14
+    environment:
+      - TEACHER_IP=172.28.0.10
+      - TEACHER_PORT=3000
+    networks:
+      testnet:
+        ipv4_address: 172.28.0.20
+    volumes:
+      - .:/workspace
+    working_dir: /workspace
+    depends_on:
+      - test-console
+    command: >
+      bash -c "ip route add 224.0.0.0/4 dev eth0 2>/dev/null || true;
+               exec ./beacon/gs-agent"
+
+networks:
+  testnet:
+    driver: bridge
+    ipam:
+      driver: default
+      config:
+        - subnet: 172.28.0.0/16

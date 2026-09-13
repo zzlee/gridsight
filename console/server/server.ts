@@ -8,7 +8,6 @@ import fs from 'fs';
 import { createServer } from 'http';
 import { spawn, ChildProcess } from 'child_process';
 import { WebSocketServer, WebSocket } from 'ws';
-import { TokenAuthority } from './tokenAuthority.js';
 import { MulticastDiscoveryService } from './multicastDiscovery.js';
 import { TeacherBroadcastStreamer, findFfmpegBinary } from './broadcastStreamer.js';
 import { InputEventType } from './inputRtpStreamer.js';
@@ -74,11 +73,8 @@ app.use(cors({
 }));
 app.use(express.json());
 
-export const tokenAuth = new TokenAuthority();
 const broadcastStreamer = new TeacherBroadcastStreamer();
-const discoveryService = new MulticastDiscoveryService(tokenAuth, (device) => {
-  logger.info(`[Discovery] New Beacon: ${device.hostname} (${device.ip})`);
-});
+const discoveryService = new MulticastDiscoveryService(APP_VERSION);
 
 // Teacher PIN authentication state
 let teacherPin = process.env.TEACHER_PIN || '888888';
@@ -146,10 +142,14 @@ export const isValidTeacherToken = (token: string | null | undefined): boolean =
   return true;
 };
 
-// Middleware: Protect teacher control & discovery routes from unauthorized student browsers
+// Middleware: Teacher control-route auth (web console PIN sessions only).
+// This protects the teacher web console (browser ↔ teacher.com) control routes
+// with the teacher PIN-issued session token. It does NOT govern any
+// console ↔ student-agent interaction — those tokens/HMAC were removed.
 const requireTeacherAuth: express.RequestHandler = (req, res, next) => {
-  const authHeader = req.headers.authorization;
-  const token = authHeader?.startsWith('Bearer ') ? authHeader.substring(7) : (req.query.token as string);
+  const token = req.headers.authorization?.startsWith('Bearer ')
+    ? req.headers.authorization.substring(7)
+    : (req.query.token as string);
   if (isValidTeacherToken(token)) {
     return next();
   }
@@ -157,7 +157,7 @@ const requireTeacherAuth: express.RequestHandler = (req, res, next) => {
 };
 
 // Bounded in-memory JPEG cache for authenticated outbound student pushes.
-const snapshotCache = new Map<string, { buffer: Buffer; timestamp: number; captureTimeMs?: number }>();
+const snapshotCache = new Map<string, { buffer: Buffer; timestamp: number; captureTimeMs?: number | undefined }>();
 const SNAPSHOT_CACHE_MAX_KEYS = 256;
 const SNAPSHOT_CACHE_TTL_MS = 30_000;
 
@@ -170,6 +170,58 @@ const pendingHighResRequests = new Map<string, (b64Image: string) => void>();
 // State for student screen lockout (Feature 1)
 const lockedAgents = new Set<string>(); // normalized lowercase MAC addresses
 let lastLockMessage = '請看講台專心聽課';
+
+// State for Classroom Roll Call (Attendance)
+export interface RollCallRecord {
+  mac: string;
+  ip: string;
+  hostname: string;
+  seatNo: string;
+  studentId: string;
+  checkInTime: number;
+}
+
+export interface RollCallSession {
+  id: string;
+  title: string;
+  createdAt: number;
+  active: boolean;
+  records: Map<string, RollCallRecord>;
+}
+
+let activeRollCall: RollCallSession | null = null;
+const ATTENDANCE_FILE = process.platform === 'win32'
+  ? path.join(process.cwd(), 'data', 'attendance.json')
+  : (fs.existsSync('/data') ? '/data/attendance.json' : path.join(process.cwd(), 'data', 'attendance.json'));
+
+async function saveAttendanceSession(session: RollCallSession) {
+  try {
+    const dir = path.dirname(ATTENDANCE_FILE);
+    if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
+    let list: Array<{ id: string; title: string; createdAt: number; active: boolean; records: RollCallRecord[] }> = [];
+    if (fs.existsSync(ATTENDANCE_FILE)) {
+      try {
+        list = JSON.parse(await fs.promises.readFile(ATTENDANCE_FILE, 'utf-8'));
+      } catch {}
+    }
+    const idx = list.findIndex((s) => s.id === session.id);
+    const serialized = {
+      id: session.id,
+      title: session.title,
+      createdAt: session.createdAt,
+      active: session.active,
+      records: Array.from(session.records.values()),
+    };
+    if (idx >= 0) {
+      list[idx] = serialized;
+    } else {
+      list.unshift(serialized);
+    }
+    await fs.promises.writeFile(ATTENDANCE_FILE, JSON.stringify(list, null, 2), 'utf-8');
+  } catch (err) {
+    logger.error(`[RollCall] Failed to save attendance file: ${err}`);
+  }
+}
 
 // Normalizes MAC addresses and targets by decoding URL characters and standardizing case
 const normalizeCache = new Map<string, string>();
@@ -212,7 +264,7 @@ const pruneSnapshotCache = (now = Date.now()) => {
   }
 };
 
-const storeSnapshot = (key: string, entry: { buffer: Buffer; timestamp: number; captureTimeMs?: number }) => {
+const storeSnapshot = (key: string, entry: { buffer: Buffer; timestamp: number; captureTimeMs?: number | undefined }) => {
   if (!key) return;
   snapshotCache.delete(key);
   snapshotCache.set(key, entry);
@@ -225,7 +277,7 @@ const storeSnapshot = (key: string, entry: { buffer: Buffer; timestamp: number; 
  * insertion order (FIFO), letting a continuously polled seat flush out
  * cold-but-never-hot entries unfairly.
  */
-const getSnapshotCached = (key: string): { buffer: Buffer; timestamp: number; captureTimeMs?: number } | undefined => {
+const getSnapshotCached = (key: string): { buffer: Buffer; timestamp: number; captureTimeMs?: number | undefined } | undefined => {
   const entry = snapshotCache.get(key);
   if (entry === undefined) return undefined;
   snapshotCache.delete(key);
@@ -233,14 +285,8 @@ const getSnapshotCached = (key: string): { buffer: Buffer; timestamp: number; ca
   return entry;
 };
 
-const requireAgentSnapshotAuth: express.RequestHandler = (req, res, next) => {
-  const mac = normalizeTarget((req.headers['x-agent-mac'] as string) || '');
-  const token = (req.headers['x-auth-token'] as string) || '';
-  if (!mac || !tokenAuth.validateToken(mac, token)) {
-    return res.status(401).json({ error: 'Unauthorized agent snapshot' });
-  }
-  next();
-};
+// Middleware: Agent snapshot auth (EXPERIMENTAL PHASE: disabled, see above).
+const requireAgentSnapshotAuth: express.RequestHandler = (_req, _res, next) => next();
 
 wss.on('connection', (ws, req) => {
   const host = req.headers.host || `localhost:${PORT}`;
@@ -250,19 +296,25 @@ wss.on('connection', (ws, req) => {
   if (pathname === '/ws/agent') {
     const rawMac = parsedUrl.searchParams.get('mac') || '';
     const mac = normalizeTarget(rawMac);
-    const token = parsedUrl.searchParams.get('token') || '';
-    if (!mac || !tokenAuth.validateToken(mac, token)) {
-      logger.warn(`[WS Relay] Rejected unauthenticated agent socket from ${req.socket.remoteAddress || 'unknown'}`);
-      ws.close(1008, 'Invalid agent credentials');
+    const sourceIp = (req.socket.remoteAddress || '').replace(/^::ffff:/, '');
+    if (!mac) {
+      logger.warn(`[WS Relay] Rejected agent socket without MAC from ${sourceIp || 'unknown'}`);
+      ws.close(1008, 'Missing agent identifier');
       return;
     }
 
+    const ip = (sourceIp && sourceIp !== '::1' ? sourceIp : parsedUrl.searchParams.get('ip') || mac);
+
     const previous = agentSockets.get(mac);
     if (previous && previous !== ws) {
-      previous.close(1008, 'Superseded by a newer authenticated connection');
+      previous.close(1008, 'Superseded by a newer connection');
     }
     agentSockets.set(mac, ws);
-    logger.info(`[WS Relay] Authenticated student agent registered outbound: ${mac}`);
+
+    // Register into the roster immediately so the seat becomes visible even
+    // before its first snapshot (replaces the old BEACON registration).
+    discoveryService.upsertDevice({ mac, ip });
+    logger.info(`[WS Relay] Student agent registered outbound: ${mac} (${sourceIp})`);
 
     // Auto-relock if this agent was marked as locked
     if (lockedAgents.has(mac.toLowerCase())) {
@@ -318,7 +370,41 @@ wss.on('connection', (ws, req) => {
         try {
           const text = data.toString('utf-8');
           const json = JSON.parse(text);
-          if (json.action === 'LOGS_REPORT') {
+          if (json.action === 'AGENT_INFO_REGISTER') {
+            const studentId = typeof json.student_id === 'string' && json.student_id.trim() ? json.student_id.trim() : undefined;
+            const dev = discoveryService.upsertDevice({
+              mac,
+              ip: typeof json.ip === 'string' && json.ip ? json.ip : ip,
+              hostname: typeof json.hostname === 'string' && json.hostname ? json.hostname : undefined,
+              username: typeof json.username === 'string' && json.username ? json.username : undefined,
+              studentId,
+              activeWindow: typeof json.active_window === 'string' ? json.active_window : undefined,
+              specs: json.specs && typeof json.specs === 'object' ? json.specs : undefined,
+            });
+            logger.info(`[WS Relay] Student agent info registered: ${dev.hostname} (${dev.ip} / ${mac})${studentId ? ` [Student ID: ${studentId}]` : ''}`);
+          } else if (json.action === 'ROLL_CALL_RESPONSE') {
+            const studentId = typeof json.studentId === 'string' ? json.studentId.trim() : '';
+            if (studentId) {
+              const dev = discoveryService.findDevice(mac);
+              const seatNo = dev?.seatNo || '';
+              const hostname = dev?.hostname || mac;
+              const checkInTime = Date.now();
+              const record: RollCallRecord = {
+                mac,
+                ip: dev?.ip || '',
+                hostname,
+                seatNo,
+                studentId,
+                checkInTime,
+              };
+              if (activeRollCall) {
+                activeRollCall.records.set(mac.toLowerCase(), record);
+                saveAttendanceSession(activeRollCall).catch(() => {});
+              }
+              discoveryService.touchDevice(mac, { studentId, checkInTime });
+              logger.info(`[RollCall] Student ${hostname} (${mac}) checked in: ${studentId}`);
+            }
+          } else if (json.action === 'LOGS_REPORT') {
             const cb = pendingLogRequests.get(mac);
             if (cb) {
               cb(json.logs || '');
@@ -331,7 +417,9 @@ wss.on('connection', (ws, req) => {
               pendingHighResRequests.delete(mac);
             }
           }
-        } catch {}
+        } catch (err: any) {
+          logger.warn(`[WS Relay] Failed to parse JSON message from agent ${mac}: ${err?.message || err}`);
+        }
       }
     });
 
@@ -348,13 +436,6 @@ wss.on('connection', (ws, req) => {
       logger.info(`[WS Relay] Student Agent disconnected: ${mac}`);
     });
   } else if (pathname.startsWith('/ws/stream/')) {
-    const teacherToken = parsedUrl.searchParams.get('token');
-    if (!isValidTeacherToken(teacherToken)) {
-      logger.warn(`[WS Relay] Rejected unauthenticated teacher viewer from ${req.socket.remoteAddress || 'unknown'}`);
-      ws.close(1008, 'Teacher authentication required');
-      return;
-    }
-
     const rawTarget = pathname.replace('/ws/stream/', '');
     let mac = normalizeTarget(rawTarget);
 
@@ -700,8 +781,14 @@ app.get('/api/agents', requireTeacherAuth, (req, res) => {
   const activeSession = activeAssignmentId ? assignmentSessions.get(activeAssignmentId) : null;
   const agents = rawDevices.map((d) => {
     const sub = (activeSession && d.mac) ? activeSession.submissions.get(d.mac.toLowerCase()) : undefined;
+    const rollRecord = (activeRollCall && d.mac) ? activeRollCall.records.get(d.mac.toLowerCase()) : undefined;
+    const studentId = rollRecord?.studentId || d.studentId;
+    const checkInTime = rollRecord?.checkInTime || d.checkInTime;
     return {
       ...d,
+      studentId,
+      checkInTime,
+      hasCheckedIn: !!studentId,
       isLocked: d.mac ? lockedAgents.has(d.mac.toLowerCase()) : false,
       hasSubmitted: !!sub,
       submissionInfo: sub ? { filename: sub.filename, size: sub.size, submittedAt: sub.submittedAt } : undefined,
@@ -718,8 +805,14 @@ app.get('/api/devices', requireTeacherAuth, (req, res) => {
   const activeSession = activeAssignmentId ? assignmentSessions.get(activeAssignmentId) : null;
   const devices = rawDevices.map((d) => {
     const sub = (activeSession && d.mac) ? activeSession.submissions.get(d.mac.toLowerCase()) : undefined;
+    const rollRecord = (activeRollCall && d.mac) ? activeRollCall.records.get(d.mac.toLowerCase()) : undefined;
+    const studentId = rollRecord?.studentId || d.studentId;
+    const checkInTime = rollRecord?.checkInTime || d.checkInTime;
     return {
       ...d,
+      studentId,
+      checkInTime,
+      hasCheckedIn: !!studentId,
       isLocked: d.mac ? lockedAgents.has(d.mac.toLowerCase()) : false,
       hasSubmitted: !!sub,
       submissionInfo: sub ? { filename: sub.filename, size: sub.size, submittedAt: sub.submittedAt } : undefined,
@@ -1139,7 +1232,8 @@ app.post(
     await ensureAssignmentsDirectory();
     const rawMac = (req.headers['x-agent-mac'] as string) || '';
     const ip = (req.headers['x-agent-ip'] as string) || req.ip?.replace(/^.*:/, '') || '';
-    const rawAssignmentId = (req.headers['x-assignment-id'] as string) || (req.query.id as string) || activeAssignmentId || '';
+    const specifiedId = (req.headers['x-assignment-id'] as string) || (req.query.id as string) || '';
+    const assignmentId = specifiedId || activeAssignmentId || '';
     const rawFilenameB64 = (req.headers['x-filename'] as string) || '';
     const mac = normalizeTarget(rawMac);
 
@@ -1152,7 +1246,7 @@ app.post(
       }
     }
 
-    const session = assignmentSessions.get(rawAssignmentId) || (activeAssignmentId ? assignmentSessions.get(activeAssignmentId) : null);
+    const session = assignmentId ? assignmentSessions.get(assignmentId) : null;
     if (!session) {
       return res.status(404).json({ error: '找不到指定的作業收取作業' });
     }
@@ -1237,6 +1331,145 @@ app.get('/api/assignments/:id/download-zip', requireTeacherAuth, async (req, res
   res.setHeader('Content-Disposition', `attachment; filename="GridSight_Assignment.zip"; filename*=UTF-8''${encodedName}`);
   res.setHeader('Content-Length', zipBuf.length);
   res.send(zipBuf);
+});
+
+// ========================================================
+// Roll Call (Attendance) Endpoints
+// ========================================================
+
+app.post('/api/rollcall/start', requireTeacherAuth, (req, res) => {
+  const { title = '課堂點名', targets } = req.body || {};
+  const isTargeted = Array.isArray(targets) && targets.length > 0 && !targets.includes('ALL');
+
+  if (!activeRollCall || !isTargeted) {
+    const id = `rc_${Date.now()}`;
+    activeRollCall = {
+      id,
+      title: String(title).trim() || '課堂點名',
+      createdAt: Date.now(),
+      active: true,
+      records: new Map(),
+    };
+  } else {
+    if (title && typeof title === 'string') {
+      activeRollCall.title = title.trim();
+    }
+    activeRollCall.active = true;
+  }
+
+  const payload = JSON.stringify({
+    action: 'START_ROLL_CALL',
+    rollCallId: activeRollCall.id,
+    title: activeRollCall.title,
+  });
+
+  let count = 0;
+  if (!isTargeted) {
+    agentSockets.forEach((ws) => {
+      if (ws.readyState === WebSocket.OPEN) {
+        try { ws.send(payload); count++; } catch {}
+      }
+    });
+  } else {
+    for (const t of targets) {
+      const norm = normalizeTarget(String(t));
+      const ws = agentSockets.get(norm) || Array.from(agentSockets.entries()).find(([k]) => k.toLowerCase() === norm.toLowerCase())?.[1];
+      if (ws && ws.readyState === WebSocket.OPEN) {
+        try { ws.send(payload); count++; } catch {}
+      }
+    }
+  }
+
+  saveAttendanceSession(activeRollCall).catch(() => {});
+  logger.info(`[RollCall] Started roll call "${activeRollCall.title}" (id: ${activeRollCall.id}), dispatched to ${count} agents (targeted: ${isTargeted})`);
+
+  res.json({
+    ok: true,
+    session: {
+      id: activeRollCall.id,
+      title: activeRollCall.title,
+      createdAt: activeRollCall.createdAt,
+      active: activeRollCall.active,
+      recordsCount: activeRollCall.records.size,
+    },
+    targetCount: count,
+  });
+});
+
+app.post('/api/rollcall/stop', requireTeacherAuth, (req, res) => {
+  if (activeRollCall) {
+    activeRollCall.active = false;
+    saveAttendanceSession(activeRollCall).catch(() => {});
+  }
+  const payload = JSON.stringify({ action: 'STOP_ROLL_CALL' });
+  let count = 0;
+  agentSockets.forEach((ws) => {
+    if (ws.readyState === WebSocket.OPEN) {
+      try { ws.send(payload); count++; } catch {}
+    }
+  });
+  logger.info(`[RollCall] Stopped active roll call, notified ${count} agents`);
+  res.json({ ok: true, count });
+});
+
+app.get('/api/rollcall/status', requireTeacherAuth, (req, res) => {
+  if (!activeRollCall) {
+    return res.json({ active: false, session: null });
+  }
+  const records = Array.from(activeRollCall.records.values());
+  res.json({
+    active: activeRollCall.active,
+    session: {
+      id: activeRollCall.id,
+      title: activeRollCall.title,
+      createdAt: activeRollCall.createdAt,
+      active: activeRollCall.active,
+      records,
+      totalCheckedIn: records.length,
+    },
+  });
+});
+
+app.get('/api/rollcall/export-csv', requireTeacherAuth, (req, res) => {
+  const title = activeRollCall?.title || '課堂點名';
+  const devices = discoveryService.getDevices();
+
+  let csv = '\uFEFF座號,學號,電腦名稱,IP位址,簽到時間,狀態\r\n';
+  for (const dev of devices) {
+    const rec = (activeRollCall && dev.mac) ? activeRollCall.records.get(dev.mac.toLowerCase()) : undefined;
+    const seatNo = dev.seatNo || '未分配';
+    const studentId = rec?.studentId || dev.studentId || '';
+    const hostname = dev.hostname || dev.mac;
+    const ip = dev.ip || '';
+    const timeStr = rec?.checkInTime
+      ? new Date(rec.checkInTime).toLocaleString('zh-TW', { hour12: false })
+      : (dev.checkInTime ? new Date(dev.checkInTime).toLocaleString('zh-TW', { hour12: false }) : '');
+    const status = studentId ? '已簽到' : '未簽到';
+
+    const escapeCsv = (str: string) => `"${String(str).replace(/"/g, '""')}"`;
+    csv += `${escapeCsv(seatNo)},${escapeCsv(studentId)},${escapeCsv(hostname)},${escapeCsv(ip)},${escapeCsv(timeStr)},${escapeCsv(status)}\r\n`;
+  }
+
+  const safeTitle = title.replace(/[/\\?%*:|"<>]/g, '_');
+  const nowStr = new Date().toISOString().replace(/[-:T.]/g, '').slice(0, 14);
+  const filename = `GridSight_點名名冊_${safeTitle}_${nowStr}.csv`;
+
+  res.setHeader('Content-Type', 'text/csv; charset=utf-8');
+  res.setHeader('Content-Disposition', `attachment; filename="attendance.csv"; filename*=UTF-8''${encodeURIComponent(filename)}`);
+  res.send(csv);
+});
+
+app.get('/api/rollcall/history', requireTeacherAuth, async (req, res) => {
+  try {
+    if (fs.existsSync(ATTENDANCE_FILE)) {
+      const data = JSON.parse(await fs.promises.readFile(ATTENDANCE_FILE, 'utf-8'));
+      res.json({ history: data });
+    } else {
+      res.json({ history: [] });
+    }
+  } catch {
+    res.json({ history: [] });
+  }
 });
 
 app.get('/api/broadcast/status', requireTeacherAuth, (req, res) => {
@@ -1902,14 +2135,19 @@ app.post(
     const mac = normalizeTarget(rawMac);
     const buffer = req.body as Buffer;
 
+    // Keep the roster fresh: a snapshot push proves the agent is alive and
+    // carries the current foreground window title (replaces BEACON liveness).
+    let winTitle = '';
     if (rawWin) {
       try {
-        const winTitle = Buffer.from(rawWin, 'base64').toString('utf-8');
-        const dev = discoveryService.findDevice(mac) || discoveryService.findDevice(ip);
-        if (dev && winTitle) {
-          dev.activeWindow = winTitle;
-        }
+        winTitle = Buffer.from(rawWin, 'base64').toString('utf-8');
       } catch {}
+    }
+    const rawStuId = (req.headers['x-student-id'] as string) || '';
+    const studentId = rawStuId.trim() || undefined;
+    const known = discoveryService.touchDevice(mac, { ip, activeWindow: winTitle, studentId });
+    if (!known) {
+      discoveryService.upsertDevice({ mac, ip, activeWindow: winTitle, studentId });
     }
 
     if (buffer && buffer.length > 0) {
@@ -1991,10 +2229,10 @@ app.post('/api/snapshots/batch', requireTeacherAuth, async (req, res) => {
   const results: Array<{
     id: string;
     notModified: boolean;
-    timestamp?: number;
-    data?: string;
-    activeWindow?: string;
-    status?: 'online' | 'offline';
+    timestamp?: number | undefined;
+    data?: string | undefined;
+    activeWindow?: string | undefined;
+    status?: 'online' | 'offline' | undefined;
   }> = [];
 
   for (const item of requests) {
@@ -2100,12 +2338,10 @@ app.get('/install-agent.ps1', async (req, res) => {
       ? socketAddress
       : req.hostname;
   const teacherHost = /^[A-Za-z0-9._-]+$/.test(candidateHost) ? candidateHost : '127.0.0.1';
-  const hmacSecret = await tokenAuth.getHmacSecret();
   const script = buildInstallAgentScript({
     serverHost: `${teacherHost}:${PORT}`,
     teacherHost,
     teacherPort: PORT,
-    hmacSecret,
     version: APP_VERSION,
   });
   res.setHeader('Content-Type', 'text/plain; charset=utf-8');

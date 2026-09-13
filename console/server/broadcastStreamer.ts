@@ -396,9 +396,14 @@ export class TeacherBroadcastStreamer {
         appendScale();
       }
     } else {
-      // Linux: omit -video_size so x11grab captures the full screen at native resolution
-      const display = process.env.DISPLAY || ':0';
-      inputArgs = ['-f', 'x11grab', '-framerate', String(fps), '-i', display];
+      // Linux: if USE_TEST_SOURCE=true, DISPLAY=testsrc, or no DISPLAY, use synthetic test pattern
+      if (process.env.USE_TEST_SOURCE === 'true' || process.env.DISPLAY === 'testsrc' || !process.env.DISPLAY) {
+        logger.info('[Broadcast] Using synthetic test pattern (testsrc2) for headless/Docker testing');
+        inputArgs = ['-f', 'lavfi', '-i', `testsrc2=size=1280x720:rate=${fps}`];
+      } else {
+        const display = process.env.DISPLAY || ':0';
+        inputArgs = ['-f', 'x11grab', '-framerate', String(fps), '-i', display];
+      }
       appendScale();
     }
 
@@ -425,10 +430,16 @@ export class TeacherBroadcastStreamer {
           this.currentAudioDevice = 'none';
         }
       } else {
-        const devName = requestedDev === 'default' ? 'default' : requestedDev;
-        audioArgs = ['-f', 'pulse', '-i', devName];
-        this.currentAudioDevice = devName;
-        logger.info(`[Broadcast/Record] Attached Linux audio source: ${devName}`);
+        if (process.env.USE_TEST_SOURCE === 'true' || requestedDev === 'test-sine' || requestedDev === 'synthetic') {
+          audioArgs = ['-f', 'lavfi', '-i', 'sine=frequency=1000:sample_rate=48000'];
+          this.currentAudioDevice = 'test-sine';
+          logger.info('[Broadcast/Record] Attached synthetic test audio source: 1000Hz Sine Wave');
+        } else {
+          const devName = requestedDev === 'default' ? 'default' : requestedDev;
+          audioArgs = ['-f', 'pulse', '-i', devName];
+          this.currentAudioDevice = devName;
+          logger.info(`[Broadcast/Record] Attached Linux audio source: ${devName}`);
+        }
       }
     } else {
       this.currentAudioDevice = 'none';

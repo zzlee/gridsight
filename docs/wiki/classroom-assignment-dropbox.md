@@ -34,7 +34,7 @@ sequenceDiagram
     Note over A,S: 學生螢幕自動彈出 Win32 原生置頂拖曳視窗<br/>(GridSightAssignmentDropZone)
     S->>A: 從桌面拖曳檔案至視窗放開 (WM_DROPFILES)
     Note over A: 本地檢查：副檔名格式校驗與檔案大小上限
-    A->>B: Raw TCP Socket HTTP POST (/api/assignments/upload)<br/>二進位直傳檔案流 (附帶 MAC/Token/檔名)
+    A->>B: Raw TCP Socket HTTP POST (/api/assignments/upload)<br/>二進位直傳檔案流（附帶 MAC / 檔名）
     Note over B: 自動匹配座號與主機名<br/>儲存至 data/assignments/<ID>/[座號]_[主機名]_[原檔名]<br/>(若重複繳交則自動覆蓋舊檔)
     B-->>A: 回傳上傳成功 JSON { ok: true, filename, size }
     Note over A,S: 播放 Windows 成功音 (MessageBeep)<br/>視窗呈現綠色繳交成功提示
@@ -74,7 +74,7 @@ sequenceDiagram
 - 學生端 C++ 啟動獨立背景線程，建立直接通往教師端 Port 3000 的 Raw TCP Socket。
 - 發送 HTTP POST `/api/assignments/upload` 請求標頭：
   - `X-Agent-MAC`：學生網卡 MAC 位址。
-  - `X-Auth-Token`：動態 HMAC 鑑權 Token。
+  - `X-Agent-IP`：學生端 IP 位址。
   - `X-Assignment-Id`：當前進行中作業唯一識別碼。
   - `X-Filename`：UTF-8 Base64 編碼檔名。
 - 檔案資料直接以區塊（Chunk）寫入 Socket，百 KB 級程式碼上傳僅需 **0.05 秒**，數十 MB 專案壓縮檔亦在數秒內完成。

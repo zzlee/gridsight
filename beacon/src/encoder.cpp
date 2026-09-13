@@ -27,6 +27,11 @@
 #pragma comment(lib, "ole32.lib")
 #endif
 
+#ifndef _WIN32
+#define STB_IMAGE_WRITE_IMPLEMENTATION
+#include "../include/stb_image_write.h"
+#endif
+
 namespace GridSight {
 
 void ConvertBGRAtoNV12_SIMD(const uint8_t* bgra_data, int width, int height, uint8_t* nv12_out) {
@@ -260,6 +265,32 @@ bool ImageEncoder::EncodeToJPEG(const uint8_t* bgra_data, int width, int height,
     }
     return !out_jpeg.empty();
 #else
+    // Linux headless/synthetic JPEG encoder using stb_image_write
+    std::vector<uint8_t> rgb_buffer(target_width * target_height * 3);
+    for (int dy = 0; dy < target_height; ++dy) {
+        int sy = (dy * height) / target_height;
+        for (int dx = 0; dx < target_width; ++dx) {
+            int sx = (dx * width) / target_width;
+            size_t src_idx = (size_t)(sy * width + sx) * 4;
+            size_t dst_idx = (size_t)(dy * target_width + dx) * 3;
+            rgb_buffer[dst_idx + 0] = bgra_data[src_idx + 2]; // R
+            rgb_buffer[dst_idx + 1] = bgra_data[src_idx + 1]; // G
+            rgb_buffer[dst_idx + 2] = bgra_data[src_idx + 0]; // B
+        }
+    }
+
+    out_jpeg.clear();
+    auto write_cb = [](void* context, void* data, int size) {
+        auto* vec = static_cast<std::vector<uint8_t>*>(context);
+        const uint8_t* byte_data = static_cast<const uint8_t*>(data);
+        vec->insert(vec->end(), byte_data, byte_data + size);
+    };
+
+    if (stbi_write_jpg_to_func(write_cb, &out_jpeg, target_width, target_height, 3, rgb_buffer.data(), quality)) {
+        tl_last_hash = current_hash;
+        tl_cached_jpeg = out_jpeg;
+        return true;
+    }
     return false;
 #endif
 }

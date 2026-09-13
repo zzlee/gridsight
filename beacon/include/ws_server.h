@@ -24,6 +24,7 @@ private:
     void StreamLoop();
     void ReceiveCommands(uintptr_t sock_fd);
     void HandleCommandMessage(uintptr_t sock_fd, const std::string& message);
+    void SendAgentRegistration(uintptr_t sock_fd);
     bool SendWsClientFrame(uintptr_t sock_fd, uint8_t opcode, const uint8_t* data, size_t len);
     void SendWsClientBinary(uintptr_t sock_fd, const uint8_t* data, size_t len);
     void SendWsClientText(uintptr_t sock_fd, const std::string& text);

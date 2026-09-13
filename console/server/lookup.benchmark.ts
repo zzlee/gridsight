@@ -1,9 +1,7 @@
 import { MulticastDiscoveryService } from './multicastDiscovery.js';
 import type { DiscoveredAgent } from './multicastDiscovery.js';
-import { TokenAuthority } from './tokenAuthority.js';
 
-const tokenAuth = new TokenAuthority();
-const service = new MulticastDiscoveryService(tokenAuth);
+const service = new MulticastDiscoveryService();
 
 // Access private activeDevices map using casting for benchmark setup
 const activeDevices = (service as any).activeDevices as Map<string, DiscoveredAgent>;
@@ -22,7 +20,6 @@ for (let i = 0; i < NUM_DEVICES; i++) {
     ip,
     mac,
     username: 'Student',
-    token: 'test-token',
     activeWindow: 'Desktop',
     lastSeen: now,
   };

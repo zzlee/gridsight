@@ -1,6 +1,5 @@
 #include "../include/ws_server.h"
 #include "../include/utils.h"
-#include "../include/token_manager.h"
 #include "../include/rtp_receiver.h"
 #include <iostream>
 #include <fstream>
@@ -160,10 +159,9 @@ void WebSocketStreamer::ConnectOutboundLoop() {
 
         // Send WebSocket Client Upgrade Request (RFC 6455)
         NetworkInfo net = Utils::GetSystemNetworkInfo();
-        std::string token = TokenManager::Instance().GetSessionToken();
 
         std::ostringstream oss;
-        oss << "GET /ws/agent?mac=" << net.mac << "&ip=" << net.ip << "&token=" << token << " HTTP/1.1\r\n"
+        oss << "GET /ws/agent?mac=" << net.mac << "&ip=" << net.ip << " HTTP/1.1\r\n"
             << "Host: " << host << ":" << port << "\r\n"
             << "Upgrade: websocket\r\n"
             << "Connection: Upgrade\r\n"
@@ -178,9 +176,19 @@ void WebSocketStreamer::ConnectOutboundLoop() {
         if (rec > 0 && std::string(buf).find("101 Switching Protocols") != std::string::npos) {
             Utils::Log("INFO", "✅ Reverse WebSocket Outbound Stream connected to Teacher " + host);
             Utils::UpdateHeartbeat("ws-connected");
+            // Register roll call submit callback
+            Utils::SetRollCallSubmitCallback([this, s](const std::string& roll_call_id, const std::string& student_id) {
+                std::string resp = "{\"action\":\"ROLL_CALL_RESPONSE\",\"rollCallId\":" + Utils::JsonEscape(roll_call_id) + ",\"studentId\":" + Utils::JsonEscape(student_id) + "}";
+                SendWsClientText((uintptr_t)s, resp);
+            });
+
+            // Register identity (hostname / username / specs / active window)
+            // so the teacher can build its device roster without a beacon.
+            SendAgentRegistration((uintptr_t)s);
 
             // Receive commands (START_STREAM / STOP_STREAM / GET_HIGHRES_SNAPSHOT / GET_LOGS etc)
             ReceiveCommands((uintptr_t)s);
+            Utils::SetRollCallSubmitCallback(nullptr);
             if (running_) {
                 Utils::Log("WARN", "Reverse WebSocket disconnected, retrying...");
             }
@@ -201,9 +209,45 @@ void WebSocketStreamer::ConnectOutboundLoop() {
             }
             streaming_active_ = false;
         }
+
+#ifdef _WIN32
         closesocket(s);
-        if (running_) Utils::SleepMs(2000);
+#else
+        close(s);
+#endif
+
+        if (running_) {
+            Utils::SleepMs(2000);
+        }
     }
+}
+
+void WebSocketStreamer::SendAgentRegistration(uintptr_t sock_fd) {
+    NetworkInfo net = Utils::GetSystemNetworkInfo();
+    SystemHardwareInfo hw = Utils::GetSystemHardwareInfo();
+    const std::string win_title = Utils::GetActiveWindowTitle();
+
+    std::ostringstream ss;
+    ss << "{"
+       << "\"action\":\"AGENT_INFO_REGISTER\","
+       << "\"version\":\"" AGENT_VERSION "\","
+       << "\"hostname\":" << Utils::JsonEscape(net.hostname) << ","
+       << "\"username\":" << Utils::JsonEscape(net.username) << ","
+       << "\"ip\":\"" << net.ip << "\","
+       << "\"mac\":\"" << net.mac << "\","
+       << "\"student_id\":" << Utils::JsonEscape(Utils::GetStudentId()) << ","
+       << "\"active_window\":" << Utils::JsonEscape(win_title) << ","
+       << "\"specs\":{"
+       <<   "\"agent_version\":\"" AGENT_VERSION "\","
+       <<   "\"os\":" << Utils::JsonEscape(hw.os_name) << ","
+       <<   "\"uptime\":" << hw.uptime_seconds << ","
+       <<   "\"cpu\":{\"model\":" << Utils::JsonEscape(hw.cpu_model) << ",\"cores\":" << hw.cpu_cores << ",\"usage_percent\":" << hw.cpu_usage_percent << "},"
+       <<   "\"ram\":{\"total_mb\":" << hw.ram_total_mb << ",\"avail_mb\":" << hw.ram_avail_mb << ",\"usage_percent\":" << hw.ram_usage_percent << "},"
+       <<   "\"disk\":{\"drive\":" << Utils::JsonEscape(hw.disk_drive) << ",\"total_gb\":" << hw.disk_total_gb << ",\"free_gb\":" << hw.disk_free_gb << ",\"usage_percent\":" << hw.disk_usage_percent << "}"
+       << "}"
+       << "}";
+    SendWsClientText(sock_fd, ss.str());
+    Utils::Log("INFO", "✅ Sent AGENT_INFO_REGISTER to Teacher");
 }
 
 void WebSocketStreamer::ReceiveCommands(uintptr_t sock_fd) {
@@ -361,11 +405,19 @@ void WebSocketStreamer::HandleCommandMessage(uintptr_t sock_fd, const std::strin
         }
         Utils::Log("INFO", "📁 [Assignment Command] Received COLLECT_ASSIGNMENT: " + title);
         std::thread([id, title, allowed_exts, max_mb, upload_url]() {
-            Utils::ShowAssignmentDropZone(id, title, allowed_exts, max_mb, upload_url, TokenManager::Instance().GetSessionToken());
+            Utils::ShowAssignmentDropZone(id, title, allowed_exts, max_mb, upload_url);
         }).detach();
     } else if (action == "STOP_ASSIGNMENT") {
         Utils::Log("INFO", "📁 [Assignment Command] Received STOP_ASSIGNMENT from Teacher Console");
         Utils::HideAssignmentDropZone();
+    } else if (action == "START_ROLL_CALL") {
+        const std::string roll_call_id = Utils::ExtractJsonField(message, "rollCallId");
+        const std::string title = Utils::ExtractJsonField(message, "title");
+        Utils::Log("INFO", "📋 [RollCall Command] Received START_ROLL_CALL: " + (title.empty() ? "課堂點名" : title) + " (id: " + roll_call_id + ")");
+        Utils::ShowRollCallDialog(roll_call_id, title);
+    } else if (action == "STOP_ROLL_CALL") {
+        Utils::Log("INFO", "🛑 [RollCall Command] Received STOP_ROLL_CALL from Teacher Console");
+        Utils::HideRollCallDialog();
     } else if (action == "GET_HIGHRES_SNAPSHOT") {
         Utils::Log("INFO", "📸 [Command] Received GET_HIGHRES_SNAPSHOT request from Teacher Console");
         FrameData frame;

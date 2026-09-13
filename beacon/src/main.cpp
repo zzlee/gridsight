@@ -3,7 +3,6 @@
 #include "../include/http_server.h"
 #include "../include/ws_server.h"
 #include "../include/rtp_receiver.h"
-#include "../include/token_manager.h"
 #include "../include/input_rtp_receiver.h"
 #include "../include/utils.h"
 #include <iostream>
@@ -231,7 +230,6 @@ int main(int argc, char* argv[]) {
     int rtp_port = GridSight::Utils::GetEnvInt("RTP_PORT", 9000);
     std::string input_rtp_ip = GridSight::Utils::GetEnv("INPUT_RTP_IP", rtp_ip);
     int input_rtp_port = GridSight::Utils::GetEnvInt("INPUT_RTP_PORT", 9002);
-    std::string hmac_secret = GridSight::Utils::GetEnv("HMAC_SECRET", "");
     std::string teacher_host = GridSight::Utils::GetEnv(
         "TEACHER_HOST",
         GridSight::Utils::GetEnv("TEACHER_IP", "192.168.190.201"));
@@ -252,17 +250,14 @@ int main(int argc, char* argv[]) {
         }
     }
 
-    // Request Student ID before starting full agent services
-    std::string student_id = GridSight::Utils::ShowStudentLoginDialog();
-    GridSight::Utils::Log("INFO", "Student ID recorded: " + student_id);
-
     auto capturer = std::make_shared<GridSight::ScreenCapturer>();
     if (!capturer->Initialize()) {
         GridSight::Utils::Log("WARN", "Initial ScreenCapturer setup failed; capture requests will retry initialization");
     }
 
     // 1. Start snapshot and focus-stream services with the configured
-    // bootstrap endpoint. A verified TOKEN_GRANT updates both destinations.
+    // bootstrap endpoint. A verified DISCOVERY announcement updates both
+    // destinations dynamically.
     auto http_server = std::make_shared<GridSight::HttpServer>(capturer);
     auto ws_streamer = std::make_shared<GridSight::WebSocketStreamer>(capturer);
     http_server->SetTeacherHost(teacher_host, teacher_port);
@@ -270,10 +265,10 @@ int main(int argc, char* argv[]) {
     http_server->Start();
     ws_streamer->Start();
 
-    // 2. Start discovery only after both consumers exist, so every verified
-    // teacher endpoint update is applied atomically to snapshot and WS paths.
+    // 2. Start discovery only after both consumers exist, so every received
+    // teacher announcement update is applied atomically to snapshot and WS paths.
     GridSight::BeaconClient beacon_client(
-        multicast_ip, multicast_port, http_server, ws_streamer, hmac_secret, student_id);
+        multicast_ip, multicast_port, http_server, ws_streamer);
     beacon_client.Start();
 
     // 3. Start RTP Receiver for Teacher Multicast Broadcast

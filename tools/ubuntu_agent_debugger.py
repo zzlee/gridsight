@@ -579,7 +579,6 @@ class UbuntuAgentDebugger:
         self.player_proc = None
         self.rtp_active = False
         self.rtp_packet_count = 0
-        self.token = ""
 
     def start(self):
         self.print_banner()
@@ -588,8 +587,8 @@ class UbuntuAgentDebugger:
         if not self.teacher_ip:
             self.discover_teacher()
 
-        # 2. Launch Beacon Heartbeat Thread
-        threading.Thread(target=self.beacon_loop, daemon=True).start()
+        # 2. Launch DISCOVERY Listener Thread (auto-pair teacher IP via multicast)
+        threading.Thread(target=self.discovery_listen_loop, daemon=True).start()
 
         # 3. Launch HTTP Snapshot Pusher Thread
         threading.Thread(target=self.snapshot_loop, daemon=True).start()
@@ -634,73 +633,48 @@ class UbuntuAgentDebugger:
         if self.teacher_ip:
             log_event("DISCOVERY", f"✅ Paired with Teacher Console at {BOLD}{self.teacher_ip}:{self.port}{RESET}", GREEN)
         else:
-            log_event("DISCOVERY", "⏳ Waiting for dynamic Token Grant response to auto-pair teacher IP...", YELLOW)
+            log_event("DISCOVERY", "⏳ Waiting for DISCOVERY multicast announcement to auto-pair teacher IP...", YELLOW)
 
-    def beacon_loop(self):
-        sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-        sock.setsockopt(socket.SOL_SOCKET, socket.SO_BROADCAST, 1)
+    def discovery_listen_loop(self):
+        """New architecture: listen for the teacher console's periodic DISCOVERY
+        multicast announcement (239.255.42.99:8888) and auto-pair its IP."""
         try:
-            sock.setsockopt(socket.IPPROTO_IP, socket.IP_MULTICAST_TTL, 2)
-        except:
-            pass
-        sock.settimeout(2.0)
-        
-        while self.running:
+            sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM, socket.IPPROTO_UDP)
+            sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+            sock.bind(("", MCAST_BEACON_PORT))
             try:
-                payload = json.dumps({
-                    "type": "BEACON",
-                    "version": "5.8.12",
-                    "hostname": self.hostname,
-                    "ip": self.local_ip,
-                    "mac": self.mac,
-                    "username": self.username,
-                    "active_window": "GridSight Debugger Console",
-                    "timestamp": int(time.time() * 1000),
-                    "specs": {
-                        "agent_version": "5.8.12",
-                        "os": "Ubuntu Linux (x64)",
-                        "uptime": 3600,
-                        "cpu": {"model": "Intel Core", "cores": 8, "usage_percent": 12.5},
-                        "ram": {"total_mb": 16384, "used_mb": 4096, "usage_percent": 25.0},
-                        "disk": {"total_gb": 512, "used_gb": 128, "usage_percent": 25.0}
-                    }
-                })
-                raw_payload = payload.encode("utf-8")
-                # Broadcast and Multicast beacon (matching C++ gs-agent discovery)
-                sock.sendto(raw_payload, ("255.255.255.255", MCAST_BEACON_PORT))
+                mreq = struct.pack("4s4s", socket.inet_aton(MCAST_BEACON_IP), socket.inet_aton(self.local_ip))
+                sock.setsockopt(socket.IPPROTO_IP, socket.IP_ADD_MEMBERSHIP, mreq)
+            except Exception:
+                mreq = struct.pack("4sl", socket.inet_aton(MCAST_BEACON_IP), socket.INADDR_ANY)
+                sock.setsockopt(socket.IPPROTO_IP, socket.IP_ADD_MEMBERSHIP, mreq)
+            sock.settimeout(3.0)
+
+            log_event("DISCOVERY", f"🎧 Listening for DISCOVERY announcements on {MCAST_BEACON_IP}:{MCAST_BEACON_PORT}...", YELLOW)
+
+            while self.running:
                 try:
-                    sock.sendto(raw_payload, (MCAST_BEACON_IP, MCAST_BEACON_PORT))
-                except:
-                    pass
-                if self.teacher_ip:
-                    try:
-                        sock.sendto(raw_payload, (self.teacher_ip, MCAST_BEACON_PORT))
-                    except:
-                        pass
-                
-                # Listen for TOKEN_GRANT response
-                try:
-                    resp_data, resp_addr = sock.recvfrom(2048)
-                    resp_json = json.loads(resp_data.decode("utf-8", errors="ignore"))
-                    if resp_json.get("type") == "TOKEN_GRANT":
-                        if resp_addr and resp_addr[0] and self.teacher_ip != resp_addr[0]:
-                            self.teacher_ip = resp_addr[0]
-                            log_event("DISCOVERY", f"🎯 Auto-paired with Teacher Console at {BOLD}{self.teacher_ip}:{self.port}{RESET}", BOLD + GREEN)
-                        new_token = resp_json.get("token", "")
-                        if new_token and new_token != self.token:
-                            self.token = new_token
-                            log_event("TOKEN", f"🔑 Received dynamic Token Grant from {resp_addr[0]}: {self.token[:12]}...", BOLD + GREEN)
+                    data, addr = sock.recvfrom(2048)
+                    pkt = json.loads(data.decode("utf-8", errors="ignore"))
+                    if pkt.get("type") == "DISCOVERY" and pkt.get("teacherIp"):
+                        ip = pkt["teacherIp"]
+                        port = int(pkt.get("teacherPort", 3000) or 3000)
+                        if self.teacher_ip != ip or self.port != port:
+                            self.teacher_ip = ip
+                            self.port = port
+                            log_event("DISCOVERY", f"🎯 Auto-paired with Teacher Console at {BOLD}{ip}:{port}{RESET}", BOLD + GREEN)
                 except socket.timeout:
-                    pass
-            except Exception as e:
-                log_event("BEACON_ERR", str(e), RED)
-            time.sleep(3.0)
+                    continue
+                except Exception:
+                    continue
+        except Exception as e:
+            log_event("BEACON_ERR", f"Discovery listener failed: {e}", RED)
 
     def snapshot_loop(self):
         dummy_jpeg = b"\xff\xd8\xff\xe0\x00\x10JFIF\x00\x01\x01\x01\x00`\x00`\x00\x00\xff\xdb\x00C\x00\x08\x06\x06\x07\x06\x05\x08\x07\x07\x07\t\t\x08\n\x0c\x14\r\x0c\x0b\x0b\x0c\x19\x12\x13\x0f\x14\x1d\x1a\x1f\x1e\x1d\x1a\x1c\x1c $.\x27 \",#\x1c\x1c(7),01444\x1f\x27=82<.342\xff\xc0\x00\x0b\x08\x00\x10\x00\x10\x01\x01\x11\x00\xff\xc4\x00\x1f\x00\x00\x01\x05\x01\x01\x01\x01\x01\x01\x00\x00\x00\x00\x00\x00\x00\x00\x01\x02\x03\x04\x05\x06\x07\x08\t\n\x0b\xff\xda\x00\x08\x01\x01\x00\x00?\x00\xbf\x00\xff\xd9"
         
         while self.running:
-            if self.teacher_ip and self.token:
+            if self.teacher_ip:
                 try:
                     url = f"http://{self.teacher_ip}:{self.port}/api/agent/snapshot"
                     headers = {
@@ -709,7 +683,6 @@ class UbuntuAgentDebugger:
                         "X-Agent-Ip": self.local_ip,
                         "X-Agent-Hostname": self.hostname,
                         "X-Agent-Username": self.username,
-                        "X-Auth-Token": self.token,
                         "X-Active-Window": "R3JpZFNpZ2h0IERlYnVnZ2Vy"
                     }
                     req = urllib.request.Request(url, data=dummy_jpeg, headers=headers)
@@ -899,7 +872,7 @@ class UbuntuAgentDebugger:
     def ws_command_loop(self):
         """Connects reverse WebSocket to teacher console and logs all received events"""
         while self.running:
-            if not self.token or not self.teacher_ip:
+            if not self.teacher_ip:
                 time.sleep(0.5)
                 continue
 
@@ -912,7 +885,7 @@ class UbuntuAgentDebugger:
                 
                 ws_key = "dGhlIHNhbXBsZSBub25jZQ=="
                 req = (
-                    f"GET /ws/agent?mac={self.mac}&ip={self.local_ip}&token={self.token} HTTP/1.1\r\n"
+                    f"GET /ws/agent?mac={self.mac}&ip={self.local_ip} HTTP/1.1\r\n"
                     f"Host: {self.teacher_ip}:{self.port}\r\n"
                     "Upgrade: websocket\r\n"
                     "Connection: Upgrade\r\n"
@@ -923,7 +896,7 @@ class UbuntuAgentDebugger:
                 
                 resp = s.recv(2048).decode("utf-8", errors="ignore")
                 if "101 Switching Protocols" in resp:
-                    log_event("WS_CLIENT", "✅ Reverse WebSocket AUTHENTICATED & CONNECTED to Teacher!", BOLD + GREEN)
+                    log_event("WS_CLIENT", "✅ Reverse WebSocket CONNECTED & REGISTERED to Teacher!", BOLD + GREEN)
                     
                     s.settimeout(None)
                     while self.running:

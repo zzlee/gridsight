@@ -46,7 +46,7 @@ powershell -ExecutionPolicy Bypass -WindowStyle Hidden -Command "irm http://192.
 - **瀏覽器**：Google Chrome 94+ 或 Microsoft Edge 94+ (支援 WebCodecs API 硬體解碼)
 
 ### 2.2 容器化一鍵部署 (標準生產推薦)
-使用 Docker Compose 啟動整合後端 API、組播探索、FFmpeg 廣播與靜態前端 UI 的完整服務：
+使用 Docker Compose 啟動整合後端 API、多播探索宣告、FFmpeg 廣播與靜態前端 UI 的完整服務：
 ```bash
 # 1. 一鍵建置並在背景啟動
 docker compose up -d

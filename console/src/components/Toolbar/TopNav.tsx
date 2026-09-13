@@ -1,4 +1,4 @@
-import { AppMode, ClassroomLayout, ActiveAssignment } from '../../types';
+import { AppMode, ClassroomLayout, ActiveAssignment, ActiveRollCall } from '../../types';
 import { TrafficStats } from '../../services/pollingManager';
 import { useState, useEffect, useRef } from 'react';
 import { AuthService } from '../../services/authService';
@@ -19,6 +19,7 @@ import {
   Globe,
   FolderUp,
   FolderDown,
+  ClipboardCheck,
   Clapperboard,
   ChevronDown,
   Power,
@@ -58,6 +59,8 @@ interface TopNavProps {
   onOpenLockScreen?: () => void;
   onOpenAssignment?: () => void;
   activeAssignment?: ActiveAssignment | null;
+  onOpenRollCall?: () => void;
+  activeRollCall?: ActiveRollCall | null;
   offTaskCount?: number;
   unassignedCount?: number;
   onLock: () => void;
@@ -86,6 +89,8 @@ export const TopNav: React.FC<TopNavProps> = ({
   onOpenLockScreen,
   onOpenAssignment,
   activeAssignment,
+  onOpenRollCall,
+  activeRollCall,
   offTaskCount = 0,
   unassignedCount = 0,
   onLock,
@@ -470,6 +475,35 @@ export const TopNav: React.FC<TopNavProps> = ({
                       <span className="hidden sm:inline">收取作業</span>
                       <span className="sm:hidden">作業</span>
                     </>
+                  )}
+                </span>
+              </button>
+            )}
+
+            {/* Roll Call (Attendance) Button */}
+            {onOpenRollCall && (
+              <button
+                onClick={onOpenRollCall}
+                className={`flex items-center space-x-1 sm:space-x-1.5 px-2 sm:px-3 py-1.5 rounded-lg border text-xs font-semibold transition-all shadow-sm active:scale-95 whitespace-nowrap shrink-0 ${
+                  activeRollCall?.active
+                    ? 'bg-emerald-500/20 text-emerald-300 border-emerald-500/50 hover:bg-emerald-500/30 animate-pulse shadow-md shadow-emerald-950/60'
+                    : 'bg-slate-900 hover:bg-slate-800 text-slate-300 border-slate-800 hover:border-slate-700'
+                }`}
+                title={
+                  activeRollCall?.active
+                    ? `課堂點名進行中：「${activeRollCall.title}」(${activeRollCall.records.length} 人已簽到)，點擊管理名冊`
+                    : '發起課堂點名，學生輸入學號簽到'
+                }
+              >
+                <ClipboardCheck className={`w-3.5 h-3.5 ${activeRollCall?.active ? 'text-emerald-400' : 'text-slate-400'}`} />
+                <span>
+                  {activeRollCall?.active ? (
+                    <>
+                      <span className="hidden sm:inline">點名中 </span>
+                      <span>({activeRollCall.records.length})</span>
+                    </>
+                  ) : (
+                    <span>點名</span>
                   )}
                 </span>
               </button>

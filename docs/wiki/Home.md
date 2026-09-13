@@ -9,11 +9,11 @@
 0. **[⭐ GridSight 全功能無腦使用手冊 (Zero-Brain User Manual)](user-manual.md)**
    - **老師必備、照著點就會！** 整理全系統 14 大功能之「三步驟操作指南」與鍵盤快速鍵速查。
 1. **[系統完整開發歷程與技術演進全紀錄 (Development History)](development-history.md)**
-   - 記錄從 v1.0 至 v5.8.10 的架構選型、效能突破、踩坑經驗與完整版本演進圖。
+   - 記錄從 v1.0 至 v5.9.0 的架構選型、效能突破、踩坑經驗與完整版本演進圖。
 2. **[系統架構與設計規格 (Architecture)](../architecture.md)**
    - 深入探討三大影像傳輸模式、DXGI 擷取、IGMP Snooping 多播與 WebCodecs GPU 硬體解碼管線。
 3. **[通訊協定規範書 (Protocol Spec)](../protocol_spec.md)**
-   - 包含 UDP 8888 多播心跳 (Beacon)、HTTP 1 FPS 快照拉取、WebSocket 30 FPS H.264 推流與 RTP 多播廣播封包格式。
+   - 包含 UDP 8888 教師多播探索 (Discovery)、HTTP 1 FPS 快照拉取、WebSocket 30 FPS H.264 推流與 RTP 多播廣播封包格式。
 4. **[電腦教室交換器 IGMP Snooping 設定指南 (IGMP Snooping Setup)](../igmp_snooping_setup.md)**
    - Cisco、D-Link、Zyxel、TP-Link 等主流網管交換器多播設定步驟。
 5. **[極速部署與維運手冊 (Deployment Guide)](../deployment_guide.md)**

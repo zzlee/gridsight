@@ -7,6 +7,9 @@ export interface DiscoveredAgent {
   mac: string;
   username?: string;
   token?: string;
+  studentId?: string;
+  checkInTime?: number;
+  hasCheckedIn?: boolean;
   activeWindow?: string;
   window_title?: string;
   specs?: DeviceSystemInfo;
@@ -55,6 +58,9 @@ export interface StudentDevice {
   lastSeen: number;
   token?: string;
   thumbnailUrl?: string;
+  studentId?: string;
+  checkInTime?: number;
+  hasCheckedIn?: boolean;
   activeWindow?: string;
   isOffTask?: boolean;
   isLocked?: boolean;
@@ -66,6 +72,24 @@ export interface StudentDevice {
   };
   selected?: boolean;
   specs?: DeviceSystemInfo;
+}
+
+export interface RollCallRecordItem {
+  mac: string;
+  ip: string;
+  hostname: string;
+  seatNo: string;
+  studentId: string;
+  checkInTime: number;
+}
+
+export interface ActiveRollCall {
+  id: string;
+  title: string;
+  createdAt: number;
+  active: boolean;
+  records: RollCallRecordItem[];
+  totalCheckedIn?: number;
 }
 
 export interface AssignmentSubmissionItem {

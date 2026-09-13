@@ -1,6 +1,5 @@
 #include "../include/http_server.h"
 #include "../include/encoder.h"
-#include "../include/token_manager.h"
 #include "../include/utils.h"
 #include <iostream>
 #include <sstream>
@@ -93,18 +92,20 @@ void HttpServer::PushSnapshotToTeacher(const std::vector<uint8_t>& jpeg_data, ui
 
     if (connect(s, (sockaddr*)&addr, sizeof(addr)) != SOCKET_ERROR) {
         NetworkInfo net = Utils::GetSystemNetworkInfo();
-        const std::string session_token = TokenManager::Instance().GetSessionToken();
         std::string win_title = Utils::GetActiveWindowTitle();
         std::string win_b64 = Utils::Base64Encode((const uint8_t*)win_title.data(), win_title.size());
         std::ostringstream oss;
+        std::string stu_id = Utils::GetStudentId();
         oss << "POST /api/agent/snapshot HTTP/1.1\r\n"
             << "Host: " << host << ":" << port << "\r\n"
             << "X-Agent-MAC: " << net.mac << "\r\n"
             << "X-Agent-IP: " << net.ip << "\r\n"
-            << "X-Auth-Token: " << session_token << "\r\n"
             << "X-Active-Window: " << win_b64 << "\r\n"
-            << "X-Capture-Time: " << capture_time_ms << "\r\n"
-            << "Content-Type: image/jpeg\r\n"
+            << "X-Capture-Time: " << capture_time_ms << "\r\n";
+        if (!stu_id.empty()) {
+            oss << "X-Student-Id: " << stu_id << "\r\n";
+        }
+        oss << "Content-Type: image/jpeg\r\n"
             << "Content-Length: " << jpeg_data.size() << "\r\n"
             << "Connection: close\r\n\r\n";
         std::string header = oss.str();

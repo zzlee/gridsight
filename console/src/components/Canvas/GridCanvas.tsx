@@ -28,6 +28,7 @@ interface GridCanvasProps {
   filterOnlyOffTask?: boolean;
   onShowcase?: (device: StudentDevice) => void;
   onToggleLock?: (device: StudentDevice) => void;
+  onPromptRollCall?: (device: StudentDevice) => void;
   onEditObstacle?: (obstacle: GridObstacle) => void;
   onDeleteObstacle?: (id: string) => void;
 }
@@ -55,6 +56,7 @@ export const GridCanvas: React.FC<GridCanvasProps> = ({
   filterOnlyOffTask = false,
   onShowcase,
   onToggleLock,
+  onPromptRollCall,
   onEditObstacle,
   onDeleteObstacle,
 }) => {
@@ -621,6 +623,7 @@ export const GridCanvas: React.FC<GridCanvasProps> = ({
                   onEditSeat={onEditSeat}
                   onShowcase={onShowcase}
                   onToggleLock={onToggleLock}
+                  onPromptRollCall={onPromptRollCall}
                   onDragStart={handleCardDragStart}
                   onDragEnd={handleCardDragEnd}
                   onDragOver={handleCardDragOver}

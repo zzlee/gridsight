@@ -17,7 +17,7 @@ GridSight 專為具備還原卡之 Windows 電腦教室打造，兼顧極簡部�
   - 後端：Node.js Express + WebSocket Relay + UDP 多播探索服務（Port 3000）。
   - 獨立單檔版：`release/gs-console.exe`（內建 Node.js 執行期環境與 Web 靜態資源，雙擊即啟動）。
 - **`tools/`（測試、特效與除錯工具）**：
-  - `mock_agents.py`：支援一鍵模擬多台學生機心跳宣告與虛擬螢幕縮圖。
+  - `mock_agents.py`：支援一鍵模擬多台學生機在線註冊、虛擬螢幕縮圖與離題警示測試。
   - `ubuntu_agent_debugger.py`：支援 Ubuntu Linux 環境下即時多播解碼播放視窗（`ffplay`）與全彩即時事件除錯。
   - `mouse_overlay.cpp`（編譯為 `bin/GridSightMouseOverlay.exe`）：Windows 原生獨立滑鼠特效模組（32-bit ARGB True Alpha 逐像素透明混合、GDI+ 真實游標圖示、左右鍵與滾輪微光波紋動畫）。
 
@@ -32,7 +32,7 @@ GridSight 專為具備還原卡之 Windows 電腦教室打造，兼顧極簡部�
 | 協定 / 服務 | 埠號 / 組播位址 | 說明 |
 | :--- | :--- | :--- |
 | **教師端 Web & API** | **`TCP 3000`** | 託管 Web UI、REST API（`/api/...`）、WebSocket 中繼（`/ws/...`）與腳本下載 |
-| **學生端多播探索 (Beacon)** | **`UDP 239.255.42.99:8888`** | 學生端啟動時發送心跳，教師端監聽此多播以動態發現學生機 |
+| **教師端多播探索 (Discovery)** | **`UDP 239.255.42.99:8888`** | 教師端定期廣播「教師在線」封包（含 Teacher IP 與共用 session token），學生端監聽此多播後建立單一出站反向 WebSocket；方向為教師 ➔ 學生 |
 | **教師畫面全班廣播 (RTP)** | **`UDP 239.255.42.100:9000`** | 教師螢幕 H.264 廣播，支援三檔品質（高 1080p30/8M、中 720p30/4M、低 480p15/1.5M；交換器 IGMP Snooping 硬體複製） |
 | **教師滑鼠與輸入多播 (Input RTP)** | **`UDP 239.255.42.100:9002`** | 教師即時滑鼠座標 (0..65535) 與點擊事件，供學生端視窗滑鼠自動跟隨與動畫特效（交換器 IGMP Snooping 硬體複製） |
 | **學生端本地 Snapshot** | **不開埠 (僅出站推送)** | 學生端主動向教師端 `POST /api/agent/snapshot` 推送縮圖 |
@@ -65,19 +65,42 @@ powershell -WindowStyle Hidden -c "irm http://<教師IP>:3000/install-agent.ps1|
 - **工作管理員**：在「詳細資料」中對 `gs-agent.exe` 點選「結束工作」。
 
 ### 3.3 學生端交叉編譯 (`gs-agent.exe`)
-- **一鍵 Docker 編譯**：
+> [!IMPORTANT]
+> **如需使用 MinGW-w64 / mingw32 編譯，一律在 Docker 內執行**。
+> 嚴禁在宿主機 (Host) 直接調用本地 mingw32 編譯器，必須透過 Docker 容器環境隔離編譯，以確保編譯工具鏈版本一致性、純淨度並杜絕環境相依污染。
+
+- **一鍵 Docker 編譯（推薦）**：
   ```bash
   ./scripts/build-docker.sh
   ```
   > 執行後自動拉起 `Dockerfile.builder`（Ubuntu 22.04 + MinGW-w64），在容器內以 `x86_64-w64-mingw32-g++` 靜態編譯所有 `beacon/src/*.cpp`。
 - **產物位置**：`beacon/gs-agent.exe`（約 3.5 MB）
-- **手動 Docker 操作**（進階）：
+- **手動 Docker 操作（進階）**：
   ```bash
-  # 單次編譯（不執行 build-docker.sh）
+  # 單次編譯（不執行 build-docker.sh 腳本時）
   docker build -t gridsight-builder:latest -f Dockerfile.builder .
   docker run --rm -v "$(pwd):/workspace" gridsight-builder:latest \
     make -C beacon clean all CXX=x86_64-w64-mingw32-g++
   ```
+
+### 3.4 Ubuntu 原生建置與測試 (Ubuntu Native Build & Test) ⭐【V5.8 唯一正式測試路徑】
+> ⚠️ **本節為 GridSight 全域唯一受支援的「編譯＋單元測試」路徑**。凡涉及 beacon 原生編譯或 beacon 單元測試，**一律**循本節（含 console 的 Ubuntu 產線）。
+> 凡涉及與教師端之跨模組整合、網路通訊、多播廣播、快照推送與斷線自癒測試，**一律嚴格遵循 §12.4 雙容器獨立 Docker 測試產線**（[`docker-compose.test-cluster.yml`](docker-compose.test-cluster.yml)）。
+> 已實證可跑：`docker run` 於容器內以 g++ 原生編譯出 Linux ELF `gs-agent`（5.8.12，347 KB），並通過 beacon 全部 host-side 單元測試（`test-capture/test-utils/test-input-rtp/test-viewport` 全數 PASS）。
+
+- **Dockerfile**：`Dockerfile.ubuntu-agent`（Ubuntu 24.04 + build-essential；**不**安裝 GDI+/DXGI/X11 seam，因 beacon capture Linux 分支已是 stub seam → image 極小、headless 可跑全部 host unit tests）
+- **建置 image**：
+  ```bash
+  docker build -t gridsight-ubuntu-agent:latest -f Dockerfile.ubuntu-agent .
+  ```
+- **執行「編譯 beacon + 跑全部 beacon host 測試」**：
+  ```bash
+  docker run --rm -v "$(pwd)":/workspace -w /workspace gridsight-ubuntu-agent:latest
+  # 等價於容器內: make -C beacon CXX=g++ TARGET=gs-agent && make -C beacon test
+  ```
+
+> [!NOTE] 本節 seam 為「編譯＋測試」肇始 commit (V5.8)。先前
+> test seam 多散布於 script seam，此節統一收斂；未來 beacon 產線不得跳過此 Docker seam。
 
 ---
 
@@ -118,6 +141,11 @@ powershell -WindowStyle Hidden -c "irm http://<教師IP>:3000/install-agent.ps1|
 - **陷阱**：若 `console/node_modules` 或 `console/server/node_modules` 尚未安裝，`build:portable` 會以「tsc: not found」與「Could not resolve 'cors'/'ws'」失敗；請先執行上述前置之 npm install。
 
 ### 4.3 Linux Docker 容器部署
+> ⚠️ **本 seam 為 GridSight 教師端 (gs-console) 在 Linux 下唯一受支援的「編譯＋運行」路徑**，與 3.4（beacon seam）同屬原生測試產線。凡涉及雙方跨容器網路通訊、多播廣播與自動連線測試，**一律嚴格遵循 §12.4 雙容器獨立 Docker 測試產線**（[`docker-compose.test-cluster.yml`](docker-compose.test-cluster.yml)）。
+- **編譯（含 frontend tsc + esbuild + server tsc）**：
+  ```bash
+  docker compose build
+  ```
 - **啟動與重構**：
   ```bash
   docker compose build && docker compose up -d
@@ -168,7 +196,7 @@ powershell -WindowStyle Hidden -c "irm http://<教師IP>:3000/install-agent.ps1|
 ### 7.1 視窗標題擷取與回傳
 - **學生端 (`gs-agent.exe`)**：
   - 呼叫原生 Windows API `GetForegroundWindow()` 與 `GetWindowTextW()` 取得學生當前焦點應用程式視窗標題（如 `Visual Studio Code`、`YouTube - Google Chrome`）。
-  - 隨 UDP 多播心跳封包（`active_window`，每 3.5~5 秒隨機抖動發送）以及每秒 HTTP 快照請求標頭（`X-Active-Window: base64`）同步上報。
+  - 連上教師端反向 WebSocket 後以 `AGENT_INFO_REGISTER` 上報初始值，並隨每秒 HTTP 快照請求標頭（`X-Active-Window: base64`）持續同步上報。
 - **模擬器 (`mock_agents.py`)**：內建包含日常編程與離題測試程式樣本。
 
 ### 7.2 離題關鍵字庫與警示機制
@@ -216,6 +244,8 @@ powershell -WindowStyle Hidden -c "irm http://<教師IP>:3000/install-agent.ps1|
    - 游標圖示需透過 GDI+ `Bitmap::FromHICON` 繪製以完整填充 Alpha 通道（傳統 GDI `DrawIconEx` 會將 Alpha 寫為 0 導致游標在 DWM 下隱形）。
 6. **Linux / CI 編譯相容性**：
    - `beacon/src/utils.cpp` 中由跨平台共用函式訪問之全域/原子變數（如 `g_shutdown_cancelled`），絕不可置於 `#ifdef _WIN32` 內，以確保 Linux 原生單元測試（`make test-capture`）編譯無阻。
+7. **MinGW-w64 (mingw32) 編譯規範**：
+   - **如需使用 MinGW-w64 / mingw32 編譯，一律在 Docker 內執行**。嚴禁在宿主機 (Host) 直接調用本地 mingw32 編譯器，必須透過 Docker 容器隔離編譯（`./scripts/build-docker.sh` 或 `gridsight-builder`），以確保工具鏈版本一致性、避免本機相依污染與產物不穩定。
 
 ---
 
@@ -264,3 +294,142 @@ powershell -WindowStyle Hidden -c "irm http://<教師IP>:3000/install-agent.ps1|
 - **一鍵催繳與全班打包**：
   - 一鍵催繳：向所有連線中且「尚未繳交」之學生機再次發送 `COLLECT_ASSIGNMENT` 彈窗。
   - 零依賴全班 ZIP 打包（[`zipPacker.ts`](console/server/zipPacker.ts)）：純 Node.js 原生實作 deflate 與 CRC32 封包，點擊「下載全班作業打包」直接透過 HTTP 串流下載包含所有學生作業的 ZIP 壓縮檔，隨身碟一鍵帶走。
+
+---
+
+## 🛠️ 12. 除錯通道雙方斷線與自動復線測試規範 (Debug Channel Disconnection & Recovery)
+
+### 12.1 架構原理與反向通道 (Reverse Channel Architecture)
+- **通訊路徑**：學生端代理 (`gs-agent`) 主動出站反向連線至教師端 WebSocket（`ws://<TEACHER_IP>:3000/ws/agent?mac=...&ip=...`），徹底穿透學生機本地防火牆與 NAT 限制。
+- **除錯通道與日誌抓取**：
+  - 教師端呼叫 `GET /api/agent/:id/logs`（需驗證教師 PIN 授權 Token）。
+  - 後端伺服器由 `agentSockets` 取得對應反向 WebSocket，發送 `{ action: "GET_LOGS" }` 指令。
+  - `gs-agent` 之 `ReceiveCommands` 攔截指令後讀取日誌全文，回傳 `LOGS_REPORT` 封包。
+  - 教師端接收後以 `HTTP 200 OK` (`text/plain`) 即時回應日誌內容。
+
+### 12.2 斷線行為與狀態碼規範 (Disconnection Lifecycle & Status Codes)
+1. **學生端 (`gs-agent`) 離線 / 異常終止**：
+   - **緩衝期內（< 20 秒，`STALE_MS`）**：`findDevice()` 仍命中暫存，但 `agentSockets` 已由 `ws.on('close')` 清理移除。
+     ➔ `GET /api/agent/:id/logs` 回應 **`HTTP 502 Bad Gateway`**（訊息：`目標學生機的反向 WebSocket 未連線`）。
+   - **過期後（> 20 秒）**：設備自 `multicastDiscovery` 自動過期 unindex。
+     ➔ `GET /api/agent/:id/logs` 回應 **`HTTP 404 Not Found`**（訊息：`找不到指定的學生端裝置`）。
+2. **教師端 (`gs-console`) 離線 / 服務重啟**：
+   - 教師端關閉 `0.0.0.0:3000` 監聽。
+   - `gs-agent` `ReceiveCommands` 偵測到連線中斷，印出 `[WARN] Reverse WebSocket disconnected, retrying...`。
+   - `gs-agent` 之 `ConnectOutboundLoop` 每 2 秒進行出站重連；因目標埠無 Listener，產生 **`error 111`** (`ECONNREFUSED`，實證為常態重試等待，非通訊協定或容器埠配置錯誤)。
+
+### 12.3 自動復線實證與驗證步驟 (Verification Runbook)
+嚴格循 `§3.4` (Ubuntu ELF `gs-agent`) 與 `§4.3` (Console 產線) 進行驗證：
+
+1. **基線建立**：
+   - 啟動 `gs-console` (`0.0.0.0:3000`) 與 `gs-agent`。
+   - 驗證教師 PIN 登入 (`POST /api/auth/login`) 取得 Token。
+   - 驗證 `GET /api/agent/:id/logs` 回傳 `HTTP 200 OK` 且日誌內容成功拉取。
+2. **測試 A：學生端離線與重連恢復 (Agent Disconnect / Recovery)**：
+   - 終止 `gs-agent` (`kill -15 <pid>`)。
+   - 驗證 `GET /api/agent/:id/logs` 在緩衝期內回傳 `HTTP 502`、超時後回傳 `HTTP 404`。
+   - 重新啟動 `gs-agent` (`TEACHER_IP=... ./beacon/gs-agent`)。
+   - 驗證反向 WS 自動握手並送出 `AGENT_INFO_REGISTER`。
+   - 驗證 `GET /api/agent/:id/logs` 立即回歸 **`HTTP 200 OK`**。
+3. **測試 B：教師端重啟與學生端自動復線 (Console Restart / Auto-Reconnect)**：
+   - 終止 `gs-console` (關閉 Port 3000)。
+   - 觀察 `gs-agent` 進入重試循環，日誌明確標註 `error 111` 重連嘗試。
+   - 重新啟動 `gs-console` (重啟 Port 3000)。
+   - 驗證 `gs-agent` 於 2 秒內自動重連成功，完成反向 WebSocket 註冊。
+   - 驗證 `GET /api/agent/:id/logs` 立即恢復 **`HTTP 200 OK`**，日誌中可直接調閱到剛才斷線與重連之歷史紀錄。
+
+### 12.4 雙容器獨立 Docker 測試產線 (Two-Container Docker Test Cluster) ⭐【全系統唯一正式網路與編碼測試標準】
+> ⚠️ **後續全系統之網路通訊、多播廣播、輸入多播、快照推送與雙向斷線復線測試，一律全面規範使用此雙容器 Docker 獨立環境**（[`docker-compose.test-cluster.yml`](docker-compose.test-cluster.yml)）。
+> 嚴禁在宿主機 (Host) 混雜啟動零散背景進程，徹底杜絕網路命名空間混淆與非預期連接埠衝突。
+
+#### 12.4.1 架構與虛擬影音採集配置
+- **拓撲配置**：
+  - **`gs-test-console`**（教師端容器，IP `172.28.0.10`）：
+    - 運行 `gridsight-console:latest`（Node.js 20 Alpine + FFmpeg + iproute2 + curl）。
+    - 支援 `USE_TEST_SOURCE=true`：免實體顯卡與音效卡，FFmpeg 動態產生 `lavfi testsrc2` 30 FPS 畫面與 `sine` 1000Hz 音訊訊號，直接推流至 RTP 多播 `239.255.42.100:9000`。
+  - **`gs-test-agent`**（學生端容器，IP `172.28.0.20`，靜態 MAC `02:42:ac:1c:00:14`）：
+    - 運行 `gridsight-ubuntu-agent:latest`（Ubuntu 24.04 + build-essential + iproute2 + curl）。
+    - 支援 Linux 軟體圖樣產生與 `stb_image_write` 真實 JPEG 壓縮，以 1 FPS 自動推送至教師端 `/api/agent/snapshot`。
+    - 支援動態接收 Discovery 多播 (`239.255.42.99:8888`)、Video RTP 多播 (`239.255.42.100:9000`) 與 Input RTP 多播 (`239.255.42.100:9002`)。
+  - **隔離網路 (`gridsight-testnet`)**：
+    - Docker Bridge 子網 `172.28.0.0/16`。
+    - 雙方容器具備 `NET_ADMIN` 能力，於 entrypoint 自動執行 `ip route add 224.0.0.0/4 dev eth0`，確保多播與 IGMP 封包跨容器轉發穿透。
+
+#### 12.4.2 一鍵測試與自動復線驗證指令
+1. **啟動測試叢集**：
+   ```bash
+   docker compose -f docker-compose.test-cluster.yml up -d
+   ```
+2. **驗證基線 (在線、快照、反向 WS 日誌拉取、全班多播廣播)**：
+   ```bash
+   # 1. 教師登入取得 Token
+   TOKEN=$(curl -s http://172.28.0.10:3000/api/auth/login -H "Content-Type: application/json" -d '{"pin":"888888"}' | jq -r .token)
+
+   # 2. 驗證裝置在線
+   curl -s http://172.28.0.10:3000/api/devices -H "Authorization: Bearer $TOKEN"
+
+   # 3. 驗證真實 JPEG 縮圖推送 (stb_image_write)
+   curl -s -X POST http://172.28.0.10:3000/api/snapshots/batch \
+     -H "Authorization: Bearer $TOKEN" -H "Content-Type: application/json" \
+     -d '{"requests":[{"id":"02:42:ac:1c:00:14","since":0}]}'
+
+   # 4. 驗證除錯通道反向 WebSocket 拉取日誌
+   curl -s -i "http://172.28.0.10:3000/api/agent/02:42:ac:1c:00:14/logs" -H "Authorization: Bearer $TOKEN"
+
+   # 5. 驗證合成 30 FPS 畫面多播推流與學生端接收
+   curl -s -X POST http://172.28.0.10:3000/api/broadcast/start -H "Authorization: Bearer $TOKEN" -H "Content-Type: application/json" -d '{"quality":"low","fps":15}'
+   docker logs --tail 10 gs-test-agent   # 觀察 RTP FU-A 重組與 Input RTP 接收
+   curl -s -X POST http://172.28.0.10:3000/api/broadcast/stop -H "Authorization: Bearer $TOKEN"
+   ```
+3. **驗證斷線與自動復線測試**：
+   - **測試 A（停用 Agent 容器）**：
+     `docker compose -f docker-compose.test-cluster.yml stop test-agent` ➔ 驗證 `GET /api/agent/:id/logs` 回傳 502 ➔ `docker compose -f docker-compose.test-cluster.yml start test-agent` ➔ 驗證 3 秒內自動恢復 200 OK。
+   - **測試 B（停用 Console 容器）**：
+     `docker compose -f docker-compose.test-cluster.yml stop test-console` ➔ 觀察 Agent 日誌記錄 `error 111` 重連嘗試 ➔ `docker compose -f docker-compose.test-cluster.yml start test-console` ➔ 驗證 Agent 自動重新握手連線，`GET /api/agent/:id/logs` 恢復 200 OK。
+4. **驗證動態點名與學號簽到測試**：
+   ```bash
+   python3 tools/test_rollcall_cluster.py
+   # 全程自動化驗證：WS 點名下發 ➔ 學生自動回應學號 ➔ 後端名冊更新 ➔ 單獨重填 ➔ CSV 匯出 ➔ 結束點名
+   ```
+5. **驗證分享網址與分享檔案測試**：
+   ```bash
+   python3 tools/test_share_cluster.py
+   # 全程自動化驗證：全班/定向分享網址 ➔ 學生日誌校驗 ➔ 檔案上傳 ➔ 學生下載 ➔ 雜湊與位元組完全一致校驗 ➔ 安全路徑防禦
+   ```
+6. **驗證課堂作業批次收取測試**：
+   ```bash
+   python3 tools/test_assignment_cluster.py
+   # 全程自動化驗證：發起作業收取 ➔ 學生繳交 ➔ 重複覆蓋最新版 ➔ 格式限制防禦 ➔ 全班零依賴 ZIP 打包下載與解壓縮位元組校驗 ➔ 結束收取
+   ```
+7. **測試完成拆除叢集**：
+   ```bash
+   docker compose -f docker-compose.test-cluster.yml down
+   ```
+
+---
+
+## 📋 13. 課堂動態點名與學號簽到系統 (Classroom Dynamic Roll Call System)
+
+### 13.1 學生端開機無痕與出站反向 WebSocket 動態點名
+- **移除開機搶焦點視窗**：
+  - 徹底移除舊版代理啟動強制彈出輸入學號之互動。`gs-agent.exe` 開機啟動時完全在背景無痕執行（`-mwindows`）。
+- **動態指令派發與原生彈窗**：
+  - 教師端點擊頂部導航列「📋 點名」或「批次點名」時，後端伺服器透過出站反向 WebSocket 發送 `START_ROLL_CALL` 指令（附帶 `rollCallId` 與 `title`）。
+  - 學生端 C++ 收到指令後彈出置頂對話框（Windows 原生 Win32 Dialog，支援 Enter 鍵快速送出與預填上次學號；Linux 環境提供自動簽到 stub 支援無介面自動化測試）。
+  - 簽到完成後立即向教師端回傳 `ROLL_CALL_RESPONSE` WebSocket 封包，並更新記憶體學號。每秒快照推送 (`POST /api/agent/snapshot`) 標頭亦同步帶上 `X-Student-Id`。
+
+### 13.2 教師端座席卡片極簡化設計 (Minimalist Student Card)
+- **資訊減法原則**：
+  - 使用者介面嚴格遵循「保留即時截圖及學生學號」原則。
+  - 卡片頂部標頭：僅顯示座號、在線狀態圓點與學號徽章（`🎓 {studentId}` 或 `未簽到`）。
+  - 卡片主體：由即時截圖填滿（保持 16:9 縮圖即時畫面，無黑邊），徹底移除卡片正面雜亂的硬體遙測儀表（CPU/RAM/Disk、焦點視窗標題等，移至焦點檢視與滑鼠懸浮選單）。
+  - 滑鼠懸浮座位卡片提供「🔄 要求重填學號」快捷按鈕，支援教師在學生填錯時單獨要求重填。
+
+### 13.3 名冊管理、持久化與匯出
+- **狀態管理與持久化**：
+  - 點名工作階段即時維護各機簽到紀錄（學號、電腦名稱、IP、座號、簽到時間戳），自動持久化儲存至伺服器 `data/attendance.json`。
+- **名冊匯出**：
+  - 支援一鍵下載 UTF-8 BOM CSV 名冊（`GET /api/rollcall/export-csv`），相容 Microsoft Excel 直接點開正常顯示中文字元無亂碼。
+
+
+

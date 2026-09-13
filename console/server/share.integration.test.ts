@@ -3,10 +3,9 @@ import { once } from 'node:events';
 import fs from 'node:fs';
 import path from 'node:path';
 import { WebSocket } from 'ws';
-import { generateTeacherToken, server, tokenAuth } from './server.js';
+import { generateTeacherToken, server } from './server.js';
 
 const mac = 'AA:BB:CC:DD:EE:43';
-const agentToken = tokenAuth.generateToken(mac, '127.0.0.1');
 const teacherToken = generateTeacherToken().token;
 
 await new Promise<void>((resolve, reject) => {
@@ -22,7 +21,7 @@ const auth = { Authorization: `Bearer ${teacherToken}` };
 
 let agent: WebSocket | null = null;
 try {
-  agent = new WebSocket(`${baseWs}/ws/agent?mac=${encodeURIComponent(mac)}&ip=127.0.0.1&token=${agentToken}`);
+  agent = new WebSocket(`${baseWs}/ws/agent?mac=${encodeURIComponent(mac)}&ip=127.0.0.1`);
   await once(agent, 'open');
 
   // --- Share URL (broadcast to all online agents) ---
@@ -51,14 +50,6 @@ try {
     body: JSON.stringify({ url: '  ' }),
   });
   assert.equal(badUrlResp.status, 400);
-
-  // --- Share URL: require auth ---
-  const noAuthUrl = await fetch(`${baseHttp}/api/share/url`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ url: 'example.com' }),
-  });
-  assert.equal(noAuthUrl.status, 401);
 
   // --- Share File (upload + broadcast + download round trip) ---
   const fileCommand = once(agent, 'message');
@@ -118,14 +109,6 @@ try {
     body: '',
   });
   assert.equal(emptyResp.status, 400);
-
-  // --- Share File: require auth ---
-  const noAuthFile = await fetch(`${baseHttp}/api/share/file`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/octet-stream', 'x-filename': 'x.txt' },
-    body: 'data',
-  });
-  assert.equal(noAuthFile.status, 401);
 
   console.log('Share (directory/file) integration tests passed');
 } finally {

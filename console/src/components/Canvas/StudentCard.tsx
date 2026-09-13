@@ -1,6 +1,6 @@
 import React from 'react';
 import { StudentDevice } from '../../types';
-import { Monitor, Maximize2, Cpu, Move, Edit2, AppWindow, AlertTriangle, Lock, Unlock, Radio, FolderCheck } from 'lucide-react';
+import { Monitor, Maximize2, Cpu, Move, Edit2, Lock, Unlock, Radio, RotateCcw } from 'lucide-react';
 
 interface StudentCardProps {
   device: StudentDevice;
@@ -12,6 +12,7 @@ interface StudentCardProps {
   onEditSeat?: (device: StudentDevice) => void;
   onShowcase?: (device: StudentDevice) => void;
   onToggleLock?: (device: StudentDevice) => void;
+  onPromptRollCall?: (device: StudentDevice) => void;
   onDragStart?: (e: React.DragEvent, id: string) => void;
   onDragEnd?: (e: React.DragEvent) => void;
   onDragOver?: (e: React.DragEvent, id: string) => void;
@@ -26,11 +27,11 @@ const StudentCardComponent: React.FC<StudentCardProps> = ({
   isEditMode,
   onSelect,
   onDoubleClick,
-  onUnbind,
   onOpenSpecs,
   onEditSeat,
   onShowcase,
   onToggleLock,
+  onPromptRollCall,
   onDragStart,
   onDragEnd,
   onDragOver,
@@ -51,8 +52,6 @@ const StudentCardComponent: React.FC<StudentCardProps> = ({
     }
   };
 
-  const specs = device.specs;
-
   return (
     <div
       draggable={isEditMode}
@@ -72,33 +71,36 @@ const StudentCardComponent: React.FC<StudentCardProps> = ({
           ? 'border-sky-500 ring-2 ring-sky-500/50 shadow-lg shadow-sky-500/20'
           : device.isLocked
           ? 'border-amber-500/80 ring-2 ring-amber-500/50 shadow-lg shadow-amber-950/70 bg-amber-950/10'
-          : device.isOffTask
-          ? 'border-rose-500 ring-2 ring-rose-500/70 shadow-lg shadow-rose-950/80 animate-pulse bg-rose-950/20'
           : 'border-slate-800 hover:border-slate-700 hover:shadow-md'
       } ${isEditMode ? 'cursor-grab active:cursor-grabbing hover:border-sky-500/60' : 'cursor-pointer'}`}
       style={{ width: '100%', height: '100%' }}
     >
-      {/* Header Info Bar */}
-      <div className={`flex items-center justify-between px-2.5 py-1 border-b text-xs transition-colors ${
-        device.isOffTask
-          ? 'bg-rose-950/70 border-rose-800/80'
-          : device.isLocked
+      {/* Header Info Bar: Seat No + Student ID + Status */}
+      <div className={`flex items-center justify-between px-2 py-1 border-b text-xs transition-colors ${
+        device.isLocked
           ? 'bg-amber-950/70 border-amber-800/80'
           : 'bg-slate-950/70 border-slate-800/80'
       }`}>
-        <div className="flex items-center space-x-1.5 font-semibold text-slate-200">
+        <div className="flex items-center space-x-1.5 font-semibold">
           <span className={`px-1.5 py-0.5 rounded font-mono text-[11px] ${
-            device.isOffTask
-              ? 'bg-rose-500 text-white font-bold'
-              : device.isLocked
+            device.isLocked
               ? 'bg-amber-600 text-white font-bold'
               : 'bg-slate-800 text-sky-400'
           }`}>
             {device.seatNo || '未分配'}
           </span>
-          <span className="truncate max-w-[75px]" title={device.hostname}>
-            {device.hostname}
-          </span>
+          {device.studentId ? (
+            <span
+              className="px-1.5 py-0.5 rounded font-mono font-bold text-xs bg-emerald-500/20 text-emerald-300 border border-emerald-500/40 shadow-sm"
+              title={`學號: ${device.studentId}`}
+            >
+              🎓 {device.studentId}
+            </span>
+          ) : (
+            <span className="text-[11px] font-mono text-slate-500 italic px-1">
+              未簽到
+            </span>
+          )}
         </div>
         <div className="flex items-center space-x-1.5">
           {isEditMode ? (
@@ -125,36 +127,18 @@ const StudentCardComponent: React.FC<StudentCardProps> = ({
                   <Lock className="w-2.5 h-2.5" /> 鎖定
                 </span>
               )}
-              {device.hasSubmitted && (
-                <span
-                  className="px-1 py-0.5 rounded bg-emerald-500/20 text-emerald-300 border border-emerald-500/40 text-[9px] font-bold flex items-center gap-0.5 shadow-sm"
-                  title={device.submissionInfo ? `已繳交：${device.submissionInfo.filename} (${(device.submissionInfo.size / 1024).toFixed(0)} KB)` : '作業已繳交'}
-                >
-                  <FolderCheck className="w-2.5 h-2.5" /> 已繳
-                </span>
-              )}
-              {device.isOffTask && (
-                <span className="text-rose-400 flex items-center gap-0.5 text-[10px] font-bold animate-pulse" title="疑似離題中">
-                  <AlertTriangle className="w-3 h-3" />
-                </span>
-              )}
-              {device.status !== 'offline' && (
-                <span className="text-[10px] font-mono text-slate-400">
-                  {device.latencyMs}ms
-                </span>
-              )}
               {getStatusBadge()}
             </>
           )}
         </div>
       </div>
 
-      {/* 480x270 Realtime Preview Thumbnail */}
+      {/* Realtime Preview Thumbnail (Takes maximum available space) */}
       <div className="relative flex-1 bg-slate-950 flex items-center justify-center overflow-hidden pointer-events-none">
         {device.thumbnailUrl ? (
           <img
             src={device.thumbnailUrl}
-            alt={device.hostname}
+            alt={device.studentId || device.hostname}
             className="w-full h-full object-cover select-none pointer-events-none"
             loading="eager"
           />
@@ -180,6 +164,18 @@ const StudentCardComponent: React.FC<StudentCardProps> = ({
             >
               <Maximize2 className="w-3.5 h-3.5" />
             </button>
+            {onPromptRollCall && device.status !== 'offline' && (
+              <button
+                onClick={(e) => {
+                  e.stopPropagation();
+                  onPromptRollCall(device);
+                }}
+                className="p-1.5 rounded-md bg-emerald-600 hover:bg-emerald-500 text-white shadow transition-transform active:scale-95"
+                title="🔄 要求此學生重填學號"
+              >
+                <RotateCcw className="w-3.5 h-3.5" />
+              </button>
+            )}
             <button
               onClick={(e) => {
                 e.stopPropagation();
@@ -236,62 +232,6 @@ const StudentCardComponent: React.FC<StudentCardProps> = ({
           </div>
         )}
       </div>
-
-      {/* Active Window Title Bar */}
-      <div
-        className={`flex items-center justify-between px-2 py-0.5 text-[10px] border-t transition-colors ${
-          device.isOffTask
-            ? 'bg-rose-950/90 border-rose-800/90 text-rose-200 font-semibold'
-            : 'bg-slate-950/90 border-slate-800/80 text-slate-300'
-        }`}
-      >
-        <div
-          className="flex items-center space-x-1 truncate max-w-[130px]"
-          title={`目前操作程式：${device.activeWindow || '桌面 (Desktop)'}`}
-        >
-          <AppWindow
-            className={`w-3 h-3 shrink-0 ${
-              device.isOffTask ? 'text-rose-400 animate-pulse' : 'text-slate-400'
-            }`}
-          />
-          <span className="truncate">{device.activeWindow || '桌面 (Desktop)'}</span>
-        </div>
-        {device.isOffTask && (
-          <span className="px-1 py-0.2 rounded bg-rose-600 text-white font-bold text-[9px] uppercase tracking-wider shrink-0 shadow-sm animate-pulse">
-            離題
-          </span>
-        )}
-      </div>
-
-      {/* Footer Info Bar with Live Hardware Meters */}
-      <div className="flex items-center justify-between px-2 py-0.5 bg-slate-950/60 text-[10px] border-t border-slate-800/50 font-mono">
-        {specs ? (
-          <div className="flex items-center space-x-2 text-slate-400">
-            <span className={specs.cpu.usage_percent > 80 ? 'text-rose-400' : 'text-slate-400'}>
-              C:{specs.cpu.usage_percent.toFixed(0)}%
-            </span>
-            <span className={specs.ram.usage_percent > 85 ? 'text-amber-400' : 'text-slate-400'}>
-              R:{specs.ram.usage_percent.toFixed(0)}%
-            </span>
-            <span className="text-slate-500 truncate max-w-[55px]" title={`磁碟可用 ${specs.disk.free_gb} GB`}>
-              D:{specs.disk.free_gb}G
-            </span>
-            {specs.agent_version && specs.agent_version !== __APP_VERSION__ && (
-              <span
-                className="px-1 py-0.5 rounded bg-amber-600/30 text-amber-300 text-[8px] font-bold"
-                title={`Agent v${specs.agent_version} ≠ Console v${__APP_VERSION__}`}
-              >
-                v{specs.agent_version}
-              </span>
-            )}
-          </div>
-        ) : (
-          <span className="truncate max-w-[85px] text-slate-400" title={device.username}>
-            {device.username || '無登入者'}
-          </span>
-        )}
-        <span className="text-slate-500 text-[9px]">{device.ip.split('.').slice(2).join('.')}</span>
-      </div>
     </div>
   );
 };
@@ -308,36 +248,14 @@ export const StudentCard = React.memo(StudentCardComponent, (prevProps, nextProp
   const prev = prevProps.device;
   const next = nextProps.device;
 
-  if (
-    prev.id !== next.id ||
-    prev.seatNo !== next.seatNo ||
-    prev.hostname !== next.hostname ||
-    prev.ip !== next.ip ||
-    prev.status !== next.status ||
-    Math.abs((prev.latencyMs || 0) - (next.latencyMs || 0)) > 15 ||
-    prev.activeWindow !== next.activeWindow ||
-    prev.isOffTask !== next.isOffTask ||
-    prev.isLocked !== next.isLocked ||
-    prev.hasSubmitted !== next.hasSubmitted ||
-    prev.submissionInfo !== next.submissionInfo ||
-    prev.selected !== next.selected ||
-    prev.thumbnailUrl !== next.thumbnailUrl ||
-    prev.username !== next.username
-  ) {
-    return false;
-  }
-
-  if (prev.specs !== next.specs) {
-    if (!prev.specs || !next.specs) return false;
-    if (
-      prev.specs.cpu.usage_percent !== next.specs.cpu.usage_percent ||
-      prev.specs.ram.usage_percent !== next.specs.ram.usage_percent ||
-      prev.specs.disk.free_gb !== next.specs.disk.free_gb ||
-      prev.specs.agent_version !== next.specs.agent_version
-    ) {
-      return false;
-    }
-  }
-
-  return true;
+  return (
+    prev.id === next.id &&
+    prev.seatNo === next.seatNo &&
+    prev.studentId === next.studentId &&
+    prev.status === next.status &&
+    prev.isLocked === next.isLocked &&
+    prev.selected === next.selected &&
+    prev.thumbnailUrl === next.thumbnailUrl
+  );
 });
+

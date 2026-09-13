@@ -2,7 +2,6 @@ export interface InstallAgentScriptOptions {
   serverHost: string;
   teacherHost: string;
   teacherPort: number;
-  hmacSecret: string;
   version: string;
 }
 
@@ -21,12 +20,10 @@ export const buildInstallAgentScript = ({
   serverHost,
   teacherHost,
   teacherPort,
-  hmacSecret,
   version,
 }: InstallAgentScriptOptions): string => {
   const safeServerHost = assertSafeValue('serverHost', serverHost, /^[A-Za-z0-9._:-]+$/);
   const safeTeacherHost = assertSafeValue('teacherHost', teacherHost, /^[A-Za-z0-9._-]+$/);
-  const safeSecret = assertSafeValue('hmacSecret', hmacSecret, /^[a-fA-F0-9]{64}$/);
   const safeVersion = assertSafeValue('version', version, /^\d+\.\d+\.\d+$/);
   if (!Number.isInteger(teacherPort) || teacherPort < 1 || teacherPort > 65535) {
     throw new Error('Invalid teacherPort value');
@@ -77,12 +74,11 @@ if (!(Test-Path $destPath) -or (Get-Item $destPath).Length -lt 10240) {
 
 # Write the exact file and keys consumed by gs-agent from its working directory.
 $configLines = @(
-    "HMAC_SECRET=${safeSecret}",
     "TEACHER_HOST=${safeTeacherHost}",
     "TEACHER_PORT=${teacherPort}"
 )
 Set-Content -Path $envPath -Value $configLines -Encoding ASCII
-Write-Host "[GridSight] 已寫入 HMAC 與教師端設定至 $envPath" -ForegroundColor DarkGray
+Write-Host "[GridSight] 已寫入教師端設定至 $envPath" -ForegroundColor DarkGray
 
 try {
     netsh advfirewall firewall delete rule name="GridSight Agent" 2>$null | Out-Null

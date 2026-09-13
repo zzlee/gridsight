@@ -23,6 +23,7 @@ import { ShutdownModal } from './components/Toolbar/ShutdownModal';
 import { TeacherRecordModal } from './components/Toolbar/TeacherRecordModal';
 import { LockScreenModal } from './components/Toolbar/LockScreenModal';
 import { AssignmentModal } from './components/Toolbar/AssignmentModal';
+import { RollCallModal } from './components/Toolbar/RollCallModal';
 import { MonitorBatchToolbar } from './components/Toolbar/MonitorBatchToolbar';
 import { PollingManager } from './services/pollingManager';
 import { LayoutStorage } from './services/layoutStorage';
@@ -30,7 +31,7 @@ import { AuthService } from './services/authService';
 import { useViewport } from './hooks/useViewport';
 import { useOffTaskAlerts } from './hooks/useOffTaskAlerts';
 import { useAgentDiscovery } from './hooks/useAgentDiscovery';
-import type { ActiveAssignment } from './types';
+import type { ActiveAssignment, ActiveRollCall } from './types';
 
 const pollingManager = new PollingManager();
 
@@ -59,6 +60,8 @@ export const App: React.FC = () => {
   const [isLockScreenOpen, setIsLockScreenOpen] = useState(false);
   const [isAssignmentOpen, setIsAssignmentOpen] = useState(false);
   const [activeAssignment, setActiveAssignment] = useState<ActiveAssignment | null>(null);
+  const [isRollCallOpen, setIsRollCallOpen] = useState(false);
+  const [activeRollCall, setActiveRollCall] = useState<ActiveRollCall | null>(null);
 
   // Viewport Zoom & Pan Persistence
   const { zoom, setZoom, pan, setPan, handleResetView } = useViewport();
@@ -119,6 +122,41 @@ export const App: React.FC = () => {
       clearInterval(timer);
     };
   }, []);
+
+  // Poll Active Roll Call (Attendance)
+  useEffect(() => {
+    let isMounted = true;
+    const fetchActiveRollCall = async () => {
+      try {
+        const resp = await AuthService.fetchWithAuth('/api/rollcall/status');
+        if (resp.ok) {
+          const data = await resp.json();
+          if (isMounted) {
+            setActiveRollCall(data.active ? data.session : null);
+          }
+        }
+      } catch {}
+    };
+    fetchActiveRollCall();
+    const timer = setInterval(fetchActiveRollCall, 3000);
+    return () => {
+      isMounted = false;
+      clearInterval(timer);
+    };
+  }, []);
+
+  const handlePromptRollCall = async (device: StudentDevice) => {
+    try {
+      await AuthService.fetchWithAuth('/api/rollcall/start', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          targets: [device.mac || device.id],
+        }),
+      });
+      setIsRollCallOpen(true);
+    } catch {}
+  };
 
   const handleSelectStudent = (id: string, multi: boolean) => {
     setLayout((prev) => ({
@@ -691,6 +729,8 @@ export const App: React.FC = () => {
         onOpenLockScreen={() => setIsLockScreenOpen(true)}
         onOpenAssignment={() => setIsAssignmentOpen(true)}
         activeAssignment={activeAssignment}
+        onOpenRollCall={() => setIsRollCallOpen(true)}
+        activeRollCall={activeRollCall}
         offTaskCount={offTaskDevices.length}
         unassignedCount={unassignedDevices.length}
         onLock={() => setIsLocked(true)}
@@ -717,6 +757,7 @@ export const App: React.FC = () => {
         onEditSeat={(device) => setEditingSeat(device)}
         onShowcase={handleShowcaseStudent}
         onToggleLock={handleToggleLockStudent}
+        onPromptRollCall={handlePromptRollCall}
         onVisibleSeatsChange={(ids) => {
           visibleDeviceIdsRef.current = ids;
         }}
@@ -746,6 +787,7 @@ export const App: React.FC = () => {
           selectedSeats={selectedSeats}
           onOpenLockModal={() => setIsLockScreenOpen(true)}
           onBatchUnlock={handleBatchUnlock}
+          onOpenRollCall={() => setIsRollCallOpen(true)}
           onOpenAssignment={() => setIsAssignmentOpen(true)}
           onOpenShareUrl={() => setIsShareUrlOpen(true)}
           onOpenShareFile={() => setIsShareFileOpen(true)}
@@ -907,6 +949,26 @@ export const App: React.FC = () => {
             if (resp.ok) {
               const data = await resp.json();
               setActiveAssignment(data.active ? data.session : null);
+            }
+          } catch {}
+        }}
+      />
+
+      {/* Classroom Roll Call (Attendance) Modal */}
+      <RollCallModal
+        isOpen={isRollCallOpen}
+        onClose={() => setIsRollCallOpen(false)}
+        selectedTargets={selectedTargets}
+        selectedCount={selectedSeats.length}
+        totalOnlineCount={totalOnlineCount}
+        activeRollCall={activeRollCall}
+        allDevices={layout.seats}
+        onRefresh={async () => {
+          try {
+            const resp = await AuthService.fetchWithAuth('/api/rollcall/status');
+            if (resp.ok) {
+              const data = await resp.json();
+              setActiveRollCall(data.active ? data.session : null);
             }
           } catch {}
         }}

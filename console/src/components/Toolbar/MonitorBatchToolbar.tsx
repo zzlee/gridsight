@@ -1,11 +1,12 @@
 import React from 'react';
 import { StudentDevice } from '../../types';
-import { Lock, Unlock, Globe, FolderUp, FolderDown, Power, X, CheckSquare } from 'lucide-react';
+import { Lock, Unlock, Globe, FolderUp, FolderDown, Power, X, CheckSquare, ClipboardCheck } from 'lucide-react';
 
 interface MonitorBatchToolbarProps {
   selectedSeats: StudentDevice[];
   onOpenLockModal: () => void;
   onBatchUnlock: () => void;
+  onOpenRollCall?: () => void;
   onOpenAssignment?: () => void;
   onOpenShareUrl?: () => void;
   onOpenShareFile?: () => void;
@@ -19,6 +20,7 @@ export const MonitorBatchToolbar: React.FC<MonitorBatchToolbarProps> = ({
   selectedSeats,
   onOpenLockModal,
   onBatchUnlock,
+  onOpenRollCall,
   onOpenAssignment,
   onOpenShareUrl,
   onOpenShareFile,
@@ -62,6 +64,18 @@ export const MonitorBatchToolbar: React.FC<MonitorBatchToolbarProps> = ({
           <Unlock className="w-3.5 h-3.5 text-emerald-400" />
           <span>批次解鎖</span>
         </button>
+
+        {/* Action: Roll Call */}
+        {onOpenRollCall && (
+          <button
+            onClick={onOpenRollCall}
+            className="flex items-center space-x-1.5 px-2.5 py-1.5 rounded-lg bg-slate-800 hover:bg-emerald-600 text-slate-300 hover:text-white border border-slate-700 font-medium text-xs transition-all"
+            title="向所選學生發起點名或要求重填學號"
+          >
+            <ClipboardCheck className="w-3.5 h-3.5 text-emerald-400" />
+            <span>點名</span>
+          </button>
+        )}
 
         {/* Action: Collect Assignment */}
         {onOpenAssignment && (

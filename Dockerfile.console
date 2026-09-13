@@ -20,8 +20,8 @@ RUN npm run build
 FROM node:20-alpine AS runner
 WORKDIR /app
 
-# Install runtime dependencies: FFmpeg for teacher screen broadcast, bash, tzdata
-RUN apk add --no-cache ffmpeg bash tzdata
+# Install runtime dependencies: FFmpeg for teacher screen broadcast, bash, tzdata, iproute2, curl
+RUN apk add --no-cache ffmpeg bash tzdata iproute2 curl
 
 # Set environment
 ENV NODE_ENV=production

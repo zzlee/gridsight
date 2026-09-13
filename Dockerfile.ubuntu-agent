@@ -1,0 +1,33 @@
+# ========================================================
+# GridSight Ubuntu Native Agent Builder + Tester Image
+# Provides a reproducible Ubuntu toolchain to compile and
+# run the gs-agent native Linux build and its host side tests
+# (never cross-compiling into Windows .exe here).
+#
+#   docker build -t gridsight-agent-ubuntu:latest -f Dockerfile.ubuntu-agent .
+#   docker run --rm -v "$(pwd)":/workspace -w /workspace gridsight-agent-ubuntu:latest
+#
+# Inside the container:
+#   make -C beacon CXX=g++ TARGET=gs-agent          # native ELF gs-agent
+#   make -C beacon test                            # host-side unit tests
+# ========================================================
+FROM ubuntu:24.04
+
+ENV DEBIAN_FRONTEND=noninteractive
+
+# Build tools only — beacon's non-Windows capture path is a stub and its
+# tests are host-cpu only, so no GDI+/DXGI/Xvfb packages are required.
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    build-essential \
+    g++ \
+    make \
+    pkg-config \
+    ca-certificates \
+    iproute2 \
+    curl \
+    && rm -rf /var/lib/apt/lists/*
+
+WORKDIR /workspace
+
+# Default: build the native gs-agent ELF, then run the host-side test-suite.
+CMD ["bash", "-lc", "make -C beacon CXX=g++ TARGET=gs-agent && make -C beacon test"]

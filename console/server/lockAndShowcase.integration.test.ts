@@ -1,10 +1,9 @@
 import assert from 'node:assert/strict';
 import { once } from 'node:events';
 import { WebSocket } from 'ws';
-import { generateTeacherToken, server, tokenAuth } from './server.js';
+import { generateTeacherToken, server } from './server.js';
 
 const mac = 'AA:BB:CC:DD:EE:99';
-const agentToken = tokenAuth.generateToken(mac, '127.0.0.1');
 const teacherToken = generateTeacherToken().token;
 
 await new Promise<void>((resolve, reject) => {
@@ -20,7 +19,7 @@ const auth = { Authorization: `Bearer ${teacherToken}` };
 
 let agent: WebSocket | null = null;
 try {
-  agent = new WebSocket(`${baseWs}/ws/agent?mac=${encodeURIComponent(mac)}&ip=127.0.0.1&token=${agentToken}`);
+  agent = new WebSocket(`${baseWs}/ws/agent?mac=${encodeURIComponent(mac)}&ip=127.0.0.1`);
   await once(agent, 'open');
 
   // 1. Initial screen status check

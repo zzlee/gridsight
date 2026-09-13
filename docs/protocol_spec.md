@@ -8,11 +8,10 @@
 
 | 協定 / 服務 | 連接埠 / 多播位址 | 發起方 (Initiator) | 接收方 (Listener) | 連線方向 | 目的與說明 | 防火牆與網路配置要求 |
 | :--- | :--- | :--- | :--- | :--- | :--- | :--- |
-| **UDP Multicast Beacon** | `239.255.42.99:8888` | 學生端 (Agent) | 教師端 (Console) | 學生 ➔ 教師 (Multicast) | 學生端啟動時廣播心跳、硬體資訊及焦點視窗標題 | 需允許 UDP 239.255.42.99 入站/出站及網卡多播轉發 |
-| **UDP Unicast Token Grant** | 動態 UDP 連接埠 (回傳 Port) | 教師端 (Console) | 學生端 (Agent) | 教師 ➔ 學生 (Unicast Response) | 教師端授予學生端 Session Token 與 Teacher IP | 需允許 UDP 單播回應 |
+| **UDP Multicast Discovery** | `239.255.42.99:8888` | 教師端 (Console) | 學生端 (Agent) | 教師 ➔ 學生 (Multicast) | 教師端定期廣播「教師在線」宣告（含 Teacher IP、教師埠號與共用 session token），學生端監聽後建立單一反向 WebSocket | 學生端需允許多播入站（IGMP Join）；教師端出站允許 |
 | **HTTP Snapshot Push** | `TCP 3000` (`POST /api/agent/snapshot`) | 學生端 (Agent) | 教師端 (Console) | 學生 ➔ 教師 (Outbound HTTP) | 學生端每秒主動推送 480×270 JPEG 縮圖至教師端快取 | 學生端出站 TCP 3000，無需開啟學生端入站防護 |
 | **HTTP Snapshot Fetch** | `TCP 3000` (`GET /api/snapshot/:id`) | 前端瀏覽器 | 教師端 (Console) | 瀏覽器 ➔ 教師 (HTTP GET) | 前端監控面板向教師端後端讀取快取之最新學生縮圖 | 教師端 TCP 3000 入站允許 |
-| **Reverse WebSocket Relay** | `TCP 3000` (`/ws/agent?mac=...&ip=...&token=...`) | 學生端 (Agent) | 教師端 (Console) | 學生 ➔ 教師 (Outbound WS) | 學生端主動向教師端建立反向持久 WS 連線，接收控制指令與傳輸 H.264 串流 | 學生端出站 TCP 3000，可穿越一般客戶端防火牆 |
+| **Reverse WebSocket Relay** | `TCP 3000` (`/ws/agent?mac=...&ip=...`) | 學生端 (Agent) | 教師端 (Console) | 學生 ➔ 教師 (Outbound WS) | 學生端主動向教師端建立反向持久 WS 連線，接收控制指令與傳輸 H.264 串流 | 學生端出站 TCP 3000，可穿越一般客戶端防火牆 |
 | **Teacher Viewer WS** | `TCP 3000` (`/ws/stream/:target`) | 前端瀏覽器 | 教師端 (Console) | 瀏覽器 ➔ 教師 (WS GET) | 前端 30 FPS 焦點調閱播放器連接教師端中繼以接收 H.264 串流 | 教師端 TCP 3000 入站允許 |
 | **Teacher Input RTP Multicast** | `UDP 239.255.42.100:9002` | 教師端 (TeacherInputRtpStreamer) | 學生端 (InputRTPReceiver) | 教師 ➔ 學生 (UDP Multicast) | 教師即時滑鼠座標 (歸一化 0~65535)、點擊與滾輪事件，用於學生端視窗滑鼠自動跟隨與特效 | 需允許 UDP 9002 入站/出站，交換器需開啟 IGMP Snooping |
 | **RTP Multicast Broadcast** | `239.255.42.100:9000` | 教師端 (FFmpeg/Console) | 學生端 (Agent) | 教師 ➔ 學生 (UDP Multicast) | 教師畫面 H.264 廣播串流，支援三檔品質（高 1080p30/8M、中 720p30/4M、低 480p15/1.5M） | 交換器需開啟 IGMP Snooping 轉發多播封包 |
@@ -21,25 +20,28 @@
 
 ## 📊 2. 系統架構與通訊流程圖 (Mermaid Diagrams)
 
-### 2.1 設備探索與動態 Token 鑑權流程 (Discovery & Token Grant)
+### 2.1 設備探索與出站註冊流程 (Discovery & Outbound Registration)
 
 ```mermaid
 sequenceDiagram
     autonumber
-    participant Student as 學生端 (gs-agent)
     participant Teacher as 教師端 (gs-console:3000)
+    participant Student as 學生端 (gs-agent)
 
-    Student->>Teacher: UDP Multicast (239.255.42.99:8888)<br/>JSON Payload: Beacon Info, Specs, Active Window
-    Note over Teacher: 記錄學生機 MAC/IP/Specs<br/>生成動態 Session Token
-    Teacher-->>Student: UDP Unicast Response<br/>JSON Payload: TOKEN_GRANT (token, teacherIp, sessionDurationSec)
-    Note over Student: 學生端保存 Token 於 RAM<br/>設定 Teacher IP 供出站推流使用
+    loop 每 ~3 秒偶發（含隨機抖動）
+        Teacher->>Student: UDP Multicast (239.255.42.99:8888)<br/>JSON Payload: DISCOVERY (teacherIp, teacherPort, version)
+    end
+    Note over Student: 學生端監聽多播，記錄 Teacher IP/Port<br/>（探索階段不派發任何共用 token）
+    Student->>Teacher: 建立唯一出站反向 WebSocket<br/>GET /ws/agent?mac=<MAC>&ip=<IP>
+    Teacher-->>Student: 101 Switching Protocols
+    Student->>Teacher: WS Text: AGENT_INFO_REGISTER<br/>hostname / username / specs / activeWindow / seatNo
+    Note over Teacher: 註冊學生機（MAC/IP/規格/視窗）並建立設備索引
 ```
 
 > [!IMPORTANT]
-> **HMAC 信任模型與限制 (Trust Model & Trade-off)**：
-> `TOKEN_GRANT` 回覆由教師端以 `HMAC-SHA256(secret, token + "|" + mac)` 簽章，學生端據此驗證回應確實來自真正的教師端。
-> 然而 HMAC secret 亦內嵌於**未鑑權**的 `GET /install-agent.ps1` 中，供學生端首次引導時同步取得。
-> 因此**同網段內任何能取得安裝腳本的人，皆可偽造有效 Token 並向學生端假冒教師端**——這是「零輸入、一鍵部署」引導流程的既定取捨（Trust-on-First-Use 類模型）。
+> **Agent Seam 信任模型 (Trust Model & Trade-off)**：
+> 自 v5.9.0 起探索方向反轉：教師端定期以 UDP Multicast 廣播「教師在線」宣告，**內含 Teacher IP 與教師埠號**（實驗階段不再派發任何共用 session token，亦無共用 HMAC secret）；學生端監聽後，以多播內之 Teacher IP/Port 建立**唯一出站反向 WebSocket**。
+> 自 v5.9.0 起「教師在線」宣告**不含共用鉴權 token**（移除多播下發的 sessionToken 派發與共用 HMAC secret），因此實驗階段 agent seam **不做 console⇄agent 鑑權**：反向 WS 握手與快照推送皆無 token/HMAC 校驗，任何能接收多播者皆可直接連上學生端。
 > 教師端控制行為（關機、分享、錄影、廣播）仍受 PIN + Bearer Token + 登入鎖定保護；此限制僅影響學生端對「教師伺服器身份」的驗證，不影響已鑑權的教師端控制面。
 
 ### 2.2 常態監控縮圖推拉流程 (Snapshot Push, Cache & Fetch)
@@ -79,7 +81,7 @@ sequenceDiagram
     participant Browser as 前端 WebCodecs Player
 
     Note over Student,Server: 啟動後建立反向持久 WebSocket 連線
-    Student->>Server: GET /ws/agent?mac=<MAC>&ip=<IP>&token=<TOKEN> (HTTP Upgrade)
+        Student->>Server: GET /ws/agent?mac=<MAC>&ip=<IP> (HTTP Upgrade)
     Server-->>Student: 101 Switching Protocols
     Note over Server: agentSockets.set(MAC, ws)
 
@@ -124,22 +126,36 @@ sequenceDiagram
 
 ## 📄 3. 詳細 API 規格與資料格式 (Endpoints & Payloads)
 
-### 3.1 學生端宣告 (Beacon Announcement)
-- **傳輸方式**：UDP Multicast (`239.255.42.99:8888`，可經 `MULTICAST_IP` / `MULTICAST_PORT` 環境變數覆寫)
-- **發送頻率**：啟動時發送，隨後 3~5 秒隨機抖動週期發送。
+### 3.1 教師端多播探索宣告 (Discovery Announcement)
+- **傳輸方式**：UDP Multicast (`239.255.42.99:8888`，可經 `MULTICAST_IP` / `MULTICAST_PORT` 環境變數覆寫)，網路方向為 **教師 ➔ 學生**
+- **發送頻率**：教師端啟動後每 ~3 秒發送一次（含隨機抖動避免與其他週期對齊）。
 - **Payload 格式 (JSON)**：
 ```json
 {
-  "type": "BEACON",
-  "version": "5.8.12",
+  "type": "DISCOVERY",
+  "version": "5.9.0",
+  "teacherIp": "192.168.1.200",
+  "teacherPort": 3000,
+  "timestamp": 1723812345678
+}
+```
+
+### 3.2 學生端上線註冊 (AGENT_INFO_REGISTER over WS)
+- **傳輸方式**：經 `/ws/agent` 反向 WebSocket，以 Text JSON 上報（學生端 ➔ 教師端）。
+- **時機**：學生端監聽 `DISCOVERY` 取得 Teacher IP/Port 後建立唯一反向 WS；握手完成後 **第一時間**送出註冊訊息，教師端據此建立/更新設備索引。
+- **Payload 格式 (JSON)**：
+```json
+{
+  "action": "AGENT_INFO_REGISTER",
+  "version": "5.9.0",
   "hostname": "PC-01",
+  "username": "Student01",
+  "seatNo": 1,
   "ip": "192.168.1.101",
   "mac": "00:1A:2B:3C:4D:01",
-  "username": "Student01",
-  "timestamp": 1723812345678,
   "active_window": "Visual Studio Code - main.cpp",
   "specs": {
-    "agent_version": "5.8.12",
+    "agent_version": "5.9.0",
     "os": "Windows 11 Pro 64-bit",
     "uptime": 3600,
     "cpu": {
@@ -161,18 +177,7 @@ sequenceDiagram
   }
 }
 ```
-
-### 3.2 Token 授權回應 (Token Grant)
-- **傳輸方式**：UDP Unicast (回應至學生發送端點)
-- **Payload 格式 (JSON)**：
-```json
-{
-  "type": "TOKEN_GRANT",
-  "token": "d8a1f8c4e2b094817a3f89e210cd4e5f",
-  "teacherIp": "192.168.1.200",
-  "sessionDurationSec": 10800
-}
-```
+- 後續 `active_window` 變化仍隨每秒快照推送標頭（`X-Active-Window`）持續更新。
 
 ### 3.3 學生端推送縮圖 (`POST /api/agent/snapshot`)
 - **目標端點**：`http://<TEACHER_IP>:3000/api/agent/snapshot`
@@ -192,10 +197,11 @@ sequenceDiagram
 - **錯誤處理**：若記憶體無快取且嘗試 Agent Proxy 也失敗，回傳 `404 Not Found` `{"error":"No snapshot available"}`
 
 ### 3.5 學生端反向 WebSocket (`/ws/agent`)
-- **端點**：`ws://<TEACHER_IP>:3000/ws/agent?mac=<MAC>&ip=<IP>&token=<TOKEN>`（Upgrade 時驗證 MAC+token；教師端 viewer 端點 `/ws/stream/<TARGET_MAC>` 則驗教師 session token）
+- **端點**：`ws://<TEACHER_IP>:3000/ws/agent?mac=<MAC>&ip=<IP>`（Upgrade 時不驗 token；教師端 viewer 端點 `/ws/stream/<TARGET_MAC>` 則驗教師 sidecar session token）
 - **方向**：學生端 ➔ 教師端 (Outbound WS)
 - **訊息類型**：
   - **二進位訊息 (Binary)**：H.264 NAL Unit (帶 `0x00000001` 起始碼之 Annex B 格式)。
+  - **上線註冊 (Text JSON From Student)**：`{"action": "AGENT_INFO_REGISTER", ...}`（完整欄位見 §3.2）：學生端於握手完成後第一時間上報 hostname / username / seatNo / specs / activeWindow。
   - **控制控制指令 (Text JSON From Teacher)**：
     - `{"action": "START_STREAM", "fps": 30, "bitrate": 2500}`
     - `{"action": "STOP_STREAM"}`
@@ -216,7 +222,6 @@ sequenceDiagram
 ### 3.6 學生端出站推播與反向 WebSocket (零入站開埠)
 - **`GET /snapshot`**：
   - 支持 Query 參數 `full=1` 或 `highres=1`。若指定高解析度，則即時擷取 1:1 螢幕解析度並編碼 JPEG (Quality 85) 回傳；否則回傳本地快取之 480×270 縮圖。
-  - 支持 `X-Auth-Token` Header 鑑權。
 - **`GET /status`**：
   - 回傳學生端硬體遙測數據 (JSON 格式)，並包含各元件 named-heartbeat 年齡（`capture-worker`、`snapshot-encode`、`ws-connected` 等）與 `capture_degraded` 旗標，供教師端 `/api/health` 與 watchdog 判讀元件級健康狀態。
 - **`GET /ping`**：
@@ -289,8 +294,10 @@ sequenceDiagram
    - 已完整實作 **UDP Socket 監聽**、**IGMP 權限加入 (`IP_ADD_MEMBERSHIP)`、**RTP Header 解析**、**RFC 6184 FU-A / STAP-A 重組**（以 marker 位元組裝 Access Unit 後整幀解碼）、**SSRC 鎖定與逾時重新鎖定**（串流更換 SSRC 時執行完整狀態 reset）及 **Win32 滿版 overlay 彈窗 + Media Foundation MFT H.264 解碼渲染**。
    - 序號中斷或 FU-A 不完整時丟棄該幀，等待下一個 IDR 自動恢復。
 
-2. **多網卡宣告與環境適應**：
-   - 學生端預設以主要網卡 `Utils::GetSystemNetworkInfo()` 回傳 IP 進行廣播。若學生機具備虛擬網卡 (如 Docker, VMware)，需確保優先選用真實物理 LAN 網卡。
+2. **多網卡探索與環境適應**：
+   - 學生端預設以主要網卡 `Utils::GetSystemNetworkInfo()` 回傳 IP 加入教師端多播群組（`IP_ADD_MEMBERSHIP`）。若學生機具備虛擬網卡 (如 Docker, VMware)，需確保優先選用真實物理 LAN 網卡加入群組並建立出站連線。
 
-3. **全出站通訊（無入站埠）**：
-   - v5.8.0 起已移除學生端傳統入站埠 `8080 / 8081`。焦點串流一律使用學生端出站反向 WebSocket `/ws/agent`，學生端零入站開埠，無需任何防火牆入站放行。
+3. **單一長連線出站 + 多播接收**：
+   - 自 v5.8.0 起已移除學生端傳統入站埠 `8080 / 8081`；v5.9.0 起探索方向反轉，學生端不再定時發送 BEACON，改為**監聽教師端多播探索**後被動註冊。
+   - 學生端所有 TCP 皆為**出站**：唯一長連線為 `/ws/agent`，另輔以一次性 HTTP 出站（快照推送 `POST /api/agent/snapshot`、作業上傳、檔案下載）。
+   - 學生端僅需允許 **UDP 多播入站**（`8888` 教師探索、`9000` 教師視訊廣播、`9002` 教師輸入事件），完全不需要任何 TCP 入站放行。

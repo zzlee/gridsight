@@ -55,8 +55,8 @@ make -C beacon CXX=x86_64-w64-mingw32-g++ LDFLAGS="-mconsole"
 | :- | :--- | :--- | :--- |
 | 2.1 | 手動啟動 debug 版 agent | `gs-agent.log` 出現 `Watchdog spawned worker process` | 缺 VC++ Runtime?（靜態編譯應無）；防毒攔截？ |
 | 2.2 | `curl http://127.0.0.1:3000/api/health` | `{"status":"ok",...}` | 教師端服務未啟動？ |
-| 2.3 | 啟動 console（同機） | server.log：`Multicast listener joined 239.255.42.99:8888` | 多播被防火牆擋？見 §5 |
-| 2.4 | 等待 ≤ 5 秒 | server.log 出現該機 BEACON 註冊；Web UI 設備池出現本機 | TTL=2 與網卡選擇（虛擬網卡優先問題，§5.4） |
+| 2.3 | 啟動 console（同機） | server.log：`[Discovery] Multicast sender started`（教師端開始定時廣播 8888） | 多播被防火牆擋？見 §5 |
+| 2.4 | 等待 ≤ 5 秒 | 學生端收到 8888 宣告後建立反向 WS 並以 `AGENT_INFO_REGISTER` 註冊；Web UI 設備池出現該機 | TTL=2 與網卡選擇（虛擬網卡優先問題，§5.4） |
 | 2.5 | 點擊座位開啟焦點監看 | 30 FPS 畫面出現 | 看 HUD 幀型；agent.log 的 START_STREAM 行 |
 | 2.6 | 測試分享網址/檔案至本機 | 瀏覽器開啟 / Downloads 出現檔案並開啟資料夾 | WS 送達？（server.log `[WS Relay] Sent ...`） |
 | 2.7 | 安裝 FFmpeg 後啟動廣播 | 本機彈出全螢幕廣播視窗*（Media Foundation MFT H.264 解碼渲染） | §2.4 FFmpeg PATH / 便攜包內建；畫面黑屏時檢查 agent.log 的 `[RTP]` 與 `rtp-decode` 心跳 |
@@ -78,8 +78,8 @@ Test-NetConnection <教師IP> -Port 3000        # 學生機 → 教師端 TCP 30
 
 | 路徑 | 學生端驗證方式 | 教師端證據 |
 | :--- | :--- | :--- |
-| Discovery (UDP 8888 多播) | `pktmon filter add -i 239.255.42.99` + `pktmon start --etw -m real-time`；或 Wireshark filter `udp.port==8888` | server.log `[Discovery]` 註冊行 |
-| Token Grant (UDP 單播回應) | agent.log 中 TOKEN_GRANT 接收紀錄 | — |
+| Discovery (UDP 8888 多播) | **學生端** `pktmon filter add -i 239.255.42.99` + `pktmon start --etw -m real-time`（教師端廣播、學生端收）；教師端開 `pktmon` 驗證出站封包 | server.log `[Discovery]` 廣播/WS 註冊行 |
+| Session Token (隨多播派發) | agent.log 接收 8888 宣告並儲存 teacherIp/token 紀錄 | WEB UI 設備名冊由 `AGENT_INFO_REGISTER` 建立 |
 | Snapshot Push (TCP 3000) | agent.log 每秒 POST 成功紀錄；`curl http://<教師>:3000/api/snapshot/<MAC> -o s.jpg` | Web UI 縮圖更新 |
 | Reverse WebSocket | agent.log 反向連線建立行 | server.log `[WS Relay]` |
 | Broadcast RTP (UDP 9000) | `netsh int ipv4 show joins` 應含 239.255.42.100；Wireshark `rtp` | ffmpeg stderr / `/api/broadcast/status` |
@@ -87,8 +87,11 @@ Test-NetConnection <教師IP> -Port 3000        # 學生機 → 教師端 TCP 30
 ### 3.3 快速隔離法
 任一路徑不通時，於**學生機**直接對教師端發測試包，二分法定位是「發送端」還是「鏈路」問題：
 ```powershell
-# 模擬一顆 BEACON（應使教師端立刻註冊此假裝置）
-python scripts/test-network-multicast.py   # 於學生機執行（或單發一次）
+# v5.9.0+：教師端才發 8888 探索（教師➔學生）。於教師機執行：
+#   教師端驗證出站宣告：python scripts/test-network-multicast.py
+#   學生機驗證接收：pktmon filter add -i 239.255.42.99 ; pktmon start --etw -m real-time
+#   學生機驗證反向 WS：Test-NetConnection <教師IP> -Port 3000
+python scripts/test-network-multicast.py   # 於教師端執行（v5.8.x 舊版為學生端模擬 BEACON）
 ```
 
 ---
@@ -96,7 +99,7 @@ python scripts/test-network-multicast.py   # 於學生機執行（或單發一�
 ## 🏫 4. 階段三：教室規模部署
 
 1. **IGMP Snooping 驗證**：核心交換器需啟用 Snooping + Querier（見 `docs/igmp_snooping_setup.md`）。症狀：單機正常、全班廣播時交換器 Flooding 導致頻寬崩潰。
-2. **70 台同時上線衝擊**：心跳已含 3.5~5s 抖動設計；若 server.log 出現大量同秒註冊，檢查是否有機器時間同步異常。
+2. **全班同時上線衝擊**：教師端 8888 探索宣告每 ~3 秒單一來源廣播，學生端獨立收到後各自建立反向 WS（`AGENT_INFO_REGISTER` 註冊）；若 server.log 出現大量同秒註冊，與教師端廣播週期對齊有關。
 3. **混合模式壓力測試**：先 `scripts/mock-70-agents.js` 打滿 70 裝置註冊，再加入 5~10 台實機觀察 console CPU/RAM 與快照延遲。
 
 ---
@@ -121,8 +124,9 @@ python scripts/test-network-multicast.py   # 於學生機執行（或單發一�
      # 放行教師端 Web/API TCP 3000 埠 (適用所有網路設定檔: 私人/公用/網域)
      netsh advfirewall firewall add rule name="GridSight Console Port 3000" dir=in action=allow protocol=TCP localport=3000 profile=any
 
-     # 放行學生端動態探索 UDP 8888 埠
-     netsh advfirewall firewall add rule name="GridSight Discovery UDP 8888" dir=in action=allow protocol=UDP localport=8888 profile=any
+     # v5.9.0 起教師端為 8888 探索多播「發送端」，出站 UDP 預設允許，無需入站放行；
+     # 若學生端收不到宣告，請於「學生機」放行 UDP 8888 入站並確認網卡已 join 群組。
+     netsh advfirewall firewall add rule name="GridSight Discovery UDP 8888 (僅舊版需要)" dir=in action=allow protocol=UDP localport=8888 profile=any
      ```
   3. **第三方防毒軟體排除**：
      若教師端安裝有趨勢科技 (PC-cillin/Apex One)、ESET、Symantec 等端點防護軟體，需在其「個人防火牆 / 網路防護」中將 TCP 3000 設為允許傳入。
@@ -134,7 +138,7 @@ python scripts/test-network-multicast.py   # 於學生機執行（或單發一�
 | 症狀 | 最可能原因 | 診斷指令 / 解決方案 |
 | :--- | :--- | :--- |
 | **學生可以 ping 但開不了 /join** | 教師端 Windows 防火牆阻擋 TCP 3000 | 詳見 §5.1；學生機 `Test-NetConnection <IP> -Port 3000`，教師端執行 `netsh` 放行指令 |
-| Web UI 完全看不到某台機器 | 多播被擋／虛擬網卡搶先宣告 | `netsh int ipv4 show joins`、`route print`、停用 VirtualBox/VMware/Hyper-V 網卡重試 |
+| Web UI 完全看不到某台機器 | 多播被擋／虛擬網卡搶先加入群組（8888 探索） | `netsh int ipv4 show joins`、`route print`、停用 VirtualBox/VMware/Hyper-V 網卡重試 |
 | 設備出現但縮圖黑灰 | Agent DXGI 擷取失敗（Session 0 / RDP 登入） | agent.log 搜尋 `Capture`；確認實體登入 Session 1（`query session`） |
 | 縮圖有、焦點串流黑畫面 | H.264 編碼器初始化失敗 | agent.log 搜尋 `START_STREAM` 後的 ERROR；HUD 是否有幀送達 |
 | OPEN_URL/分享檔沒反應 | 反向 WS 未連上 | 兩端 log 各查 `[WS Relay]` 與 reverse connect 行；`Test-NetConnection 教師IP -Port 3000` |

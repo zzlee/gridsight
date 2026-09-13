@@ -23,7 +23,7 @@ GridSight 是專為 70 台具備還原卡之 Windows 電腦教室打造的螢幕
 +──────────────────────────────────────────────+  +───────────────────────────────────────────│─│─+    |
 |        GridSight Beacon 01 (學生端)           |  |        GridSight Beacon 70 (學生端)        │ │ |    |
 | [學生 Session 1 執行 gs-agent.exe (無UI背景)]|  | [學生 Session 1 執行 gs-agent.exe (無UI背景)]│ │ |    |
-|  ├─ 啟動發送 UDP Multicast 主動宣告 (Beacon) |  |  ├─ 啟動發送 UDP Multicast 主動宣告 (Beacon) │ │ |    |
+|  ├─ 監聽教師端多播探索 (Discovery) 後建立反向 WS |  |  ├─ 監聽教師端多播探索 (Discovery) 後建立反向 WS    │ │ |    |
 |  ├─ (模式1) 出站推送 1 FPS Snapshot 至伺服器  |  |  ├─ (模式1) 出站推送 1 FPS Snapshot 至伺服器  │ │ |    |
 |  ├─ (模式2) 按需啟動 MFT H.264 WS 串流推流 ──┼──┼─ (模式2) [雙擊選中時] 啟動 30FPS 推流 ───────┘ │ |    |
 |  ├─ (模式3) MFT 解碼 / Win32 GDI 全螢幕廣播 ◀┼──┼─ (模式3) MFT 解碼 / Win32 GDI 全螢幕廣播 ◀──────────┘ |    |
@@ -52,14 +52,14 @@ GridSight 是專為 70 台具備還原卡之 Windows 電腦教室打造的螢幕
 - **運行環境**：Windows 10/11 x64 (透過 MinGW-w64 靜態編譯)
 - **核心職責**：
   1. **Session 1 背景運行**：透過 PowerShell 雲端熱拉取至 `%TEMP%` 於學生登入 Session 1 執行，徹底避開 Session 0 截圖隔離。
-  2. **主動上線宣告 (Beacon)**：啟動時向 `239.255.42.99:8888` 發送探索包，動態取得 RAM Token 與 Teacher IP。
+  2. **被動在線註冊 (Discovery)**：監聽 `239.255.42.99:8888` 教師端多播探索宣告，取得 Teacher IP 與共用 Session Token 後建立唯一出站反向 WebSocket；上線資訊（hostname / username / specs / 座號）透過 `AGENT_INFO_REGISTER` 上報。
   3. **出站 Snapshot 推送**：每秒主動出站 `POST /api/agent/snapshot`，學生端零入站開放埠。
   4. **按需 WebSocket H.264 串流**：當教師端焦點點選或發起示範轉播時，啟動 30 FPS 串流編碼。
   5. **MFT 解碼 / Win32 GDI 全螢幕置頂廣播接收**：接收組播 RTP 串流，以 Media Foundation MFT 解碼並透過最上層無邊框 Win32 視窗覆蓋顯示；本機被轉播時自動抑制全螢幕防鏡像遞迴。
   6. **遠端電源與指令接收**：支援遠端關機 30 秒倒數視窗與教師端/學生端一鍵撤銷關機。
   7. **原生黑屏與低階輸入攔截**：註冊 `WH_KEYBOARD_LL` 遮蔽 Win 鍵、Alt+Tab、Alt+F4 與滑鼠點擊，置頂深藍鎖定視窗。
   8. **原生作業拖曳視窗**：`WM_DROPFILES` 原生置頂拖曳框，桌面檔案直接拖入即繳，本地大小與副檔名校驗。
-  9. **學號登錄機制**：啟動時輕量 Win32 彈窗登錄學號，即時隨心跳與快照上報綁定座位。
+  9. **學號登錄機制**：啟動時輕量 Win32 彈窗登錄學號，即時隨 WS 註冊與快照上報綁定座位。
 
 ---
 

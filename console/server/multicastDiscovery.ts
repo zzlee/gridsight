@@ -1,6 +1,5 @@
 import dgram from 'dgram';
 import os from 'os';
-import { TokenAuthority } from './tokenAuthority.js';
 import { logger } from './logger.js';
 
 export interface DeviceSystemInfo {
@@ -33,7 +32,8 @@ export interface DiscoveredAgent {
   ip: string;
   mac: string;
   username?: string;
-  token?: string;
+  studentId?: string | undefined;
+  checkInTime?: number | undefined;
   activeWindow?: string;
   status?: string;
   seatNo?: string;
@@ -47,6 +47,21 @@ const normalizeTargetKey = (raw: string) => {
   return decodeURIComponent(raw).replace(/%3A/gi, ':').trim().toUpperCase();
 };
 
+/**
+ * Teacher-side multicast discovery service (new architecture).
+ *
+ * Direction reversed vs the old BEACON flow:
+ *   - The teacher periodically broadcasts a `DISCOVERY` announcement
+ *     (teacherIp / teacherPort / version) to 239.255.42.99:8888 every ~3s.
+ *   - Students listen on that multicast group and then establish a single
+ *     outbound reverse WebSocket to `teacherIp:teacherPort/ws/agent`.
+ *
+ * The device roster is therefore no longer fed by student UDP beacons. It is
+ * maintained lazily by the server via `upsertDevice()` — called whenever a
+ * student agent registers over WebSocket (`AGENT_INFO_REGISTER`) or pushes a
+ * snapshot. `getDevices()`/`findDevice()` keep the same API surface so all
+ * existing route consumers work unchanged.
+ */
 export class MulticastDiscoveryService {
   private server: dgram.Socket | null = null;
   private multicastAddress = process.env.MULTICAST_IP || process.env.DISCOVERY_MULTICAST_IP || '239.255.42.99';
@@ -55,17 +70,21 @@ export class MulticastDiscoveryService {
     : process.env.DISCOVERY_PORT
     ? parseInt(process.env.DISCOVERY_PORT, 10)
     : 8888;
-  private tokenAuth: TokenAuthority;
-  private onDeviceDiscovered?: ((device: DiscoveredAgent) => void) | undefined;
+  private teacherPort = process.env.PORT ? parseInt(process.env.PORT, 10) : 3000;
+  private selectedInterfaceIp: string | undefined;
+  private readonly version: string;
   private activeDevices = new Map<string, DiscoveredAgent>(); // key: mac or ip
   private deviceIndex = new Map<string, DiscoveredAgent>(); // O(1) secondary index by normalized mac, ip, hostname, id
   private listening = false;
   private joinedRoutes = 0;
   private lastError = '';
+  private broadcastTimer: NodeJS.Timeout | null = null;
+  // Stale threshold: keep discovering for a few beacon intervals after the
+  // last WS/snapshot contact (agent pushes a snapshot roughly every second).
+  private readonly STALE_MS = 20_000;
 
-  constructor(tokenAuth: TokenAuthority, onDeviceDiscovered?: ((device: DiscoveredAgent) => void) | undefined) {
-    this.tokenAuth = tokenAuth;
-    this.onDeviceDiscovered = onDeviceDiscovered;
+  constructor(version = '') {
+    this.version = version;
   }
 
   private indexDevice(dev: DiscoveredAgent) {
@@ -102,7 +121,81 @@ export class MulticastDiscoveryService {
     }
   }
 
+  /**
+   * Register/refresh a student agent in the roster. Called by server.ts when
+   * an agent completes its WS handshake (`AGENT_INFO_REGISTER`) or pushes a
+   * snapshot. Replaces the old BEACON-based registration.
+   */
+  upsertDevice(patch: Partial<DiscoveredAgent> & { mac: string; ip: string }): DiscoveredAgent {
+    const key = patch.mac || patch.ip;
+    const existing = this.activeDevices.get(key);
+    const now = Date.now();
+
+    const merged: DiscoveredAgent = {
+      ...(existing || {}),
+      ...patch,
+      hostname: patch.hostname || existing?.hostname || `Host-${String(patch.ip).replace(/\./g, '-')}`,
+      username: patch.username || existing?.username || 'Student',
+      studentId: patch.studentId !== undefined ? patch.studentId : existing?.studentId,
+      checkInTime: patch.checkInTime !== undefined ? patch.checkInTime : existing?.checkInTime,
+      activeWindow: patch.activeWindow || existing?.activeWindow || '桌面 (Desktop)',
+      lastSeen: now,
+    };
+
+    if (existing) this.unindexDevice(existing);
+    this.activeDevices.set(key, merged);
+    this.indexDevice(merged);
+    return merged;
+  }
+
+  /** Just refresh liveness + optional fields for an already-known device. */
+  touchDevice(target: string, patch?: Partial<DiscoveredAgent>) {
+    const dev = this.findDevice(target);
+    if (!dev) return dev;
+    if (patch) {
+      if (patch.activeWindow) dev.activeWindow = patch.activeWindow;
+      if (patch.seatNo) dev.seatNo = patch.seatNo;
+      if (patch.status) dev.status = patch.status;
+      if (patch.studentId !== undefined) dev.studentId = patch.studentId;
+      if (patch.checkInTime !== undefined) dev.checkInTime = patch.checkInTime;
+      if (patch.specs) dev.specs = { ...dev.specs, ...patch.specs } as DeviceSystemInfo;
+    }
+    dev.lastSeen = Date.now();
+    return dev;
+  }
+
+  private resolveTeacherIp(): string {
+    if (this.selectedInterfaceIp && this.selectedInterfaceIp !== '0.0.0.0' && this.selectedInterfaceIp !== '127.0.0.1') {
+      return this.selectedInterfaceIp;
+    }
+    try {
+      const interfaces = os.networkInterfaces();
+      for (const addrs of Object.values(interfaces)) {
+        for (const a of addrs || []) {
+          if (a.family === 'IPv4' && !a.internal) return a.address;
+        }
+      }
+    } catch {}
+    return '127.0.0.1';
+  }
+
+  private sendAnnouncement = () => {
+    const s = this.server;
+    if (!s) return;
+    const teacherIp = this.resolveTeacherIp();
+    const payload = JSON.stringify({
+      type: 'DISCOVERY',
+      teacherIp,
+      teacherPort: this.teacherPort,
+      version: this.version,
+    });
+    s.send(payload, this.port, this.multicastAddress, (err) => {
+      if (err) logger.warn(`[Discovery] Broadcast announce failed: ${err.message}`);
+    });
+  };
+
   start(selectedInterfaceIp?: string) {
+    this.selectedInterfaceIp = selectedInterfaceIp;
     this.server = dgram.createSocket({ type: 'udp4', reuseAddr: true });
 
     this.server.on('listening', () => {
@@ -146,7 +239,9 @@ export class MulticastDiscoveryService {
       this.listening = true;
       this.joinedRoutes = joinedCount;
       this.lastError = '';
-      logger.info(`[Discovery] Multicast listener joined ${this.multicastAddress}:${this.port} across ${joinedCount} network route(s)`);
+      logger.info(
+        `[Discovery] Announcing DISCOVERY on ${this.multicastAddress}:${this.port} across ${joinedCount} network route(s) every 3s`
+      );
     });
 
     this.server.on('error', (err) => {
@@ -155,65 +250,11 @@ export class MulticastDiscoveryService {
       logger.error(`[Discovery] UDP socket error: ${err.message}`);
     });
 
-    this.server.on('message', async (msg, rinfo) => {
-      try {
-        let payload;
-        try {
-          payload = JSON.parse(msg.toString('utf-8'));
-        } catch (parseErr) {
-          // logger.debug(`[Discovery] Ignoring malformed UDP payload from ${rinfo.address}`);
-          return;
-        }
-        const pType = (payload.type || '').toUpperCase();
-        if (pType === 'BEACON') {
-          const mac = payload.mac || rinfo.address;
-          // Generate Session Token
-          const token = this.tokenAuth.generateToken(mac, rinfo.address);
-
-          // Compute HMAC signature so agent can verify this is from the real server
-          const signature = await this.tokenAuth.signTokenGrant(token, mac);
-
-          // Reply with Token Uni-cast
-          const reply = JSON.stringify({
-            type: 'TOKEN_GRANT',
-            token,
-            signature,
-            teacherIp: rinfo.address,
-            sessionDurationSec: 10800,
-          });
-
-          this.server?.send(reply, rinfo.port, rinfo.address);
-
-          const agent: DiscoveredAgent = {
-            hostname: payload.hostname || `Host-${rinfo.address.replace(/\./g, '-')}`,
-            ip: rinfo.address,
-            mac,
-            username: payload.username || 'Student',
-            token,
-            activeWindow: payload.active_window || payload.window_title || '桌面 (Desktop)',
-            specs: payload.specs,
-            lastSeen: Date.now(),
-          };
-
-          const isNew = !this.activeDevices.has(mac);
-          const oldDev = this.activeDevices.get(mac);
-          if (oldDev) {
-            this.unindexDevice(oldDev);
-          }
-
-          this.activeDevices.set(mac, agent);
-          this.indexDevice(agent);
-
-          if (isNew && this.onDeviceDiscovered) {
-            this.onDeviceDiscovered(agent);
-          }
-        }
-      } catch (err) {
-        logger.error('[Discovery] Error processing beacon packet:', err);
-      }
-    });
-
     this.server.bind(this.port);
+
+    // Periodically announce "teacher online" so listening students can connect.
+    this.sendAnnouncement();
+    this.broadcastTimer = setInterval(this.sendAnnouncement, 3000);
   }
 
   getHealth() {
@@ -222,6 +263,7 @@ export class MulticastDiscoveryService {
       joinedRoutes: this.joinedRoutes,
       lastError: this.lastError || undefined,
       activeDevices: this.activeDevices.size,
+      mode: 'broadcast',
     };
   }
 
@@ -229,8 +271,8 @@ export class MulticastDiscoveryService {
     const now = Date.now();
     const result: DiscoveredAgent[] = [];
     for (const [key, dev] of this.activeDevices.entries()) {
-      if (now - dev.lastSeen < 6000) {
-        // Active within 6s (agent sends beacon every 1~2s)
+      if (now - dev.lastSeen < this.STALE_MS) {
+        // Active (WS connected or snapshot received within threshold)
         result.push(dev);
       } else {
         this.unindexDevice(dev);
@@ -249,23 +291,27 @@ export class MulticastDiscoveryService {
     const candidate = this.deviceIndex.get(normKey) || this.deviceIndex.get(target);
 
     if (candidate) {
-      if (now - candidate.lastSeen < 6000) {
+      if (now - candidate.lastSeen < this.STALE_MS) {
         return candidate;
       } else {
         this.unindexDevice(candidate);
-        this.activeDevices.delete(candidate.mac);
+        this.activeDevices.delete(candidate.mac || candidate.ip);
         return undefined;
       }
     }
 
-    // Fallback if not found in index or for safety
     return undefined;
   }
 
   stop() {
     this.listening = false;
     this.joinedRoutes = 0;
+    if (this.broadcastTimer) {
+      clearInterval(this.broadcastTimer);
+      this.broadcastTimer = null;
+    }
     this.deviceIndex.clear();
+    this.activeDevices.clear();
     if (this.server) {
       this.server.close();
       this.server = null;

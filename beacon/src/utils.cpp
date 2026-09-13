@@ -30,14 +30,20 @@
 #include <sys/socket.h>
 #include <netinet/in.h>
 #include <arpa/inet.h>
+#include <netdb.h>
 #include <unistd.h>
 #include <sys/types.h>
 #include <sys/wait.h>
+#include <sys/stat.h>
+#include <ifaddrs.h>
+#include <net/if.h>
+#include <sys/ioctl.h>
 #define SOCKET int
 #define INVALID_SOCKET -1
 #define SOCKET_ERROR -1
 #define closesocket close
 #endif
+
 
 namespace GridSight {
 
@@ -118,6 +124,48 @@ NetworkInfo Utils::GetSystemNetworkInfo() {
     info.hostname = GetWindowsHostname();
     info.username = GetWindowsUsername();
     GetWindowsIpAndMac(info.ip, info.mac);
+#else
+    char host[256] = {0};
+    if (gethostname(host, sizeof(host)) == 0 && strlen(host) > 0) {
+        info.hostname = host;
+    }
+    const char* user = getenv("USER");
+    if (user && strlen(user) > 0) {
+        info.username = user;
+    }
+
+    struct ifaddrs* ifaddr = nullptr;
+    if (getifaddrs(&ifaddr) == 0) {
+        for (struct ifaddrs* ifa = ifaddr; ifa != nullptr; ifa = ifa->ifa_next) {
+            if (!ifa->ifa_addr || ifa->ifa_addr->sa_family != AF_INET) continue;
+            if (ifa->ifa_flags & IFF_LOOPBACK) continue;
+            if (!(ifa->ifa_flags & IFF_UP)) continue;
+
+            char ip_str[INET_ADDRSTRLEN] = {0};
+            sockaddr_in* sa = (sockaddr_in*)ifa->ifa_addr;
+            inet_ntop(AF_INET, &(sa->sin_addr), ip_str, sizeof(ip_str));
+            if (strcmp(ip_str, "127.0.0.1") != 0) {
+                info.ip = ip_str;
+
+                int sock = socket(AF_INET, SOCK_DGRAM, 0);
+                if (sock >= 0) {
+                    struct ifreq ifr;
+                    memset(&ifr, 0, sizeof(ifr));
+                    strncpy(ifr.ifr_name, ifa->ifa_name, IFNAMSIZ - 1);
+                    if (ioctl(sock, SIOCGIFHWADDR, &ifr) == 0) {
+                        unsigned char* mac_ptr = (unsigned char*)ifr.ifr_hwaddr.sa_data;
+                        char mac_buf[32];
+                        snprintf(mac_buf, sizeof(mac_buf), "%02X:%02X:%02X:%02X:%02X:%02X",
+                                 mac_ptr[0], mac_ptr[1], mac_ptr[2], mac_ptr[3], mac_ptr[4], mac_ptr[5]);
+                        info.mac = mac_buf;
+                    }
+                    close(sock);
+                }
+                break;
+            }
+        }
+        freeifaddrs(ifaddr);
+    }
 #endif
     return info;
 }
@@ -694,7 +742,12 @@ bool Utils::DownloadAndOpenFile(const std::string& url, const std::string& raw_f
 #else
     std::string downloads_dir = "/tmp";
     const char* home = std::getenv("HOME");
-    if (home) downloads_dir = std::string(home) + "/Downloads";
+    if (home) {
+        std::string cand = std::string(home) + "/Downloads";
+        if (mkdir(cand.c_str(), 0755) == 0 || errno == EEXIST) {
+            downloads_dir = cand;
+        }
+    }
     std::string target_path_utf8 = downloads_dir + "/" + filename;
 #endif
 
@@ -719,7 +772,16 @@ bool Utils::DownloadAndOpenFile(const std::string& url, const std::string& raw_f
     sockaddr_in addr{};
     addr.sin_family = AF_INET;
     addr.sin_port = htons(port);
-    inet_pton(AF_INET, host.c_str(), &addr.sin_addr);
+    if (inet_pton(AF_INET, host.c_str(), &addr.sin_addr) <= 0) {
+        struct hostent* he = gethostbyname(host.c_str());
+        if (he && he->h_addr_list[0]) {
+            memcpy(&addr.sin_addr, he->h_addr_list[0], sizeof(addr.sin_addr));
+        } else {
+            Log("ERROR", "Failed to resolve host: " + host);
+            closesocket(s);
+            return false;
+        }
+    }
 
     if (connect(s, (sockaddr*)&addr, sizeof(addr)) == SOCKET_ERROR) {
         Log("ERROR", "Failed to connect to teacher server for file download");
@@ -740,6 +802,11 @@ bool Utils::DownloadAndOpenFile(const std::string& url, const std::string& raw_f
     outfile.open(target_path.c_str(), std::ios::binary);
 #else
     outfile.open(target_path_utf8.c_str(), std::ios::binary);
+    if (!outfile.is_open() && downloads_dir != "/tmp") {
+        downloads_dir = "/tmp";
+        target_path_utf8 = downloads_dir + "/" + filename;
+        outfile.open(target_path_utf8.c_str(), std::ios::binary);
+    }
 #endif
 
     if (!outfile.is_open()) {
@@ -1635,7 +1702,6 @@ struct AssignmentConfig {
     std::string allowed_exts;
     int max_size_mb = 50;
     std::string upload_url;
-    std::string token;
 };
 
 static std::atomic<bool> g_assignment_active{false};
@@ -1784,7 +1850,6 @@ static void PerformAssignmentUpload(const std::wstring& filePath, HWND hwnd) {
         << "Host: " << host << ":" << port << "\r\n"
         << "X-Agent-MAC: " << net.mac << "\r\n"
         << "X-Agent-IP: " << net.ip << "\r\n"
-        << "X-Auth-Token: " << config.token << "\r\n"
         << "X-Assignment-Id: " << config.id << "\r\n"
         << "X-Filename: " << fn_b64 << "\r\n"
         << "Content-Type: application/octet-stream\r\n"
@@ -1971,7 +2036,7 @@ static LRESULT CALLBACK AssignmentDropWndProc(HWND hwnd, UINT msg, WPARAM wParam
 }
 #endif
 
-void Utils::ShowAssignmentDropZone(const std::string& id, const std::string& title, const std::string& allowed_exts, int max_size_mb, const std::string& upload_url, const std::string& token) {
+void Utils::ShowAssignmentDropZone(const std::string& id, const std::string& title, const std::string& allowed_exts, int max_size_mb, const std::string& upload_url) {
     {
         std::lock_guard<std::mutex> lock(g_assignment_mutex);
         g_assignment_config.id = id;
@@ -1979,7 +2044,6 @@ void Utils::ShowAssignmentDropZone(const std::string& id, const std::string& tit
         g_assignment_config.allowed_exts = allowed_exts;
         g_assignment_config.max_size_mb = max_size_mb > 0 ? max_size_mb : 50;
         g_assignment_config.upload_url = upload_url;
-        g_assignment_config.token = token;
 #ifdef _WIN32
         g_assignment_status_text = L"請將作業檔案拖曳至此處放開即可繳交";
         g_assignment_status_color = RGB(56, 189, 248);
@@ -2040,6 +2104,23 @@ void Utils::ShowAssignmentDropZone(const std::string& id, const std::string& tit
             }
         }
     });
+#else
+    // Linux / Headless stub:
+    // In headless testing or Docker containers, auto-upload a sample homework submission if AUTO_SUBMIT_ASSIGNMENT is enabled
+    std::thread([id, upload_url, allowed_exts]() {
+        Utils::SleepMs(200);
+        const char* auto_sub = std::getenv("AUTO_SUBMIT_ASSIGNMENT");
+        if (auto_sub && (std::string(auto_sub) == "1" || std::string(auto_sub) == "true")) {
+            std::string ext = "cpp";
+            if (!allowed_exts.empty()) {
+                if (allowed_exts.find("py") != std::string::npos) ext = "py";
+                else if (allowed_exts.find("txt") != std::string::npos) ext = "txt";
+            }
+            std::string fn = "student_hw." + ext;
+            std::string content = "#include <iostream>\nint main() { std::cout << \"GridSight Auto HW\"; return 0; }\n";
+            Utils::UploadAssignmentData(id, fn, content, upload_url);
+        }
+    }).detach();
 #endif
 }
 
@@ -2054,6 +2135,331 @@ void Utils::HideAssignmentDropZone() {
 
 bool Utils::IsAssignmentActive() {
     return g_assignment_active.load();
+}
+
+bool Utils::UploadAssignmentData(const std::string& assignment_id, const std::string& filename, const std::string& content, const std::string& upload_url) {
+    std::string url = upload_url;
+    if (url.empty()) {
+        url = "http://127.0.0.1:3000/api/assignments/upload";
+    }
+    std::string proto = "http://";
+    if (url.find(proto) == 0) url = url.substr(proto.length());
+    size_t slashPos = url.find('/');
+    std::string hostPort = (slashPos != std::string::npos) ? url.substr(0, slashPos) : url;
+    std::string reqPath = (slashPos != std::string::npos) ? url.substr(slashPos) : "/api/assignments/upload";
+    std::string host = hostPort;
+    int port = 3000;
+    size_t colonPos = hostPort.find(':');
+    if (colonPos != std::string::npos) {
+        host = hostPort.substr(0, colonPos);
+        try { port = std::stoi(hostPort.substr(colonPos + 1)); } catch(...) {}
+    }
+
+    SOCKET s = socket(AF_INET, SOCK_STREAM, 0);
+    if (s == INVALID_SOCKET) return false;
+
+#ifdef _WIN32
+    DWORD to = 10000;
+    setsockopt(s, SOL_SOCKET, SO_SNDTIMEO, (const char*)&to, sizeof(to));
+    setsockopt(s, SOL_SOCKET, SO_RCVTIMEO, (const char*)&to, sizeof(to));
+#else
+    struct timeval to = {10, 0};
+    setsockopt(s, SOL_SOCKET, SO_SNDTIMEO, &to, sizeof(to));
+    setsockopt(s, SOL_SOCKET, SO_RCVTIMEO, &to, sizeof(to));
+#endif
+
+    sockaddr_in addr{};
+    addr.sin_family = AF_INET;
+    addr.sin_port = htons(port);
+    if (inet_pton(AF_INET, host.c_str(), &addr.sin_addr) <= 0) {
+        struct hostent* he = gethostbyname(host.c_str());
+        if (he && he->h_addr_list[0]) {
+            memcpy(&addr.sin_addr, he->h_addr_list[0], sizeof(addr.sin_addr));
+        } else {
+            closesocket(s);
+            return false;
+        }
+    }
+
+    if (connect(s, (sockaddr*)&addr, sizeof(addr)) == SOCKET_ERROR) {
+        closesocket(s);
+        return false;
+    }
+
+    NetworkInfo net = Utils::GetSystemNetworkInfo();
+    std::string fn_b64 = Utils::Base64Encode((const uint8_t*)filename.data(), filename.size());
+
+    std::ostringstream oss;
+    oss << "POST " << reqPath << " HTTP/1.1\r\n"
+        << "Host: " << host << ":" << port << "\r\n"
+        << "X-Agent-MAC: " << net.mac << "\r\n"
+        << "X-Agent-IP: " << net.ip << "\r\n"
+        << "X-Assignment-Id: " << assignment_id << "\r\n"
+        << "X-Filename: " << fn_b64 << "\r\n"
+        << "Content-Type: application/octet-stream\r\n"
+        << "Content-Length: " << content.size() << "\r\n"
+        << "Connection: close\r\n\r\n"
+        << content;
+
+    std::string req = oss.str();
+    send(s, req.c_str(), (int)req.size(), 0);
+
+    char respBuf[512] = {0};
+    int rec = recv(s, respBuf, sizeof(respBuf) - 1, 0);
+    closesocket(s);
+
+    if (rec > 0) {
+        std::string resp(respBuf, rec);
+        if (resp.find(" 200 ") != std::string::npos) {
+            Utils::Log("INFO", "📁 [Assignment] Successfully uploaded assignment file: " + filename + " (" + std::to_string(content.size()) + " bytes)");
+            return true;
+        }
+    }
+    Utils::Log("ERROR", "📁 [Assignment] Failed to upload assignment file: " + filename);
+    return false;
+}
+
+static std::mutex g_student_id_mutex;
+static std::string g_student_id = "";
+static std::atomic<bool> g_rollcall_active{false};
+static Utils::RollCallSubmitCallback g_rollcall_callback = nullptr;
+static std::mutex g_rollcall_cb_mutex;
+static std::string g_current_rollcall_id = "";
+static std::string g_current_rollcall_title = "";
+
+void Utils::SetRollCallSubmitCallback(RollCallSubmitCallback cb) {
+    std::lock_guard<std::mutex> lock(g_rollcall_cb_mutex);
+    g_rollcall_callback = cb;
+}
+
+std::string Utils::GetStudentId() {
+    std::lock_guard<std::mutex> lock(g_student_id_mutex);
+    return g_student_id;
+}
+
+void Utils::SetStudentId(const std::string& student_id) {
+    std::lock_guard<std::mutex> lock(g_student_id_mutex);
+    g_student_id = student_id;
+}
+
+bool Utils::IsRollCallActive() {
+    return g_rollcall_active.load();
+}
+
+#ifdef _WIN32
+static HWND g_rollcall_hwnd = NULL;
+static HWND g_rollcall_edit = NULL;
+static std::thread g_rollcall_thread;
+
+static LRESULT CALLBACK RollCallWndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) {
+    switch (msg) {
+    case WM_CREATE: {
+        HINSTANCE hInst = ((LPCREATESTRUCT)lParam)->hInstance;
+
+        HWND hStatic = CreateWindowW(
+            L"STATIC", L"請輸入您的學號 (Student ID)：",
+            WS_VISIBLE | WS_CHILD | SS_LEFT,
+            24, 20, 320, 24,
+            hwnd, NULL, hInst, NULL
+        );
+
+        g_rollcall_edit = CreateWindowExW(
+            WS_EX_CLIENTEDGE, L"EDIT", L"",
+            WS_VISIBLE | WS_CHILD | WS_TABSTOP | ES_AUTOHSCROLL,
+            24, 52, 332, 32,
+            hwnd, (HMENU)301, hInst, NULL
+        );
+
+        HWND hBtn = CreateWindowW(
+            L"BUTTON", L"確認簽到 (Enter)",
+            WS_VISIBLE | WS_CHILD | WS_TABSTOP | BS_DEFPUSHBUTTON,
+            120, 100, 140, 36,
+            hwnd, (HMENU)302, hInst, NULL
+        );
+
+        HFONT hFont = CreateFontW(16, 0, 0, 0, FW_NORMAL, FALSE, FALSE, FALSE, DEFAULT_CHARSET,
+                                  OUT_DEFAULT_PRECIS, CLIP_DEFAULT_PRECIS, CLEARTYPE_QUALITY,
+                                  DEFAULT_PITCH | FF_SWISS, L"Microsoft JhengHei");
+        if (hStatic) SendMessage(hStatic, WM_SETFONT, (WPARAM)hFont, TRUE);
+        if (g_rollcall_edit) SendMessage(g_rollcall_edit, WM_SETFONT, (WPARAM)hFont, TRUE);
+        if (hBtn) SendMessage(hBtn, WM_SETFONT, (WPARAM)hFont, TRUE);
+
+        std::string existing_id = Utils::GetStudentId();
+        if (!existing_id.empty()) {
+            int wlen = MultiByteToWideChar(CP_UTF8, 0, existing_id.c_str(), -1, NULL, 0);
+            if (wlen > 0) {
+                std::vector<wchar_t> wbuf(wlen);
+                MultiByteToWideChar(CP_UTF8, 0, existing_id.c_str(), -1, wbuf.data(), wlen);
+                SetWindowTextW(g_rollcall_edit, wbuf.data());
+                SendMessage(g_rollcall_edit, EM_SETSEL, 0, -1);
+            }
+        }
+        SetFocus(g_rollcall_edit);
+        return 0;
+    }
+    case WM_COMMAND: {
+        if (LOWORD(wParam) == 302) {
+            wchar_t buf[256] = {0};
+            GetWindowTextW(g_rollcall_edit, buf, 255);
+            int u8_len = WideCharToMultiByte(CP_UTF8, 0, buf, -1, NULL, 0, NULL, NULL);
+            std::string stu_id = "";
+            if (u8_len > 1) {
+                stu_id.resize(u8_len - 1);
+                WideCharToMultiByte(CP_UTF8, 0, buf, -1, &stu_id[0], u8_len, NULL, NULL);
+            }
+            while (!stu_id.empty() && (stu_id.back() == ' ' || stu_id.back() == '\r' || stu_id.back() == '\n' || stu_id.back() == '\t')) {
+                stu_id.pop_back();
+            }
+            while (!stu_id.empty() && stu_id.front() == ' ') {
+                stu_id.erase(stu_id.begin());
+            }
+
+            if (stu_id.empty()) {
+                MessageBoxW(hwnd, L"學號不可為空，請輸入您的學號！", L"點名提示", MB_ICONWARNING | MB_OK);
+                SetFocus(g_rollcall_edit);
+                return 0;
+            }
+
+            Utils::SetStudentId(stu_id);
+            Utils::Log("INFO", "📋 [RollCall] Student ID entered: " + stu_id);
+
+            Utils::RollCallSubmitCallback cb = nullptr;
+            {
+                std::lock_guard<std::mutex> lock(g_rollcall_cb_mutex);
+                cb = g_rollcall_callback;
+            }
+            if (cb) {
+                cb(g_current_rollcall_id, stu_id);
+            }
+
+            g_rollcall_active.store(false);
+            DestroyWindow(hwnd);
+        }
+        return 0;
+    }
+    case WM_CLOSE: {
+        g_rollcall_active.store(false);
+        DestroyWindow(hwnd);
+        return 0;
+    }
+    case WM_DESTROY: {
+        g_rollcall_hwnd = NULL;
+        g_rollcall_edit = NULL;
+        PostQuitMessage(0);
+        return 0;
+    }
+    }
+    return DefWindowProcW(hwnd, msg, wParam, lParam);
+}
+#endif
+
+void Utils::ShowRollCallDialog(const std::string& id, const std::string& title) {
+    g_current_rollcall_id = id;
+    g_current_rollcall_title = title;
+    g_rollcall_active.store(true);
+
+#ifdef _WIN32
+    if (g_rollcall_hwnd && IsWindow(g_rollcall_hwnd)) {
+        ShowWindow(g_rollcall_hwnd, SW_SHOW);
+        SetForegroundWindow(g_rollcall_hwnd);
+        if (g_rollcall_edit) {
+            SetFocus(g_rollcall_edit);
+            SendMessage(g_rollcall_edit, EM_SETSEL, 0, -1);
+        }
+        return;
+    }
+
+    if (g_rollcall_thread.joinable()) {
+        g_rollcall_thread.join();
+    }
+
+    g_rollcall_thread = std::thread([]() {
+        HINSTANCE hInstance = GetModuleHandle(NULL);
+        WNDCLASSW wc = {0};
+        wc.lpfnWndProc = RollCallWndProc;
+        wc.hInstance = hInstance;
+        wc.lpszClassName = L"GridSightRollCallClass";
+        wc.hCursor = LoadCursor(NULL, IDC_ARROW);
+        wc.hbrBackground = (HBRUSH)(COLOR_WINDOW + 1);
+        RegisterClassW(&wc);
+
+        int screen_w = GetSystemMetrics(SM_CXSCREEN);
+        int screen_h = GetSystemMetrics(SM_CYSCREEN);
+        int w = 380;
+        int h = 190;
+        int x = (screen_w - w) / 2;
+        int y = (screen_h - h) / 2;
+
+        std::wstring wTitle = L"GridSight 課堂點名";
+        if (!g_current_rollcall_title.empty()) {
+            int len = MultiByteToWideChar(CP_UTF8, 0, g_current_rollcall_title.c_str(), -1, NULL, 0);
+            if (len > 0) {
+                wTitle.resize(len - 1);
+                MultiByteToWideChar(CP_UTF8, 0, g_current_rollcall_title.c_str(), -1, &wTitle[0], len);
+            }
+        }
+
+        HWND hwnd = CreateWindowExW(
+            WS_EX_TOPMOST | WS_EX_TOOLWINDOW,
+            L"GridSightRollCallClass",
+            wTitle.c_str(),
+            WS_POPUP | WS_CAPTION | WS_SYSMENU | WS_VISIBLE,
+            x, y, w, h,
+            NULL, NULL, hInstance, NULL
+        );
+
+        if (hwnd) {
+            g_rollcall_hwnd = hwnd;
+            SetForegroundWindow(hwnd);
+            UpdateWindow(hwnd);
+
+            MSG msg;
+            while (g_rollcall_active.load() && GetMessageW(&msg, NULL, 0, 0)) {
+                if (msg.message == WM_KEYDOWN && msg.wParam == VK_RETURN) {
+                    SendMessage(hwnd, WM_COMMAND, MAKEWPARAM(302, BN_CLICKED), 0);
+                    continue;
+                }
+                TranslateMessage(&msg);
+                DispatchMessageW(&msg);
+            }
+
+            if (IsWindow(hwnd)) {
+                DestroyWindow(hwnd);
+            }
+        }
+    });
+#else
+    // Linux / Headless stub:
+    // In headless testing or Docker containers, respond automatically with mock student ID.
+    std::thread([id]() {
+        Utils::SleepMs(200);
+        std::string mock_id = Utils::GetEnv("MOCK_STUDENT_ID", "STU-2026-001");
+        if (!Utils::GetStudentId().empty()) {
+            mock_id = Utils::GetStudentId();
+        } else {
+            Utils::SetStudentId(mock_id);
+        }
+        Utils::Log("INFO", "📋 [RollCall] Headless stub auto-submitted student ID: " + mock_id);
+        RollCallSubmitCallback cb = nullptr;
+        {
+            std::lock_guard<std::mutex> lock(g_rollcall_cb_mutex);
+            cb = g_rollcall_callback;
+        }
+        if (cb) {
+            cb(id, mock_id);
+        }
+        g_rollcall_active.store(false);
+    }).detach();
+#endif
+}
+
+void Utils::HideRollCallDialog() {
+    g_rollcall_active.store(false);
+#ifdef _WIN32
+    if (g_rollcall_hwnd && IsWindow(g_rollcall_hwnd)) {
+        PostMessageW(g_rollcall_hwnd, WM_CLOSE, 0, 0);
+    }
+#endif
 }
 
 } // namespace GridSight

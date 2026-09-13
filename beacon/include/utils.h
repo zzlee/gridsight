@@ -2,6 +2,7 @@
 #include <string>
 #include <vector>
 #include <cstdint>
+#include <functional>
 
 namespace GridSight {
 
@@ -61,11 +62,18 @@ public:
     static void SetShowcaseToast(bool active);
     static bool IsShowcaseActive();
 
-    static void ShowAssignmentDropZone(const std::string& id, const std::string& title, const std::string& allowed_exts = "", int max_size_mb = 50, const std::string& upload_url = "", const std::string& token = "");
+    static void ShowAssignmentDropZone(const std::string& id, const std::string& title, const std::string& allowed_exts = "", int max_size_mb = 50, const std::string& upload_url = "");
     static void HideAssignmentDropZone();
     static bool IsAssignmentActive();
+    static bool UploadAssignmentData(const std::string& assignment_id, const std::string& filename, const std::string& content, const std::string& upload_url = "");
 
-    static std::string ShowStudentLoginDialog();
+    using RollCallSubmitCallback = std::function<void(const std::string& roll_call_id, const std::string& student_id)>;
+    static void SetRollCallSubmitCallback(RollCallSubmitCallback cb);
+    static void ShowRollCallDialog(const std::string& id, const std::string& title = "課堂點名");
+    static void HideRollCallDialog();
+    static bool IsRollCallActive();
+    static std::string GetStudentId();
+    static void SetStudentId(const std::string& student_id);
 
     static std::string HMACSHA256Hex(const std::string& key, const std::string& data);
     static bool VerifyHMACSHA256(const std::string& key, const std::string& data, const std::string& expected_hex);

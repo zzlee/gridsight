@@ -95,9 +95,11 @@ gridsight/
 │   ├── protocol_spec.md
 │   ├── deployment_guide.md
 │   └── igmp_snooping_setup.md
-├── scripts/                  # 交叉編譯與多播測試實用工具
+├── scripts/                  # 交叉編譯、多播測試與延遲壓測工具
 │   ├── build-agent-cross.sh
 │   ├── test-network-multicast.py
+│   ├── test-broadcast-e2e.py
+│   ├── benchmark-broadcast-latency.py # 廣播與中繼延遲微秒級壓測
 │   └── generate-sample-layout.py
 ├── LICENSE                   # MIT License
 └── README.md

@@ -2,7 +2,7 @@
 
 > 適用情境：模擬環境（Docker / mock agents / Xvfb）驗證完成後，於真實 Windows 教室部署時的系統化除錯流程。
 >
-> 本文件假設：教師端為 Windows（gs-console.exe 或 portable zip），學生端為 `gs-agent.exe` v5.4.x。
+> 本文件假設：教師端為 Windows（gs-console.exe 或 portable zip），學生端為 `gs-agent.exe` v5.8.x。
 
 ---
 

@@ -185,6 +185,8 @@ sequenceDiagram
   - `X-Agent-MAC`: `00:1A:2B:3C:4D:01`
   - `X-Agent-IP`: `192.168.1.101`
   - `X-Active-Window`: Base64 編碼之當前視窗標題（例如：`VmlzdWFsIFN0dWRpbyBDb2Rl`）
+  - `X-Student-Id`: 學生已簽到之學號（可選，簽到後持續帶上）
+  - `X-Capture-Time`: 學生端本地截圖時間戳記（毫秒）
   - `Content-Type`: `image/jpeg`
 - **Body**：480×270 JPEG 影像二進位數據 (Quality 70)
 - **回應**：`200 OK` `{"status":"ok"}`
@@ -201,12 +203,17 @@ sequenceDiagram
 - **方向**：學生端 ➔ 教師端 (Outbound WS)
 - **訊息類型**：
   - **二進位訊息 (Binary)**：H.264 NAL Unit (帶 `0x00000001` 起始碼之 Annex B 格式)。
-  - **上線註冊 (Text JSON From Student)**：`{"action": "AGENT_INFO_REGISTER", ...}`（完整欄位見 §3.2）：學生端於握手完成後第一時間上報 hostname / username / seatNo / specs / activeWindow。
+  - **上線註冊與回報 (Text JSON From Student)**：
+    - `{"action": "AGENT_INFO_REGISTER", ...}`（完整欄位見 §3.2）：握手完成後第一時間上報機台資訊。
+    - `{"action": "ROLL_CALL_RESPONSE", "rollCallId": "rc_123", "studentId": "B1103001"}`：學生於置頂輸入框輸入學號簽到後即時回傳。
+    - `{"action": "HIGHRES_SNAPSHOT_REPORT", "image": "<base64>"}`：回應教師端的高畫質截圖請求，包含 JPEG 原圖之 Base64 字串。
+    - `{"action": "LOGS_REPORT", "logs": "..."}`：回應除錯日誌抓取請求，回傳 `gs-agent.log` 完整日誌內容。
   - **控制控制指令 (Text JSON From Teacher)**：
-    - `{"action": "START_STREAM", "fps": 30, "bitrate": 2500}`
-    - `{"action": "STOP_STREAM"}`
-    - `{"action": "OPEN_URL", "url": "https://example.com"}`
-    - `{"action": "SHARE_FILE", "url": "http://<TEACHER_IP>:3000/api/share/download/<fileId>/<filename>", "filename": "lesson1.pdf", "fileSize": 1048576}`
+    - `{"action": "START_STREAM", "fps": 30, "bitrate": 2500}`：啟動 30 FPS H.264 串流。
+    - `{"action": "STOP_STREAM"}`：停止 30 FPS 串流。
+    - `{"action": "STOP_BROADCAST"}`：通知學生端全螢幕廣播已結束。
+    - `{"action": "OPEN_URL", "url": "https://example.com"}`：派送網址並於學生端預設瀏覽器開啟。
+    - `{"action": "SHARE_FILE", "url": "http://<TEACHER_IP>:3000/api/share/download/<fileId>/<filename>", "filename": "lesson1.pdf", "fileSize": 1048576}`：派送檔案至學生桌面。
     - `{"action": "SHUTDOWN", "timeout": 30}`：通知學生端開啟 30 秒置頂倒數視窗並執行關機。
     - `{"action": "CANCEL_SHUTDOWN"}`：通知學生端即刻銷毀倒數視窗並中止關機流程。
     - `{"action": "LOCK_SCREEN", "message": "請看講台專心聽課"}`：通知學生端顯示置頂深藍黑屏視窗（金色大鎖圖示與提示字樣），並啟動低階鍵鼠鉤子攔截 Win 鍵、Alt+Tab、Alt+F4 等操作。
@@ -215,17 +222,19 @@ sequenceDiagram
     - `{"action": "SHOWCASE_STOP"}`：通知學生端停止轉播，隱藏右下角 Toast 提示。
     - `{"action": "COLLECT_ASSIGNMENT", "id": "as-123", "title": "課堂作業", "allowedExts": "cpp,py", "maxSizeMb": 50, "uploadUrl": "http://<TEACHER_IP>:3000/api/assignments/upload"}`：通知學生端彈出原生 Win32 懸浮拖曳繳交視窗，支援拖曳桌面檔案即刻上傳與防呆校驗。
     - `{"action": "STOP_ASSIGNMENT"}`：通知學生端隱藏/銷毀拖曳繳交視窗。
-      - `url`：教師端檔案下載端點（學生端以此發起 HTTP GET 下載，無需鑑權）。
-      - `filename`：伺服器端已消毒之檔名（`path.basename` + 非法字元取代為 `_`），學生端存檔時據此避免目錄攻擊。
-      - `fileSize`：檔案大小（位元組），供學生端校驗下載完整性（目前學生端實作尚未消費此欄位，僅供保留/未來驗證用）。
+    - `{"action": "START_ROLL_CALL", "id": "rc_123", "title": "第一週課堂點名"}`：通知學生端彈出原生 Win32 置頂學號輸入視窗，支援 Enter 鍵送出與歷史預填。
+    - `{"action": "STOP_ROLL_CALL"}`：通知學生端關閉/銷毀學號輸入視窗。
+    - `{"action": "GET_HIGHRES_SNAPSHOT"}`：請求調閱該機當前 1:1 原生解析度之高畫質 JPEG 截圖。
+    - `{"action": "GET_LOGS"}`：請求學生端打包回傳 `gs-agent.log` 完整紀錄。
 
-### 3.6 學生端出站推播與反向 WebSocket (零入站開埠)
-- **`GET /snapshot`**：
-  - 支持 Query 參數 `full=1` 或 `highres=1`。若指定高解析度，則即時擷取 1:1 螢幕解析度並編碼 JPEG (Quality 85) 回傳；否則回傳本地快取之 480×270 縮圖。
-- **`GET /status`**：
-  - 回傳學生端硬體遙測數據 (JSON 格式)，並包含各元件 named-heartbeat 年齡（`capture-worker`、`snapshot-encode`、`ws-connected` 等）與 `capture_degraded` 旗標，供教師端 `/api/health` 與 watchdog 判讀元件級健康狀態。
-- **`GET /ping`**：
-  - 回傳 `{"status":"ok","service":"GridSight Beacon"}` 用於探針檢測。
+### 3.6 高畫質原圖截圖與批次快照調閱 API (Snapshot Retrieval & Batch Endpoints)
+- **`GET /api/snapshot/:id`**：
+  - 支持 Query 參數 `highres=1` 或 `full=1`。若指定高解析度，伺服器經由 WebSocket 對該機下發 `GET_HIGHRES_SNAPSHOT`，學生端即時擷取當前原生解析度螢幕並編碼為 JPEG (Q85) 回傳 `HIGHRES_SNAPSHOT_REPORT`，伺服器回應 200 `image/jpeg`；若無此參數則直接自伺服器記憶體快取回應 480×270 縮圖。
+- **`POST /api/snapshots/batch`**：
+  - 前端單次聚合請求多台可見座位縮圖。Body: `{"requests": [{"id": "00:1A:...", "since": 1723812345000}]}`。
+  - 伺服器對比快取時間戳：若 `since > 0` 且畫面未改變，回應 `notModified: true`（0 影像傳輸載重）；若有更新則回傳 Base64 JPEG 數據與學生當前焦點視窗標題 `activeWindow`。
+- **`GET /api/agent/:id/logs`**：
+  - 教師端遠端除錯通道。伺服器透過出站反向 WS 向目標學生機發送 `GET_LOGS`，學生端回傳後伺服器以 `text/plain` 即時回應 `gs-agent.log` 全文。
 
 ### 3.7 教師端廣播控制 API (Broadcast Control)
 - **`POST /api/broadcast/start`**（教師 session token）：啟動教師畫面全體廣播。Body（可選 `quality` 三檔預設，或直接指定）：
@@ -263,8 +272,15 @@ sequenceDiagram
 - **`GET /api/assignments/list`**：列出歷史作業收取紀錄。
 - **`POST /api/assignments/upload`**：學生端二進位上傳端點。自動歸檔儲存為 `data/assignments/<ID>/[座號]_[主機名]_[原檔名]`，重複繳交自動覆蓋更新（保持最新版）。
 - **`GET /api/assignments/:id/download-zip`**：純 Node.js 零依賴即時將該作業全部檔案打包為標準 ZIP 串流供教師下載帶走。
- 
-### 3.12 教師滑鼠與輸入多播協定 (Teacher Input RTP Protocol, Port 9002)
+
+### 3.12 課堂動態點名與學號簽到 API (Dynamic Roll Call API)
+- **`POST /api/rollcall/start`**：發起課堂點名。Body: `{"title": "第一週上機點名", "targets": "all" | string[]}`。
+- **`POST /api/rollcall/stop`**：結束當前點名工作階段，並通知學生端關閉輸入對話框。
+- **`POST /api/rollcall/remind`**：向尚未簽到之學生機（或指定單一學生機）再次下發點名對話框（支援個別重填學號）。
+- **`GET /api/rollcall/active`**：查詢目前進行中之點名狀態、標題、各機簽到名冊與時間戳。
+- **`GET /api/rollcall/export`**：下載帶有 UTF-8 with BOM 之 CSV 點名名冊檔案（包含座號、學號、電腦名稱、IP、簽到時間、狀態）。
+
+### 3.13 教師滑鼠與輸入多播協定 (Teacher Input RTP Protocol, Port 9002)
 - **傳輸管道**：`UDP 239.255.42.100:9002`（多播組）
 - **發布端**：教師端 `TeacherInputRtpStreamer`（Node.js / C++ 鉤子）
 - **接收端**：學生端 `InputRTPReceiver`（`gs-agent.exe` 常駐背景接收）

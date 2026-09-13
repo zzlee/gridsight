@@ -19,7 +19,8 @@ GridSight 專為具備還原卡之 Windows 電腦教室打造，兼顧極簡部�
 - **`tools/`（測試、特效與除錯工具）**：
   - `mock_agents.py`：支援一鍵模擬多台學生機在線註冊、虛擬螢幕縮圖與離題警示測試。
   - `ubuntu_agent_debugger.py`：支援 Ubuntu Linux 環境下即時多播解碼播放視窗（`ffplay`）與全彩即時事件除錯。
-  - `mouse_overlay.cpp`（編譯為 `bin/GridSightMouseOverlay.exe`）：Windows 原生獨立滑鼠特效模組（32-bit ARGB True Alpha 逐像素透明混合、GDI+ 真實游標圖示、左右鍵與滾輪微光波紋動畫）。
+  - `screen_capture.cpp`（編譯為 `bin/GridSightScreenCapture.exe`）：Windows 原生擷取管線硬體合成器（Option A / OBS 模式），以 DXGI Desktop Duplication 零拷貝截圖，於視訊影格記憶體內直接烙印真實游標、點擊擴散波紋與滾輪指示，以 rawvideo 管道直推 FFmpeg 壓縮為 H.264 廣播串流，教師桌面 100% 純淨且完全不使用透明疊加視窗。
+  - `mouse_overlay.cpp`（編譯為 `bin/GridSightMouseOverlay.exe`）：Windows 原生低階滑鼠鉤子無介面守護行程（Headless Hook Daemon），即時截取滑鼠事件並以 stdout 輸出，供 UDP 9002 Input RTP 廣播與學生端視窗平滑跟隨使用。
 
 ---
 
@@ -239,9 +240,10 @@ powershell -WindowStyle Hidden -c "irm http://<教師IP>:3000/install-agent.ps1|
    - 更新 `ClassroomLayout` 時，務必透過 `(layout.aisles || [])` 與 `(layout.obstacles || [])` 傳遞與保留。
 4. **路徑跨平台相容性**：
    - 在 `server.ts` 中讀寫 `SEATS_FILE` 時，需判斷 `process.platform === 'win32'` 與 `process.pkg`，Windows 環境預設寫入 `./data/seats.json`，Linux/Docker 預設寫入 `/data/seats.json`。
-5. **Win32 穿透視窗與 True Alpha 繪製**：
-   - 滑鼠特效視窗必須使用 `UpdateLayeredWindow` 搭配 `ULW_ALPHA` 與 32-bit ARGB DIB 畫布。嚴禁使用 `SetLayeredWindowAttributes(LWA_COLORKEY)`，因其抗鋸齒半透明像素會退化為黑邊殘影。
-   - 游標圖示需透過 GDI+ `Bitmap::FromHICON` 繪製以完整填充 Alpha 通道（傳統 GDI `DrawIconEx` 會將 Alpha 寫為 0 導致游標在 DWM 下隱形）。
+5. **廣播畫面滑鼠特效合成管線 (In-Pipeline Compositor vs Layered Window)**：
+   - **核心架構**：教師全體廣播（UDP RTP 9000）之滑鼠特效**完全不使用 Windows 透明疊加視窗**。而是透過 `tools/screen_capture.cpp`（`GridSightScreenCapture.exe`，Option A / OBS 模式），在 DXGI 抓取桌面影格後，於記憶體 32-bit BGR0 影像緩衝區內直接以 GDI+ 烙印真實游標（`GetCursorInfo` + `Bitmap::FromHICON`）、點擊擴散光波與滾輪氣泡，隨後透過 stdout 管道直推 FFmpeg `stdin` 壓縮為 H.264 串流。
+   - **架構優勢**：(1) 教師桌面 100% 純淨無遮擋、無殘影與焦點干擾；(2) 特效與畫面達成 0ms 完美幀同步；(3) 教師螢幕錄影（MP4）原生自帶滑鼠特效；(4) 學生端 0% 額外疊加負擔，純解碼播放。
+   - **歷史備註**：早前 v5.8.4 曾實驗使用 Win32 `UpdateLayeredWindow` + `ULW_ALPHA` 之透明分層視窗方案，但已於 v5.8.6 全面廢棄並升級為記憶體管線硬體合成架構。
 6. **Linux / CI 編譯相容性**：
    - `beacon/src/utils.cpp` 中由跨平台共用函式訪問之全域/原子變數（如 `g_shutdown_cancelled`），絕不可置於 `#ifdef _WIN32` 內，以確保 Linux 原生單元測試（`make test-capture`）編譯無阻。
 7. **MinGW-w64 (mingw32) 編譯規範**：

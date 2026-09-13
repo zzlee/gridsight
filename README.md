@@ -21,7 +21,7 @@
 - ⚡ **三大影像傳輸模式 (Three Transmission Modes)**
   1. **全班常態監控**：480×270 @ 1 FPS，出站 Snapshot HTTP Push + 伺服器快取 (附熔斷器)，全班僅佔 1.7% 頻寬 (~17 Mbps)
   2. **焦點單機調閱**：720p/1080p @ 30 FPS，按需 Media Foundation H.264 + 反向 WebSocket 中繼，WebCodecs GPU 硬體解碼 (<50ms 延遲)
-  3. **教師全體廣播**：H.264 + UDP Multicast (RTP)，內建 True Alpha 原生滑鼠光圈與點擊波紋特效，支援三檔品質快速切換（高 1080p30/8M、中 720p30/4M、低 480p15/1.5M）
+  3. **教師全體廣播**：H.264 + UDP Multicast (RTP)，內建擷取管線硬體合成原生滑鼠游標與點擊波紋特效，支援三檔品質快速切換（高 1080p30/8M、中 720p30/4M、低 480p15/1.5M）
 - 🔒 **輕量無感部署與安全鑑權 (Zero-Maintenance & Security)**
   - **雲端熱拉取**：PowerShell 單行指令下載至 `%TEMP%` 於 Session 1 執行，避開 Session 0 隔離，還原卡零殘留
   - **RAM Session Token**：教師端定期 UDP Multicast 廣播「教師在線」探索 (Discovery)，學生端監聽後以共用 Session Token（僅存放於記憶體）建立唯一出站反向 WebSocket，防範同儕偷窺

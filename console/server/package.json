@@ -6,7 +6,7 @@
   "scripts": {
     "start": "tsx server.ts",
     "typecheck": "tsc --noEmit",
-    "test": "npx tsx logger.test.ts && npx tsx browserLauncher.test.ts && npx tsx auth.test.ts && npx tsx mouseHighlight.test.ts && npx tsx inputRtpStreamer.test.ts && npx tsx nicSelector.test.ts && npx tsx installerScript.test.ts && npx tsx audioDevices.test.ts && npx tsx zipPacker.test.ts && npx tsx batchSnapshot.test.ts && npx tsx shutdown.integration.test.ts && npx tsx share.integration.test.ts && npx tsx lockAndShowcase.integration.test.ts && npx tsx assignment.integration.test.ts && npx tsx rollcall.integration.test.ts && npx tsx highresSnapshot.integration.test.ts && npx tsx layoutAndOffTask.integration.test.ts"
+    "test": "npx tsx logger.test.ts && npx tsx browserLauncher.test.ts && npx tsx auth.test.ts && npx tsx mouseHighlight.test.ts && npx tsx inputRtpStreamer.test.ts && npx tsx nicSelector.test.ts && npx tsx installerScript.test.ts && npx tsx audioDevices.test.ts && npx tsx zipPacker.test.ts && npx tsx batchSnapshot.test.ts && npx tsx shutdown.integration.test.ts && npx tsx share.integration.test.ts && npx tsx lockAndShowcase.integration.test.ts && npx tsx assignment.integration.test.ts && npx tsx rollcall.integration.test.ts && npx tsx highresSnapshot.integration.test.ts && npx tsx layoutAndOffTask.integration.test.ts && npx tsx recording.integration.test.ts"
   },
   "dependencies": {
     "cors": "^2.8.5",

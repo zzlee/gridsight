@@ -1585,7 +1585,7 @@ app.get('/api/record/download/:filename', requireTeacherAuth, (req, res) => {
   const safeFilename = path.basename(rawFilename);
   const filePath = path.join(RECORDINGS_DIR, safeFilename);
   const resolved = path.resolve(filePath);
-  if (!resolved.startsWith(path.resolve(RECORDINGS_DIR) + path.sep)) {
+  if (rawFilename !== safeFilename || !resolved.startsWith(path.resolve(RECORDINGS_DIR) + path.sep)) {
     return res.status(403).json({ error: '拒絕存取' });
   }
   if (!fs.existsSync(resolved)) {
@@ -1599,8 +1599,11 @@ app.delete('/api/record/:filename', requireTeacherAuth, async (req, res) => {
   const safeFilename = path.basename(rawFilename);
   const filePath = path.join(RECORDINGS_DIR, safeFilename);
   const resolved = path.resolve(filePath);
-  if (!resolved.startsWith(path.resolve(RECORDINGS_DIR) + path.sep)) {
+  if (rawFilename !== safeFilename || !resolved.startsWith(path.resolve(RECORDINGS_DIR) + path.sep)) {
     return res.status(403).json({ error: '拒絕存取' });
+  }
+  if (!fs.existsSync(resolved)) {
+    return res.status(404).json({ error: '檔案不存在' });
   }
   try {
     await fs.promises.unlink(resolved);

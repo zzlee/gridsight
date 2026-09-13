@@ -403,7 +403,12 @@ powershell -WindowStyle Hidden -c "irm http://<教師IP>:3000/install-agent.ps1|
    python3 tools/test_assignment_cluster.py
    # 全程自動化驗證：發起作業收取 ➔ 學生繳交 ➔ 重複覆蓋最新版 ➔ 格式限制防禦 ➔ 全班零依賴 ZIP 打包下載與解壓縮位元組校驗 ➔ 結束收取
    ```
-7. **測試完成拆除叢集**：
+7. **驗證教師與學生螢幕錄影測試**：
+   ```bash
+   python3 tools/test_recording_cluster.py
+   # 全程自動化驗證：音訊裝置列舉 ➔ 教師獨立錄影 ➔ 廣播同步雙軌錄影 ➔ 學生 H.264 焦點串流原生錄製 ➔ 錄影清單與下載 ➔ 路徑穿越防禦 ➔ 刪除錄影
+   ```
+8. **測試完成拆除叢集**：
    ```bash
    docker compose -f docker-compose.test-cluster.yml down
    ```

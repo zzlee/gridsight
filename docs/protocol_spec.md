@@ -302,18 +302,53 @@ sequenceDiagram
   - **零伺服器轉發負擔**：由交換器 IGMP Snooping 硬體複製至所有學生端，徹底避免 WebSocket 反向中繼通道產生 TCP 隊頭阻塞 (Head-of-Line Blocking)。
   - **解耦視訊與控制面**：與 Port 9000 視訊串流分離，即便視訊幀短暫緩衝，滑鼠座標平移依然即時平滑。
 
+### 3.14 雙軌螢幕錄影與歷史錄影管理 API (Screen Recording & Library API)
+- **教師端螢幕錄影控制**：
+  - **`POST /api/record/start`**：啟動教師螢幕錄影或廣播同步錄影。
+    - Body: `{"target": "screen" | "broadcast", "quality": "high" | "medium" | "low", "audioDevice"?: string}`
+    - `audioDevice`：可選 DirectShow (Windows) 或 Pulse (Linux) 實體麥克風/立體聲混音音效卡名稱；若未指定或設為 `none` 則錄製純無聲視訊。
+  - **`POST /api/record/stop`**：停止教師螢幕錄影並將 MP4 檔案寫入持久化目錄 `data/recordings/`。
+  - **`GET /api/record/status`**：查詢教師螢幕錄影狀態 `{ "active": boolean, "target": string, "startTime": number, "duration": number, "filename": string, "fileSizeBytes": number }`。
+  - **`GET /api/record/audio-devices`**：列舉主機當前可用之實體與虛擬音訊輸入設備清單。
+- **學生焦點串流原生錄影控制**：
+  - **`POST /api/record/student/start`**：發起對指定學生 30 FPS H.264 焦點串流的原生 MP4 錄製。
+    - Body: `{"mac": "00:1A:2B:3C:4D:01", "quality"?: "high" | "medium", "filename"?: string}`
+    - 伺服器端透過 FFmpeg 零拷貝 Direct Stream Copy（`-c:v copy -f mp4 -movflags +frag_keyframe+empty_moov`），首幀自動注入 SPS/PPS/IDR，兼顧 0% CPU 損耗與斷電防壞檔。
+  - **`POST /api/record/student/stop`**：停止學生畫面錄影。Body: `{"mac": "00:1A:2B:3C:4D:01"}`。
+  - **`GET /api/record/student/status`**：查詢學生錄影進度（已錄秒數、檔案大小、檔名）。
+- **歷史錄影庫管理端點**：
+  - **`GET /api/recordings`**：列出所有已完成之錄影清單（包含檔名、類型 `teacher`/`broadcast`/`student`、檔案大小、錄製時間戳、時長預估）。
+  - **`GET /api/recordings/:filename`**：HTML5 `<video>` 串流播放端點，支援標準 HTTP 206 Partial Content 與 `Range: bytes=start-end` 標頭，支援瀏覽器任意時間軸拖曳預覽。
+  - **`GET /api/recordings/download/:filename`**：下載完整 MP4 錄影檔案。
+  - **`DELETE /api/recordings/:filename`**：安全刪除指定錄影檔案（內建路徑穿越防禦）。
+
+### 3.15 課堂教材分發與網址派送 API (URL & File Sharing API)
+- **`POST /api/share/url`**：向全班或選定學生派發網址並自動於學生端預設瀏覽器開啟。Body: `{"url": "https://...", "targets": "ALL" | string[]}`。
+- **`POST /api/share/upload`**：教師端上傳待分發之檔案（Multipart Form Data），回傳 `{"fileId": "...", "filename": "...", "size": 1048576}`。
+- **`POST /api/share/file`**：通知學生端自教師端下載檔案至學生桌面。Body: `{"fileId": "...", "targets": "ALL" | string[]}`。
+- **`GET /api/share/download/:id/:filename`**：學生端下載教材二進位檔案端點。
+
+### 3.16 廣播延遲與網路抖動基準量測 API (Benchmark API)
+- **`GET /api/benchmark/status`**：查詢教師端廣播延遲量測狀態（含 60 FPS 碼錶基準時間戳、循環色彩計數器、RFC 3550 RTP 封包抖動統計、示範轉播微秒級中繼延遲）。
+
 ---
 
 ## ⚠️ 4. 實作狀態與注意事項 (Implementation Notes & Caveats)
 
-**RTP 廣播渲染管線 (RTPReceiver Frame Rendering)**：
-   - 已完整實作 **UDP Socket 監聽**、**IGMP 權限加入 (`IP_ADD_MEMBERSHIP)`、**RTP Header 解析**、**RFC 6184 FU-A / STAP-A 重組**（以 marker 位元組裝 Access Unit 後整幀解碼）、**SSRC 鎖定與逾時重新鎖定**（串流更換 SSRC 時執行完整狀態 reset）及 **Win32 滿版 overlay 彈窗 + Media Foundation MFT H.264 解碼渲染**。
+1. **RTP 廣播渲染管線 (RTPReceiver Frame Rendering)**：
+   - 已完整實作 **UDP Socket 監聽**、**IGMP 權限加入 (`IP_ADD_MEMBERSHIP`)**、**RTP Header 解析**、**RFC 6184 FU-A / STAP-A 重組**（以 marker 位元組裝 Access Unit 後整幀解碼）、**SSRC 鎖定與逾時重新鎖定**（串流更換 SSRC 時執行完整狀態 reset）及 **Win32 滿版 overlay 彈窗 + Media Foundation MFT H.264 解碼渲染**。
    - 序號中斷或 FU-A 不完整時丟棄該幀，等待下一個 IDR 自動恢復。
 
-2. **多網卡探索與環境適應**：
+2. **多網卡探索與環境適應 (Discovery Deduplication)**：
    - 學生端預設以主要網卡 `Utils::GetSystemNetworkInfo()` 回傳 IP 加入教師端多播群組（`IP_ADD_MEMBERSHIP`）。若學生機具備虛擬網卡 (如 Docker, VMware)，需確保優先選用真實物理 LAN 網卡加入群組並建立出站連線。
+   - **多播探索日誌與連線去重 (Deduplication)**：`gs-agent` 本地快取最新教師端端點資訊（`TEACHER_IP:PORT`），當週期性接收到相同的 Discovery 宣告時，自動抑制重複的日誌輸出與重複連線建立，僅於教師 IP/Port 發生實質變更或反向 WS 斷線時觸發重新連線。
 
 3. **單一長連線出站 + 多播接收**：
    - 自 v5.8.0 起已移除學生端傳統入站埠 `8080 / 8081`；v5.9.0 起探索方向反轉，學生端不再定時發送 BEACON，改為**監聽教師端多播探索**後被動註冊。
    - 學生端所有 TCP 皆為**出站**：唯一長連線為 `/ws/agent`，另輔以一次性 HTTP 出站（快照推送 `POST /api/agent/snapshot`、作業上傳、檔案下載）。
    - 學生端僅需允許 **UDP 多播入站**（`8888` 教師探索、`9000` 教師視訊廣播、`9002` 教師輸入事件），完全不需要任何 TCP 入站放行。
+
+4. **學生端 30 FPS 串流穩定化與看門狗機制 (H.264 Streaming Watchdog)**：
+   - 焦點調閱與示範轉播啟用時，學生端啟動 DXGI + MFT H.264 硬體編碼（或軟體備援），在連線初段主動注入 SPS/PPS 關鍵幀以支援 WebCodecs 快速解碼解鎖。
+   - 前端 WebCodecsPlayer 內建 10 秒 0 FPS 看門狗機制；若串流因網路波動或瀏覽器休眠停滯，將自動嘗試重新開流或無縫降級至 1 FPS Snapshot 備援，杜絕播放器永久卡死於 0 FPS。
+

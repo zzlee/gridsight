@@ -109,8 +109,8 @@
    - （`scripts/build-windows-console.js` 動態讀取 `console/package.json`，無需手動改）
 2. 建立 Git Tag 並推送：
    ```bash
-   git tag -a v5.8.8 -m "Release v5.8.8: ..."
-   git push origin v5.8.8
+   git tag -a v5.9.0 -m "Release v5.9.0: ..."
+   git push origin v5.9.0
    ```
 3. GitHub Actions (`.github/workflows/release.yml`) 會自動執行：
    - 交叉編譯產出 `gs-agent.exe`
@@ -244,12 +244,17 @@
    python3 tools/test_assignment_cluster.py
    # 全程自動化驗證：發起作業收取 ➔ 學生繳交 ➔ 重複覆蓋最新版 ➔ 格式限制防禦 ➔ 全班零依賴 ZIP 打包下載與解壓縮位元組校驗 ➔ 結束收取
    ```
-7. **驗證教師與學生螢幕錄影測試**：
+7. **驗證教師與全體廣播螢幕錄影測試**：
    ```bash
    python3 tools/test_recording_cluster.py
-   # 全程自動化驗證：音訊裝置列舉 ➔ 教師獨立錄影 ➔ 廣播同步雙軌錄影 ➔ 學生 H.264 焦點串流原生錄製 ➔ 錄影清單與下載 ➔ 路徑穿越防禦 ➔ 刪除錄影
+   # 全程自動化驗證：音訊裝置列舉 ➔ 教師獨立錄影 ➔ 廣播同步雙軌錄影 ➔ 錄影清單與下載 ➔ 路徑穿越防禦 ➔ 刪除錄影
    ```
-8. **測試完成拆除叢集**：
+8. **驗證學生焦點串流錄影與 HTTP 206 串流預覽測試**：
+   ```bash
+   python3 tools/test_student_record_cluster.py
+   # 全程自動化驗證：30 FPS H.264 串流建立 ➔ 學生原生串流錄影 ➔ FFmpeg 直封 MP4 ➔ HTTP 206 Range 串流預覽 ➔ 錄影資料夾安全校驗
+   ```
+9. **測試完成拆除叢集**：
    ```bash
    docker compose -f docker-compose.test-cluster.yml down
    ```

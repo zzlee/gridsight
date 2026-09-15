@@ -47,6 +47,8 @@ GridSight 是專為 70 台具備還原卡之 Windows 電腦教室打造的螢幕
   7. **學生示範轉播中繼**：反向 WebSocket 接收示範生 30 FPS 串流，FFmpeg 零拷貝直推 RTP 多播。
   8. **課堂作業收取與零依賴 ZIP 打包**：即時收取名冊、未繳催繳、與純 Node.js 原生實作 ZIP 串流打包下載。
   9. **自選音訊裝置雙軌螢幕錄影**：DirectShow / Pulse 麥克風與音效卡自動探測、AAC 128kbps 精準混流，多播廣播嚴格過濾聲音防嘯叫。
+  10. **學生焦點串流直出錄影與獨立歷史錄影庫**：學生 30 FPS H.264 串流 0% CPU 損耗 Direct Stream Copy 直封 MP4，支援獨立 `RecordingsListModal` 標籤篩選、搜尋、HTTP 206 串流預覽播放與下載管理。
+  11. **廣播延遲與網路抖動基準量測**：整合 60 FPS 毫秒基準碼錶、循環色塊、RFC 3550 RTP 封包抖動分析與示範轉播微秒級中繼延遲採樣。
 
 ### 學生端輕量代理 (GridSight Beacon / `gs-agent.exe`)
 - **運行環境**：Windows 10/11 x64 (透過 MinGW-w64 靜態編譯)

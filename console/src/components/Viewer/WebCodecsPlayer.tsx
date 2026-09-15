@@ -227,6 +227,21 @@ export const WebCodecsPlayer = forwardRef<WebCodecsPlayerHandle, WebCodecsPlayer
         } catch (decErr) {
           console.warn('[WebCodecsPlayer] Decode error:', decErr);
         }
+      } else if (isKeyFrame && (!decoder || decoder.state === 'closed')) {
+        // Auto-recovery: If decoder encountered a transient error and closed,
+        // recreate and reconfigure it immediately upon receiving a clean Keyframe!
+        initDecoder();
+        if (decoder && decoder.state === 'configured') {
+          try {
+            decoder.decode(new EncodedVideoChunk({
+              type: 'key',
+              timestamp: performance.now() * 1000,
+              data: buffer,
+            }));
+          } catch (decErr) {
+            console.warn('[WebCodecsPlayer] Auto-recovery decode error:', decErr);
+          }
+        }
       }
     };
 

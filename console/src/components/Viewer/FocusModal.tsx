@@ -30,14 +30,16 @@ import {
   Lock,
   Unlock,
   ChevronDown,
+  Film,
 } from 'lucide-react';
 
 interface FocusModalProps {
   device: StudentDevice | null;
   onClose: () => void;
+  onOpenRecordingsList?: () => void;
 }
 
-export const FocusModal: React.FC<FocusModalProps> = ({ device, onClose }) => {
+export const FocusModal: React.FC<FocusModalProps> = ({ device, onClose, onOpenRecordingsList }) => {
   const modalContainerRef = useRef<HTMLDivElement>(null);
   const playerRef = useRef<WebCodecsPlayerHandle>(null);
   const [showSpecsHud, setShowSpecsHud] = useState(false); // Default OFF
@@ -252,7 +254,12 @@ export const FocusModal: React.FC<FocusModalProps> = ({ device, onClose }) => {
     setLogError(null);
     try {
       const target = device.mac || device.ip || device.id;
-      const resp = await AuthService.fetchWithAuth(`/api/agent/${encodeURIComponent(target)}/logs`);
+      const queryParams = new URLSearchParams();
+      if (device.mac) queryParams.set('mac', device.mac);
+      if (device.ip) queryParams.set('ip', device.ip);
+      if (device.hostname) queryParams.set('hostname', device.hostname);
+      const url = `/api/agent/${encodeURIComponent(target)}/logs?${queryParams.toString()}`;
+      const resp = await AuthService.fetchWithAuth(url);
       if (resp.ok) {
         const text = await resp.text();
         setLogsContent(text);
@@ -548,6 +555,18 @@ export const FocusModal: React.FC<FocusModalProps> = ({ device, onClose }) => {
                 <span>錄影</span>
               )}
             </button>
+
+            {/* Historical Recordings List Shortcut */}
+            {onOpenRecordingsList && (
+              <button
+                onClick={onOpenRecordingsList}
+                className="p-1.5 sm:px-2.5 py-1.5 rounded-lg border border-purple-500/30 bg-purple-950/30 hover:bg-purple-900/50 text-purple-300 transition-all active:scale-95 flex items-center space-x-1 text-xs font-semibold whitespace-nowrap shrink-0 shadow-sm"
+                title="開啟歷史錄影庫（檢視、預覽播放與下載學生與教師錄影）"
+              >
+                <Film className="w-3.5 h-3.5" />
+                <span className="hidden sm:inline">錄影庫</span>
+              </button>
+            )}
 
             {/* Diagnostic & Tools Dropdown */}
             <div ref={toolMenuRef} className="relative shrink-0">

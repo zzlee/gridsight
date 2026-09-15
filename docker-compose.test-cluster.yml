@@ -12,6 +12,8 @@ services:
     container_name: gs-test-console
     cap_add:
       - NET_ADMIN
+    ports:
+      - "3000:3000"
     environment:
       - NODE_ENV=production
       - API_PORT=3000
@@ -29,6 +31,9 @@ services:
              exec npm run start"
 
   test-agent:
+    build:
+      context: .
+      dockerfile: Dockerfile.ubuntu-agent
     image: gridsight-ubuntu-agent:latest
     container_name: gs-test-agent
     cap_add:
@@ -47,6 +52,7 @@ services:
       - test-console
     command: >
       bash -c "ip route add 224.0.0.0/4 dev eth0 2>/dev/null || true;
+               if [ ! -f ./beacon/gs-agent ]; then make -C beacon CXX=g++ TARGET=gs-agent; fi;
                exec ./beacon/gs-agent"
 
 networks:

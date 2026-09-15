@@ -1,6 +1,4 @@
-/* stb_image_write - v1.16 - public domain - http://nothings.org/stb
-   JPEG writer component for GridSight native agent
-*/
+/* stb_image_write - JPEG writer for GridSight native agent */
 #ifndef INCLUDE_STB_IMAGE_WRITE_H
 #define INCLUDE_STB_IMAGE_WRITE_H
 
@@ -12,7 +10,6 @@ extern "C" {
 #endif
 
 typedef void stbi_write_func(void *context, void *data, int size);
-
 int stbi_write_jpg_to_func(stbi_write_func *func, void *context, int x, int y, int comp, const void *data, int quality);
 
 #ifdef STB_IMAGE_WRITE_IMPLEMENTATION
@@ -21,16 +18,15 @@ static void stbiw__write_context(stbi_write_func *func, void *context, const voi
    func(context, (void*)data, size);
 }
 
-// JPEG compression tables and routine
-static const unsigned char stbiw__jpg_ZigZag[] = {
-   0, 1, 5, 6, 14, 15, 27, 28,
-   2, 4, 7, 13, 16, 26, 29, 42,
-   3, 8, 12, 17, 25, 30, 41, 43,
-   9, 11, 18, 24, 31, 40, 44, 53,
-   10, 19, 23, 32, 39, 45, 52, 54,
-   20, 22, 33, 38, 46, 51, 55, 60,
-   21, 34, 37, 47, 50, 56, 59, 61,
-   35, 36, 48, 49, 57, 58, 62, 63
+static const unsigned char stbiw__jpg_ZigZagToRaster[64] = {
+    0,  1,  8, 16,  9,  2,  3, 10,
+   17, 24, 32, 25, 18, 11,  4,  5,
+   12, 19, 26, 33, 40, 48, 41, 34,
+   27, 20, 13,  6,  7, 14, 21, 28,
+   35, 42, 49, 56, 57, 50, 43, 36,
+   29, 22, 15, 23, 30, 37, 44, 51,
+   58, 59, 52, 45, 38, 31, 39, 46,
+   53, 60, 61, 54, 47, 55, 62, 63
 };
 
 static const unsigned char stbiw__jpg_LuminanceQuantTable[64] = {
@@ -58,28 +54,29 @@ static const unsigned char stbiw__jpg_ChrominanceQuantTable[64] = {
 typedef struct {
    stbi_write_func *func;
    void *context;
-   unsigned short bitBuf;
+   unsigned int bitBuf;
    int bitCnt;
 } stbiw__jpg_bitstream;
 
-static void stbiw__jpg_writeBits(stbiw__jpg_bitstream *bs, unsigned short val, int bits) {
-   bs->bitBuf |= (val << (16 - bs->bitCnt - bits));
+static void stbiw__jpg_writeBits(stbiw__jpg_bitstream *bs, unsigned int val, int bits) {
+   if (bits <= 0) return;
+   bs->bitBuf = (bs->bitBuf << bits) | (val & ((1U << bits) - 1));
    bs->bitCnt += bits;
    while (bs->bitCnt >= 8) {
-      unsigned char c = (unsigned char)((bs->bitBuf >> 8) & 0xFF);
+      unsigned char c = (unsigned char)((bs->bitBuf >> (bs->bitCnt - 8)) & 0xFF);
       stbiw__write_context(bs->func, bs->context, &c, 1);
       if (c == 0xFF) {
          unsigned char zero = 0;
          stbiw__write_context(bs->func, bs->context, &zero, 1);
       }
-      bs->bitBuf <<= 8;
       bs->bitCnt -= 8;
+      bs->bitBuf &= (1U << bs->bitCnt) - 1;
    }
 }
 
 static void stbiw__jpg_flushBits(stbiw__jpg_bitstream *bs) {
    if (bs->bitCnt > 0) {
-      unsigned char c = (unsigned char)((bs->bitBuf >> 8) & 0xFF);
+      unsigned char c = (unsigned char)(((bs->bitBuf << (8 - bs->bitCnt)) | ((1 << (8 - bs->bitCnt)) - 1)) & 0xFF);
       stbiw__write_context(bs->func, bs->context, &c, 1);
       if (c == 0xFF) {
          unsigned char zero = 0;
@@ -150,7 +147,11 @@ static void stbiw__jpg_write_marker(stbi_write_func *func, void *context, unsign
 static void stbiw__jpg_write_dqt(stbi_write_func *func, void *context, int table_idx, const unsigned char *qtable) {
    unsigned char h[5] = { 0xFF, 0xDB, 0x00, 0x43, (unsigned char)table_idx };
    stbiw__write_context(func, context, h, 5);
-   stbiw__write_context(func, context, qtable, 64);
+   unsigned char zz_table[64];
+   for (int i = 0; i < 64; ++i) {
+      zz_table[i] = qtable[stbiw__jpg_ZigZagToRaster[i]];
+   }
+   stbiw__write_context(func, context, zz_table, 64);
 }
 
 static void stbiw__jpg_write_dht(stbi_write_func *func, void *context, int table_type_and_idx, const unsigned char *nrcodes, const unsigned char *values, int val_count) {
@@ -163,33 +164,25 @@ static void stbiw__jpg_write_dht(stbi_write_func *func, void *context, int table
    stbiw__write_context(func, context, values, val_count);
 }
 
-// 1D DCT on 8 points
+static const float s_dct_matrix[8][8] = {
+   { 0.3535534f,  0.3535534f,  0.3535534f,  0.3535534f,  0.3535534f,  0.3535534f,  0.3535534f,  0.3535534f},
+   { 0.4903926f,  0.4157348f,  0.2777851f,  0.0975452f, -0.0975452f, -0.2777851f, -0.4157348f, -0.4903926f},
+   { 0.4619398f,  0.1913417f, -0.1913417f, -0.4619398f, -0.4619398f, -0.1913417f,  0.1913417f,  0.4619398f},
+   { 0.4157348f, -0.0975452f, -0.4903926f, -0.2777851f,  0.2777851f,  0.4903926f,  0.0975452f, -0.4157348f},
+   { 0.3535534f, -0.3535534f, -0.3535534f,  0.3535534f,  0.3535534f, -0.3535534f, -0.3535534f,  0.3535534f},
+   { 0.2777851f, -0.4903926f,  0.0975452f,  0.4157348f, -0.4157348f, -0.0975452f,  0.4903926f, -0.2777851f},
+   { 0.1913417f, -0.4619398f,  0.4619398f, -0.1913417f, -0.1913417f,  0.4619398f, -0.4619398f,  0.1913417f},
+   { 0.0975452f, -0.2777851f,  0.4157348f, -0.4903926f,  0.4903926f, -0.4157348f,  0.2777851f, -0.0975452f}
+};
+
 static void stbiw__jpg_dct_1d(float *out, const float *in) {
-   static const float s0 = 0.707106781f;
-   static const float s1 = 0.923879532f, c1 = 0.382683432f;
-   static const float s2 = 0.707106781f, c2 = 0.707106781f;
-   static const float s3 = 0.382683432f, c3 = 0.923879532f;
-
-   float a0 = in[0] + in[7], a7 = in[0] - in[7];
-   float a1 = in[1] + in[6], a6 = in[1] - in[6];
-   float a2 = in[2] + in[5], a5 = in[2] - in[5];
-   float a3 = in[3] + in[4], a4 = in[3] - in[4];
-
-   float b0 = a0 + a3, b3 = a0 - a3;
-   float b1 = a1 + a2, b2 = a1 - a2;
-
-   out[0] = (b0 + b1) * 0.5f * s0;
-   out[4] = (b0 - b1) * 0.5f * s0;
-   out[2] = (b3 * s2 + b2 * c2) * 0.5f;
-   out[6] = (b3 * c2 - b2 * s2) * 0.5f;
-
-   float c4 = a4, c5 = (a5 - a6) * s0, c6 = (a5 + a6) * s0, c7 = a7;
-   float d4 = c4 + c5, d5 = c4 - c5, d6 = c7 - c6, d7 = c7 + c6;
-
-   out[1] = (d7 * s1 + d4 * c1) * 0.5f;
-   out[5] = (d6 * s3 + d5 * c3) * 0.5f;
-   out[3] = (d6 * c3 - d5 * s3) * 0.5f;
-   out[7] = (d7 * c1 - d4 * s1) * 0.5f;
+   for (int u = 0; u < 8; ++u) {
+      float sum = 0.0f;
+      for (int x = 0; x < 8; ++x) {
+         sum += in[x] * s_dct_matrix[u][x];
+      }
+      out[u] = sum;
+   }
 }
 
 static void stbiw__jpg_dct_2d(short *out_quant, const float *block, const unsigned char *qtable) {
@@ -205,9 +198,9 @@ static void stbiw__jpg_dct_2d(short *out_quant, const float *block, const unsign
       for (int j = 0; j < 8; ++j) dct[j * 8 + i] = col_out[j];
    }
    for (int i = 0; i < 64; ++i) {
-      int zz = stbiw__jpg_ZigZag[i];
-      float q = (float)qtable[zz];
-      float val = dct[zz] / (q * 8.0f);
+      int pos = stbiw__jpg_ZigZagToRaster[i];
+      float q = (float)qtable[pos];
+      float val = dct[pos] / q;
       out_quant[i] = (short)(val >= 0.0f ? (val + 0.5f) : (val - 0.5f));
    }
 }
@@ -260,7 +253,6 @@ int stbi_write_jpg_to_func(stbi_write_func *func, void *context, int x, int y, i
    if (quality < 1) quality = 1;
    if (quality > 100) quality = 100;
 
-   // Compute scaled quant tables based on quality
    int scale = quality < 50 ? (5000 / quality) : (200 - quality * 2);
    unsigned char q_lum[64], q_chrom[64];
    for (int i = 0; i < 64; ++i) {
@@ -270,7 +262,6 @@ int stbi_write_jpg_to_func(stbi_write_func *func, void *context, int x, int y, i
       q_chrom[i] = (unsigned char)(c < 1 ? 1 : (c > 255 ? 255 : c));
    }
 
-   // Build huffman tables
    stbiw__jpg_huffman_table dc_lum_ht, ac_lum_ht, dc_chrom_ht, ac_chrom_ht;
    memset(&dc_lum_ht, 0, sizeof(dc_lum_ht));
    memset(&ac_lum_ht, 0, sizeof(ac_lum_ht));
@@ -282,14 +273,14 @@ int stbi_write_jpg_to_func(stbi_write_func *func, void *context, int x, int y, i
    stbiw__jpg_build_huffman(stbiw__jpg_std_dc_chrominance_nrcodes, stbiw__jpg_std_dc_chrominance_values, &dc_chrom_ht);
    stbiw__jpg_build_huffman(stbiw__jpg_std_ac_chrominance_nrcodes, stbiw__jpg_std_ac_chrominance_values, &ac_chrom_ht);
 
-   // Write Header: SOI
+   // Header: SOI
    stbiw__jpg_write_marker(func, context, 0xD8);
 
    // APP0 (JFIF)
    unsigned char app0[] = { 0xFF, 0xE0, 0x00, 0x10, 'J', 'F', 'I', 'F', 0, 1, 1, 0, 0, 1, 0, 1, 0, 0 };
    stbiw__write_context(func, context, app0, sizeof(app0));
 
-   // DQT
+   // DQT (Written in zigzag order)
    stbiw__jpg_write_dqt(func, context, 0, q_lum);
    stbiw__jpg_write_dqt(func, context, 1, q_chrom);
 
@@ -298,10 +289,10 @@ int stbi_write_jpg_to_func(stbi_write_func *func, void *context, int x, int y, i
       0xFF, 0xC0, 0x00, 0x11, 8,
       (unsigned char)(y >> 8), (unsigned char)(y & 0xFF),
       (unsigned char)(x >> 8), (unsigned char)(x & 0xFF),
-      3, // 3 components (Y, Cb, Cr)
-      1, 0x11, 0, // Y: ID 1, 1x1 subsample, quant table 0
-      2, 0x11, 1, // Cb: ID 2, 1x1 subsample, quant table 1
-      3, 0x11, 1  // Cr: ID 3, 1x1 subsample, quant table 1
+      3,
+      1, 0x11, 0,
+      2, 0x11, 1,
+      3, 0x11, 1
    };
    stbiw__write_context(func, context, sof0, sizeof(sof0));
 
@@ -321,7 +312,6 @@ int stbi_write_jpg_to_func(stbi_write_func *func, void *context, int x, int y, i
    };
    stbiw__write_context(func, context, sos, sizeof(sos));
 
-   // Bitstream encode
    stbiw__jpg_bitstream bs = { func, context, 0, 0 };
    short prev_dc_y = 0, prev_dc_cb = 0, prev_dc_cr = 0;
 
@@ -331,7 +321,6 @@ int stbi_write_jpg_to_func(stbi_write_func *func, void *context, int x, int y, i
 
    for (int mcu_y = 0; mcu_y < y; mcu_y += 8) {
       for (int mcu_x = 0; mcu_x < x; mcu_x += 8) {
-         // Load 8x8 block
          for (int by = 0; by < 8; ++by) {
             int py = (mcu_y + by < y) ? (mcu_y + by) : (y - 1);
             for (int bx = 0; bx < 8; ++bx) {
@@ -366,16 +355,12 @@ int stbi_write_jpg_to_func(stbi_write_func *func, void *context, int x, int y, i
    }
 
    stbiw__jpg_flushBits(&bs);
-
-   // EOI
-   stbiw__jpg_write_marker(func, context, 0xD9);
+   stbiw__jpg_write_marker(func, context, 0xD9); // EOI
    return 1;
 }
 
 #endif // STB_IMAGE_WRITE_IMPLEMENTATION
-
 #ifdef __cplusplus
 }
 #endif
-
 #endif // INCLUDE_STB_IMAGE_WRITE_H

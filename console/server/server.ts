@@ -45,7 +45,7 @@ const APP_VERSION: string = (() => {
       if (pkg.version) return pkg.version;
     } catch { /* ignore */ }
   }
-  return '5.8.12'; // fallback
+  return '5.9.0'; // fallback
 })();
 
 const app = express();
@@ -164,6 +164,7 @@ const SNAPSHOT_CACHE_TTL_MS = 30_000;
 // Maps for WebSocket reverse relay
 const agentSockets = new Map<string, WebSocket>();
 const viewerSockets = new Map<string, Set<WebSocket>>();
+const lastKeyframeFrames = new Map<string, Buffer>();
 const pendingLogRequests = new Map<string, (logs: string) => void>();
 const pendingHighResRequests = new Map<string, (b64Image: string) => void>();
 
@@ -324,6 +325,15 @@ wss.on('connection', (ws, req) => {
       } catch {}
     }
 
+    // Auto-resume H.264 stream if active teacher viewers are waiting for this agent
+    const activeViewers = viewerSockets.get(mac);
+    if (activeViewers && activeViewers.size > 0) {
+      try {
+        ws.send(JSON.stringify({ action: 'START_STREAM', fps: 30, bitrate: 2500, force_idr: true }));
+        logger.info(`[WS Relay] Auto-resumed START_STREAM for reconnected student ${mac} (viewers: ${activeViewers.size})`);
+      } catch {}
+    }
+
     let frameCount = 0;
     let totalBytes = 0;
 
@@ -337,6 +347,29 @@ wss.on('connection', (ws, req) => {
       }
 
       if (isBinary) {
+        const buf = data as Buffer;
+        // Detect keyframe (IDR 5, SPS 7, PPS 8) to cache for instant playback on new viewer join
+        let isKey = false;
+        if (buf.length >= 5 && !(buf[0] === 0xff && buf[1] === 0xd8)) {
+          const isAnnexB = (buf[0] === 0 && buf[1] === 0 && (buf[2] === 1 || (buf[2] === 0 && buf[3] === 1)));
+          if (isAnnexB) {
+            for (let i = 0; i < Math.min(buf.length - 4, 128); i++) {
+              if (buf[i] === 0 && buf[i + 1] === 0 && (buf[i + 2] === 1 || (buf[i + 2] === 0 && buf[i + 3] === 1))) {
+                const nalHeaderIndex = buf[i + 2] === 1 ? i + 3 : i + 4;
+                const nalByte = buf[nalHeaderIndex];
+                const nalType = nalByte !== undefined ? (nalByte & 0x1f) : 0;
+                if (nalType === 5 || nalType === 7 || nalType === 8) {
+                  isKey = true;
+                  break;
+                }
+              }
+            }
+          }
+        }
+        if (isKey) {
+          lastKeyframeFrames.set(mac, buf);
+        }
+
         // Forward H.264 video NALU frames directly to active student recorder if recording
         const rec = activeStudentRecordings.get(mac);
         if (rec && rec.process.stdin && !rec.process.stdin.destroyed) {
@@ -426,14 +459,16 @@ wss.on('connection', (ws, req) => {
     ws.on('close', () => {
       if (agentSockets.get(mac) === ws) {
         agentSockets.delete(mac);
+        lastKeyframeFrames.delete(mac);
+        discoveryService.touchDevice(mac, { status: 'offline' });
+        const rec = activeStudentRecordings.get(mac);
+        if (rec) {
+          try { rec.process.stdin?.end(); } catch {}
+          activeStudentRecordings.delete(mac);
+          logger.info(`[Student Record] Student ${mac} disconnected, finished recording ${rec.filename}`);
+        }
+        logger.info(`[WS Relay] Student Agent disconnected: ${mac}`);
       }
-      const rec = activeStudentRecordings.get(mac);
-      if (rec) {
-        try { rec.process.stdin?.end(); } catch {}
-        activeStudentRecordings.delete(mac);
-        logger.info(`[Student Record] Student ${mac} disconnected, finished recording ${rec.filename}`);
-      }
-      logger.info(`[WS Relay] Student Agent disconnected: ${mac}`);
     });
   } else if (pathname.startsWith('/ws/stream/')) {
     const rawTarget = pathname.replace('/ws/stream/', '');
@@ -458,6 +493,14 @@ wss.on('connection', (ws, req) => {
     viewerSockets.get(mac)!.add(ws);
     logger.info(`[WS Relay] Teacher Viewer opened stream for: ${mac} (total viewers: ${viewerSockets.get(mac)!.size})`);
 
+    // Send latest cached keyframe immediately so WebCodecs initializes in 0ms
+    const cachedKey = lastKeyframeFrames.get(mac);
+    if (cachedKey) {
+      try {
+        ws.send(cachedKey, { binary: true });
+      } catch {}
+    }
+
     // Tell the authenticated student agent to start H.264 30 FPS encoder.
     agentWs.send(JSON.stringify({ action: 'START_STREAM', fps: 30, bitrate: 2500 }));
     logger.info(`[WS Relay] Sent START_STREAM command to agent: ${mac}`);
@@ -469,11 +512,18 @@ wss.on('connection', (ws, req) => {
         logger.info(`[WS Relay] Teacher Viewer closed stream for: ${mac} (remaining viewers: ${viewers.size})`);
         if (viewers.size === 0) {
           viewerSockets.delete(mac);
-          // Tell student agent to stop streaming to save GPU/bandwidth
-          const agentWs = agentSockets.get(mac);
-          if (agentWs && agentWs.readyState === WebSocket.OPEN) {
-            agentWs.send(JSON.stringify({ action: 'STOP_STREAM' }));
-            logger.info(`[WS Relay] Sent STOP_STREAM command to agent: ${mac}`);
+          const isRecording = activeStudentRecordings.has(mac);
+          const isRelaying = broadcastStreamer.isRelayingStudent(mac);
+          if (!isRecording && !isRelaying) {
+            lastKeyframeFrames.delete(mac);
+            // Tell student agent to stop streaming to save GPU/bandwidth
+            const agentWs = agentSockets.get(mac);
+            if (agentWs && agentWs.readyState === WebSocket.OPEN) {
+              agentWs.send(JSON.stringify({ action: 'STOP_STREAM' }));
+              logger.info(`[WS Relay] Sent STOP_STREAM command to agent: ${mac}`);
+            }
+          } else {
+            logger.info(`[WS Relay] Viewers closed for ${mac}, preserving stream (recording=${isRecording}, relay=${isRelaying})`);
           }
         }
       }
@@ -736,7 +786,19 @@ app.get('/api/server-info', (req, res) => {
 
 app.get('/api/layout', requireTeacherAuth, async (req, res) => {
   const layout = await loadSeatsLayout();
-  res.json({ success: true, layout, file: SEATS_FILE });
+  const hydratedSeats = layout.seats.map((s) => {
+    const normMac = s.mac ? normalizeTarget(s.mac) : '';
+    const hasWs = normMac ? agentSockets.has(normMac) : false;
+    const dev = (normMac ? discoveryService.findDevice(normMac) : undefined) || (s.ip ? discoveryService.findDevice(s.ip) : undefined);
+    const isOnline = hasWs || Boolean(dev && dev.status !== 'offline' && Date.now() - (dev.lastSeen || 0) < 6000);
+    return {
+      ...s,
+      status: isOnline ? ('online' as const) : ('offline' as const),
+      activeWindow: dev?.activeWindow || s.activeWindow,
+      studentId: dev?.studentId || (s as any).studentId,
+    };
+  });
+  res.json({ success: true, layout: { ...layout, seats: hydratedSeats }, file: SEATS_FILE });
 });
 
 app.post('/api/layout', requireTeacherAuth, async (req, res) => {
@@ -784,8 +846,11 @@ app.get('/api/agents', requireTeacherAuth, (req, res) => {
     const rollRecord = (activeRollCall && d.mac) ? activeRollCall.records.get(d.mac.toLowerCase()) : undefined;
     const studentId = rollRecord?.studentId || d.studentId;
     const checkInTime = rollRecord?.checkInTime || d.checkInTime;
+    const hasWs = d.mac ? agentSockets.has(normalizeTarget(d.mac)) : false;
+    const isOnline = hasWs || (d.status !== 'offline' && (Date.now() - (d.lastSeen || 0) < 6000));
     return {
       ...d,
+      status: isOnline ? ('online' as const) : ('offline' as const),
       studentId,
       checkInTime,
       hasCheckedIn: !!studentId,
@@ -808,8 +873,11 @@ app.get('/api/devices', requireTeacherAuth, (req, res) => {
     const rollRecord = (activeRollCall && d.mac) ? activeRollCall.records.get(d.mac.toLowerCase()) : undefined;
     const studentId = rollRecord?.studentId || d.studentId;
     const checkInTime = rollRecord?.checkInTime || d.checkInTime;
+    const hasWs = d.mac ? agentSockets.has(normalizeTarget(d.mac)) : false;
+    const isOnline = hasWs || (d.status !== 'offline' && (Date.now() - (d.lastSeen || 0) < 6000));
     return {
       ...d,
+      status: isOnline ? ('online' as const) : ('offline' as const),
       studentId,
       checkInTime,
       hasCheckedIn: !!studentId,
@@ -1570,6 +1638,7 @@ app.get('/api/record/list', requireTeacherAuth, async (req, res) => {
           sizeFormatted: `${sizeMB} MB`,
           createdAt: stat.birthtimeMs || stat.mtimeMs,
           downloadUrl: `/api/record/download/${encodeURIComponent(filename)}`,
+          previewUrl: `/api/record/preview/${encodeURIComponent(filename)}`,
         };
       })
     );
@@ -1592,6 +1661,20 @@ app.get('/api/record/download/:filename', requireTeacherAuth, (req, res) => {
     return res.status(404).json({ error: '檔案不存在' });
   }
   res.download(resolved, safeFilename);
+});
+
+app.get('/api/record/preview/:filename', requireTeacherAuth, (req, res) => {
+  const rawFilename = req.params.filename ?? '';
+  const safeFilename = path.basename(rawFilename);
+  const filePath = path.join(RECORDINGS_DIR, safeFilename);
+  const resolved = path.resolve(filePath);
+  if (rawFilename !== safeFilename || !resolved.startsWith(path.resolve(RECORDINGS_DIR) + path.sep)) {
+    return res.status(403).json({ error: '拒絕存取' });
+  }
+  if (!fs.existsSync(resolved)) {
+    return res.status(404).json({ error: '檔案不存在' });
+  }
+  res.sendFile(resolved);
 });
 
 app.delete('/api/record/:filename', requireTeacherAuth, async (req, res) => {
@@ -1705,6 +1788,21 @@ app.post('/api/record/student/start', requireTeacherAuth, async (req, res) => {
     activeStudentRecordings.set(mac, session);
     logger.info(`[Student Record] Started native H.264 recording for student ${mac} (${label}) -> ${filename}`);
 
+    // Ensure student agent starts streaming H.264 if not already streaming
+    const agentWs = agentSockets.get(mac);
+    if (agentWs && agentWs.readyState === WebSocket.OPEN) {
+      agentWs.send(JSON.stringify({ action: 'START_STREAM', fps: 30, bitrate: 2500 }));
+      logger.info(`[Student Record] Ensured START_STREAM sent to student ${mac}`);
+    }
+
+    // Immediately seed with cached keyframe if available so recording begins with valid IDR
+    const cachedKey = lastKeyframeFrames.get(mac);
+    if (cachedKey && child.stdin && !child.stdin.destroyed) {
+      try {
+        child.stdin.write(cachedKey);
+      } catch {}
+    }
+
     res.json({
       ok: true,
       isRecording: true,
@@ -1748,6 +1846,17 @@ app.post('/api/record/student/stop', requireTeacherAuth, async (req, res) => {
       resolve();
     });
   });
+
+  // If no teacher viewer is actively watching and not showcase relaying, tell student agent to stop streaming
+  const viewers = viewerSockets.get(mac);
+  const isRelaying = broadcastStreamer.isRelayingStudent(mac);
+  if ((!viewers || viewers.size === 0) && !isRelaying) {
+    const agentWs = agentSockets.get(mac);
+    if (agentWs && agentWs.readyState === WebSocket.OPEN) {
+      agentWs.send(JSON.stringify({ action: 'STOP_STREAM' }));
+      logger.info(`[Student Record] Stopped stream on student agent ${mac} (no active viewers)`);
+    }
+  }
 
   let sizeBytes = 0;
   try {
@@ -2148,9 +2257,9 @@ app.post(
     }
     const rawStuId = (req.headers['x-student-id'] as string) || '';
     const studentId = rawStuId.trim() || undefined;
-    const known = discoveryService.touchDevice(mac, { ip, activeWindow: winTitle, studentId });
+    const known = discoveryService.touchDevice(mac, { ip, activeWindow: winTitle, studentId, status: 'online' });
     if (!known) {
-      discoveryService.upsertDevice({ mac, ip, activeWindow: winTitle, studentId });
+      discoveryService.upsertDevice({ mac, ip, activeWindow: winTitle, studentId, status: 'online' });
     }
 
     if (buffer && buffer.length > 0) {
@@ -2248,7 +2357,8 @@ app.post('/api/snapshots/batch', requireTeacherAuth, async (req, res) => {
     const targetMac = dev?.mac ? normalizeTarget(dev.mac) : normalizedId;
     const targetIp = dev?.ip;
     const activeWindow = dev?.activeWindow;
-    const isOnline = dev ? dev.status !== 'offline' : true;
+    const hasActiveWs = Boolean(targetMac && agentSockets.has(targetMac));
+    const isOnline = hasActiveWs || Boolean(dev && dev.status !== 'offline' && (Date.now() - (dev.lastSeen || 0) < 6000));
 
     const cachedEntry =
       getSnapshotCached(targetMac) ||
@@ -2292,43 +2402,107 @@ app.post('/api/snapshots/batch', requireTeacherAuth, async (req, res) => {
 // Route: Fetch/Proxy failure logs from student agent
 app.get(['/api/agent/:id/logs', '/api/agent/logs'], requireTeacherAuth, async (req, res) => {
   const rawId = req.params.id || (req.query.id as string) || (req.query.mac as string) || (req.query.ip as string) || '';
+  const queryMac = (req.query.mac as string) || '';
+  const queryIp = (req.query.ip as string) || '';
+  const queryHostname = (req.query.hostname as string) || '';
   const normalizedId = normalizeTarget(rawId);
 
-  const dev = discoveryService.findDevice(rawId) || discoveryService.findDevice(normalizedId);
+  const dev =
+    discoveryService.findDevice(rawId) ||
+    discoveryService.findDevice(normalizedId) ||
+    (queryMac ? discoveryService.findDevice(queryMac) : undefined) ||
+    (queryMac ? discoveryService.findDevice(normalizeTarget(queryMac)) : undefined) ||
+    (queryIp ? discoveryService.findDevice(queryIp) : undefined) ||
+    (queryHostname ? discoveryService.findDevice(queryHostname) : undefined);
 
-  if (!dev || !dev.ip) {
+  // Collect all possible identifier candidates
+  const candidateMacs = [
+    dev?.mac ? normalizeTarget(dev.mac) : '',
+    queryMac ? normalizeTarget(queryMac) : '',
+    normalizedId,
+    rawId,
+  ].filter(Boolean);
+
+  let ws: WebSocket | undefined;
+  let targetKey = '';
+
+  for (const key of candidateMacs) {
+    const s = agentSockets.get(key);
+    if (s && s.readyState === WebSocket.OPEN) {
+      ws = s;
+      targetKey = key;
+      break;
+    }
+  }
+
+  // Fallback: lookup ws by matching IP or Hostname in discoveryService
+  const targetIp = dev?.ip || queryIp;
+  if (!ws && targetIp) {
+    for (const [sMac, sWs] of agentSockets.entries()) {
+      if (sWs.readyState !== WebSocket.OPEN) continue;
+      const sDev = discoveryService.findDevice(sMac);
+      if (sDev && (sDev.ip === targetIp || (queryHostname && sDev.hostname === queryHostname))) {
+        ws = sWs;
+        targetKey = sMac;
+        break;
+      }
+    }
+  }
+
+  // 1. Try fetching logs via active reverse WebSocket channel (instant & firewall-piercing)
+  if (ws && ws.readyState === WebSocket.OPEN) {
+    try {
+      let gotResponse = false;
+      const logs = await new Promise<string>((resolve) => {
+        const timer = setTimeout(() => {
+          pendingLogRequests.delete(targetKey);
+          resolve('');
+        }, 3000);
+
+        pendingLogRequests.set(targetKey, (data: string) => {
+          gotResponse = true;
+          clearTimeout(timer);
+          resolve(data);
+        });
+
+        ws!.send(JSON.stringify({ action: 'GET_LOGS' }));
+      });
+
+      if (gotResponse) {
+        res.setHeader('Content-Type', 'text/plain; charset=utf-8');
+        return res.send(logs || '(學生端代理程式日誌目前為空)');
+      }
+    } catch (err: any) {
+      logger.warn(`[WS Relay] Failed to query logs over WS for ${targetKey}: ${err?.message || err}`);
+    }
+  }
+
+  // 2. HTTP Fallback: Direct GET /api/logs if student agent has accessible HTTP server port
+  if (targetIp) {
+    const port = (dev as any)?.port || 18081;
+    try {
+      const controller = new AbortController();
+      const httpTimer = setTimeout(() => controller.abort(), 2000);
+      const httpResp = await fetch(`http://${targetIp}:${port}/api/logs`, { signal: controller.signal });
+      clearTimeout(httpTimer);
+      if (httpResp.ok) {
+        const text = await httpResp.text();
+        res.setHeader('Content-Type', 'text/plain; charset=utf-8');
+        return res.send(text || '(學生端代理程式日誌目前為空)');
+      }
+    } catch {}
+  }
+
+  if (!dev && !targetKey && !targetIp) {
     return res.status(404).json({
       error: '找不到指定的學生端裝置',
       message: `無法找到與 ID '${rawId}' 對應的學生機。`,
     });
   }
 
-  // 1. Try fetching logs via active WebSocket reverse connection first (bypasses all firewall/port issues)
-  const normMac = normalizeTarget(dev.mac);
-  const ws = agentSockets.get(normMac);
-  if (ws && ws.readyState === WebSocket.OPEN) {
-    try {
-      const logs = await new Promise<string>((resolve) => {
-        const timer = setTimeout(() => {
-          pendingLogRequests.delete(normMac);
-          resolve('');
-        }, 2000);
-        pendingLogRequests.set(normMac, (data: string) => {
-          clearTimeout(timer);
-          resolve(data);
-        });
-        ws.send(JSON.stringify({ action: 'GET_LOGS' }));
-      });
-      if (logs) {
-        res.setHeader('Content-Type', 'text/plain; charset=utf-8');
-        return res.send(logs);
-      }
-    } catch {}
-  }
-
   return res.status(502).json({
     error: '無法連線至學生端抓取日誌',
-    message: `目標學生機 (${dev.hostname} - ${dev.ip}) 的反向 WebSocket 未連線。`,
+    message: `目標學生機 (${dev?.hostname || rawId} - ${targetIp || '未知 IP'}) 的反向 WebSocket 未連線。`,
   });
 });
 
@@ -2413,8 +2587,8 @@ Write-Host "[GridSight] 🚀 正在啟動 $mockCount 路模擬學生端 (對象�
 Write-Host "[GridSight] 提示：按下 Ctrl + C 即可隨時停止模擬叢集。" -ForegroundColor DarkGray
 Write-Host ""
 
-# Run Python mock agents directly in the current terminal window
-python $destPath --count $mockCount --teacher-ip $teacherIp
+# Run Python mock agents directly in the current terminal window (auto-discovers via multicast)
+python $destPath --count $mockCount
 `;
   res.setHeader('Content-Type', 'text/plain; charset=utf-8');
   res.send(script);

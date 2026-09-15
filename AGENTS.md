@@ -31,7 +31,7 @@
 ### 3.4 Ubuntu 原生建置與測試 (Ubuntu Native Build & Test) ⭐【V5.8 唯一正式測試路徑】
 > ⚠️ **本節為 GridSight 全域唯一受支援的「編譯＋單元測試」路徑**。凡涉及 beacon 原生編譯或 beacon 單元測試，**一律**循本節（含 console 的 Ubuntu 產線）。
 > 凡涉及與教師端之跨模組整合、網路通訊、多播廣播、快照推送與斷線自癒測試，**一律嚴格遵循 §12.4 雙容器獨立 Docker 測試產線**（[`docker-compose.test-cluster.yml`](docker-compose.test-cluster.yml)）。
-> 已實證可跑：`docker run` 於容器內以 g++ 原生編譯出 Linux ELF `gs-agent`（5.8.12，347 KB），並通過 beacon 全部 host-side 單元測試（`test-capture/test-utils/test-input-rtp/test-viewport` 全數 PASS）。
+> 已實證可跑：`docker run` 於容器內以 g++ 原生編譯出 Linux ELF `gs-agent`（5.9.0，347 KB），並通過 beacon 全部 host-side 單元測試（`test-capture/test-utils/test-input-rtp/test-viewport` 全數 PASS）。
 
 - **Dockerfile**：`Dockerfile.ubuntu-agent`（Ubuntu 24.04 + build-essential；**不**安裝 GDI+/DXGI/X11 seam，因 beacon capture Linux 分支已是 stub seam → image 極小、headless 可跑全部 host unit tests）
 - **建置 image**：

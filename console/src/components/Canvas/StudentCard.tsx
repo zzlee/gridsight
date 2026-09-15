@@ -136,12 +136,24 @@ const StudentCardComponent: React.FC<StudentCardProps> = ({
       {/* Realtime Preview Thumbnail (Takes maximum available space) */}
       <div className="relative flex-1 bg-slate-950 flex items-center justify-center overflow-hidden pointer-events-none">
         {device.thumbnailUrl ? (
-          <img
-            src={device.thumbnailUrl}
-            alt={device.studentId || device.hostname}
-            className="w-full h-full object-cover select-none pointer-events-none"
-            loading="eager"
-          />
+          <>
+            <img
+              src={device.thumbnailUrl}
+              alt={device.studentId || device.hostname}
+              className={`w-full h-full object-cover select-none pointer-events-none transition-all duration-300 ${
+                device.status === 'offline' ? 'grayscale opacity-30 contrast-75' : ''
+              }`}
+              loading="eager"
+            />
+            {device.status === 'offline' && (
+              <div className="absolute inset-0 flex flex-col items-center justify-center bg-slate-950/70 backdrop-blur-[1px] text-rose-400 space-y-1">
+                <Monitor className="w-6 h-6 opacity-70 animate-pulse" />
+                <span className="text-[10px] font-mono font-bold bg-rose-950/90 text-rose-300 px-2 py-0.5 rounded border border-rose-500/40 shadow-sm">
+                  ⚠️ 斷線中 (OFFLINE)
+                </span>
+              </div>
+            )}
+          </>
         ) : (
           <div className="flex flex-col items-center justify-center text-slate-600 space-y-1">
             <Monitor className="w-7 h-7 opacity-40" />

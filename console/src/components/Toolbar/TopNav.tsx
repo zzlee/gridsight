@@ -28,6 +28,7 @@ import {
   Upload,
   MoreHorizontal,
   Timer,
+  Film,
 } from 'lucide-react';
 
 type BroadcastQuality = 'high' | 'medium' | 'low';
@@ -55,6 +56,7 @@ interface TopNavProps {
   onOpenBroadcastTest?: () => void;
   onOpenBroadcastBenchmark?: () => void;
   onOpenTeacherRecord?: () => void;
+  onOpenRecordingsList?: () => void;
   onOpenShutdown?: () => void;
   onOpenLockScreen?: () => void;
   onOpenAssignment?: () => void;
@@ -85,6 +87,7 @@ export const TopNav: React.FC<TopNavProps> = ({
   onOpenBroadcastTest,
   onOpenBroadcastBenchmark,
   onOpenTeacherRecord,
+  onOpenRecordingsList,
   onOpenShutdown,
   onOpenLockScreen,
   onOpenAssignment,
@@ -601,6 +604,18 @@ export const TopNav: React.FC<TopNavProps> = ({
                             錄影中
                           </span>
                         )}
+                      </button>
+                    )}
+
+                    {/* Historical Recordings List */}
+                    {onOpenRecordingsList && (
+                      <button
+                        onClick={() => { setMoreMenuOpen(false); onOpenRecordingsList(); }}
+                        className="w-full flex items-center space-x-2.5 px-3.5 py-2 text-left text-xs font-medium text-slate-300 hover:bg-slate-800/80 hover:text-purple-300 transition-colors"
+                        title="歷史錄影庫：檢視、即時預覽播放與下載全體廣播、教師錄影與學生串流影片"
+                      >
+                        <Film className="w-3.5 h-3.5 text-purple-400 shrink-0" />
+                        <span>歷史錄影清單</span>
                       </button>
                     )}
 

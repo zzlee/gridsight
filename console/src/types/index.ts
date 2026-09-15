@@ -16,6 +16,7 @@ export interface DiscoveredAgent {
   thumbnailBase64?: string;
   lastSeen?: number;
   isLocked?: boolean;
+  status?: ConnectionStatus;
 }
 
 export interface DeviceSystemInfo {

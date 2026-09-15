@@ -21,6 +21,7 @@ import { BroadcastTestModal } from './components/Toolbar/BroadcastTestModal';
 import { BroadcastBenchmarkModal } from './components/Toolbar/BroadcastBenchmarkModal';
 import { ShutdownModal } from './components/Toolbar/ShutdownModal';
 import { TeacherRecordModal } from './components/Toolbar/TeacherRecordModal';
+import { RecordingsListModal } from './components/Toolbar/RecordingsListModal';
 import { LockScreenModal } from './components/Toolbar/LockScreenModal';
 import { AssignmentModal } from './components/Toolbar/AssignmentModal';
 import { RollCallModal } from './components/Toolbar/RollCallModal';
@@ -57,6 +58,7 @@ export const App: React.FC = () => {
   const [isBroadcastBenchmarkOpen, setIsBroadcastBenchmarkOpen] = useState(false);
   const [isShutdownOpen, setIsShutdownOpen] = useState(false);
   const [isTeacherRecordOpen, setIsTeacherRecordOpen] = useState(false);
+  const [isRecordingsListOpen, setIsRecordingsListOpen] = useState(false);
   const [isLockScreenOpen, setIsLockScreenOpen] = useState(false);
   const [isAssignmentOpen, setIsAssignmentOpen] = useState(false);
   const [activeAssignment, setActiveAssignment] = useState<ActiveAssignment | null>(null);
@@ -725,6 +727,7 @@ export const App: React.FC = () => {
         onOpenBroadcastTest={() => setIsBroadcastTestOpen(true)}
         onOpenBroadcastBenchmark={() => setIsBroadcastBenchmarkOpen(true)}
         onOpenTeacherRecord={() => setIsTeacherRecordOpen(true)}
+        onOpenRecordingsList={() => setIsRecordingsListOpen(true)}
         onOpenShutdown={() => setIsShutdownOpen(true)}
         onOpenLockScreen={() => setIsLockScreenOpen(true)}
         onOpenAssignment={() => setIsAssignmentOpen(true)}
@@ -836,6 +839,7 @@ export const App: React.FC = () => {
       <FocusModal
         device={focusDevice}
         onClose={() => setFocusDevice(null)}
+        onOpenRecordingsList={() => setIsRecordingsListOpen(true)}
       />
 
       {/* Hardware Specs & Telemetry Modal */}
@@ -901,6 +905,14 @@ export const App: React.FC = () => {
       <TeacherRecordModal
         isOpen={isTeacherRecordOpen}
         onClose={() => setIsTeacherRecordOpen(false)}
+        onOpenRecordingsList={() => setIsRecordingsListOpen(true)}
+      />
+
+      {/* Historical Recordings List Modal */}
+      <RecordingsListModal
+        isOpen={isRecordingsListOpen}
+        onClose={() => setIsRecordingsListOpen(false)}
+        onOpenTeacherRecord={() => setIsTeacherRecordOpen(true)}
       />
 
       {/* Share File Modal */}

@@ -139,7 +139,11 @@ void BeaconClient::DiscoveryListenLoop() {
                 }
                 if (http_server_) http_server_->SetTeacherHost(teacher_ip, teacher_port);
                 if (ws_streamer_) ws_streamer_->SetTeacherHost(teacher_ip, teacher_port);
-                Utils::Log("INFO", "✅ [Discovery] Teacher online from " + teacher_ip + ":" + std::to_string(teacher_port));
+                if (last_teacher_ip_ != teacher_ip || last_teacher_port_ != teacher_port) {
+                    last_teacher_ip_ = teacher_ip;
+                    last_teacher_port_ = teacher_port;
+                    Utils::Log("INFO", "✅ [Discovery] Teacher online from " + teacher_ip + ":" + std::to_string(teacher_port));
+                }
             }
             Utils::UpdateHeartbeat("beacon");
         }

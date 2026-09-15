@@ -21,6 +21,7 @@ interface TeacherRecordModalProps {
   isOpen: boolean;
   onClose: () => void;
   isBroadcasting?: boolean;
+  onOpenRecordingsList?: () => void;
 }
 
 interface RecordingFile {
@@ -55,6 +56,7 @@ export const TeacherRecordModal: React.FC<TeacherRecordModalProps> = ({
   isOpen,
   onClose,
   isBroadcasting = false,
+  onOpenRecordingsList,
 }) => {
   const [activeTab, setActiveTab] = useState<'RECORD' | 'FILES'>('RECORD');
   const [status, setStatus] = useState<ServerRecordStatus>({
@@ -623,7 +625,21 @@ export const TeacherRecordModal: React.FC<TeacherRecordModalProps> = ({
             </div>
 
             {/* Modal Footer */}
-            <div className="px-5 py-3.5 bg-slate-950 border-t border-slate-800 flex justify-end shrink-0">
+            <div className="px-5 py-3.5 bg-slate-950 border-t border-slate-800 flex items-center justify-between shrink-0">
+              <div>
+                {onOpenRecordingsList && (
+                  <button
+                    onClick={() => {
+                      onClose();
+                      onOpenRecordingsList();
+                    }}
+                    className="text-xs text-purple-400 hover:text-purple-300 flex items-center space-x-1.5 transition-colors font-medium"
+                  >
+                    <Film className="w-3.5 h-3.5" />
+                    <span>開啟獨立歷史錄影庫 ➔</span>
+                  </button>
+                )}
+              </div>
               <button
                 onClick={onClose}
                 className="px-4 py-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-300 text-xs font-semibold transition-colors"

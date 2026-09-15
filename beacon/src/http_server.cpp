@@ -57,6 +57,7 @@ void HttpServer::Stop() {
 
 void HttpServer::SetTeacherHost(const std::string& host, int port) {
     std::lock_guard<std::mutex> lock(teacher_mutex_);
+    if (teacher_host_ == host && teacher_port_ == port) return;
     teacher_host_ = host;
     teacher_port_ = port;
     Utils::Log("INFO", "HttpServer updated teacher destination for outbound push: " + host + ":" + std::to_string(port));

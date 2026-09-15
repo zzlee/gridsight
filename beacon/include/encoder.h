@@ -54,6 +54,13 @@ private:
     void* pEncoder_ = nullptr;
     long long rtStart_ = 0;
     std::vector<uint8_t> nv12_buffer_;
+
+#ifndef _WIN32
+    int ffmpeg_stdin_fd_ = -1;
+    int ffmpeg_stdout_fd_ = -1;
+    int ffmpeg_pid_ = -1;
+    int frame_count_ = 0;
+#endif
 };
 
 } // namespace GridSight

@@ -74,7 +74,7 @@ export function useAgentDiscovery({
                 hostname: a.hostname,
                 ip: a.ip,
                 mac: a.mac,
-                status: 'online',
+                status: (a.status as any) || 'online',
                 token: a.token,
                 studentId: a.studentId,
                 checkInTime: a.checkInTime,
@@ -118,7 +118,7 @@ export function useAgentDiscovery({
                     activeWindow,
                     isOffTask: isOff,
                     specs: dev.specs || seat.specs,
-                    status: 'online' as const,
+                    status: (dev.status as any) || 'online',
                   };
                 } else {
                   // Device is no longer broadcasting beacons -> mark offline
@@ -169,7 +169,8 @@ export function useAgentDiscovery({
           setLayout((prev) => {
             let anyChanged = false;
             const updatedSeats = prev.seats.map((s) => {
-              const u = updateMap.get(s.id);
+              const normMac = s.mac ? s.mac.replace(/[:-]/g, '').toUpperCase() : '';
+              const u = updateMap.get(s.id) || (s.mac ? updateMap.get(s.mac) : undefined) || (normMac ? updateMap.get(normMac) : undefined);
               if (!u) return s;
 
               const activeWindow = u.activeWindow || s.activeWindow || '桌面 (Desktop)';

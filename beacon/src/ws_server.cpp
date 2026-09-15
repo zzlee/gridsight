@@ -56,9 +56,18 @@ WebSocketStreamer::~WebSocketStreamer() {
 
 void WebSocketStreamer::SetTeacherHost(const std::string& host, int port) {
     std::lock_guard<std::mutex> lock(teacher_mutex_);
+    if (teacher_host_ == host && teacher_port_ == port) return;
+    const bool changed = (!teacher_host_.empty() && (teacher_host_ != host || teacher_port_ != port));
     teacher_host_ = host;
     teacher_port_ = port;
     Utils::Log("INFO", "WebSocketStreamer teacher destination set to: " + host + ":" + std::to_string(port));
+    if (changed) {
+        std::lock_guard<std::mutex> sock_lock(client_mutex_);
+        if (outbound_sock_ != 0 && (SOCKET)outbound_sock_ != INVALID_SOCKET) {
+            closesocket((SOCKET)outbound_sock_);
+            outbound_sock_ = 0;
+        }
+    }
 }
 
 bool WebSocketStreamer::Start() {
@@ -445,6 +454,9 @@ void WebSocketStreamer::HandleCommandMessage(uintptr_t sock_fd, const std::strin
             content.resize(read_size);
             log_file.read(content.data(), static_cast<std::streamsize>(read_size));
         }
+        if (content.empty()) {
+            content = "[INFO] GridSight Student Agent (gs-agent) is running normally. No error entries recorded in log file.\n";
+        }
         const std::string response = "{\"action\":\"LOGS_REPORT\",\"logs\":" + Utils::JsonEscape(content) + "}";
         SendWsClientText(sock_fd, response);
     }
@@ -501,12 +513,18 @@ void WebSocketStreamer::SendWsClientBinary(uintptr_t sock_fd, const uint8_t* dat
 
 void WebSocketStreamer::StreamLoop() {
     bool force_idr = true;
+    bool was_streaming = false;
     int frame_count = 0;
     int current_enc_w = 0;
     int current_enc_h = 0;
 
     while (running_) {
         bool should_stream = streaming_active_;
+        if (should_stream && !was_streaming) {
+            force_idr = true;
+            frame_count = 0;
+        }
+        was_streaming = should_stream;
 
         if (should_stream) {
             FrameData frame;
@@ -526,9 +544,6 @@ void WebSocketStreamer::StreamLoop() {
                     is_h264 = true;
                     force_idr = false;
                     Utils::UpdateHeartbeat("encoder");
-                } else {
-                    // Fallback to high-speed GDI+ JPEG streaming
-                    ImageEncoder::EncodeToJPEG(frame.bgra_buffer.data(), frame.width, frame.height, 1280, 720, 75, payload);
                 }
 
                 if (!payload.empty()) {

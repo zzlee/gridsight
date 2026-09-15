@@ -139,6 +139,7 @@ export class MulticastDiscoveryService {
       studentId: patch.studentId !== undefined ? patch.studentId : existing?.studentId,
       checkInTime: patch.checkInTime !== undefined ? patch.checkInTime : existing?.checkInTime,
       activeWindow: patch.activeWindow || existing?.activeWindow || '桌面 (Desktop)',
+      status: patch.status || 'online',
       lastSeen: now,
     };
 

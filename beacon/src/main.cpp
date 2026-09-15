@@ -286,9 +286,11 @@ int main(int argc, char* argv[]) {
         GridSight::Utils::Log("WARN", "InputRTPReceiver failed to start on " + input_rtp_ip + ":" + std::to_string(input_rtp_port));
     }
 
+    GridSight::Utils::UpdateHeartbeat("worker");
     GridSight::Utils::Log("INFO", "GridSight Beacon worker startup sequence completed.");
 
     while (g_keep_running) {
+        GridSight::Utils::UpdateHeartbeat("worker");
         GridSight::Utils::SleepMs(1000);
     }
 

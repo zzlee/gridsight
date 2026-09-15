@@ -12,11 +12,12 @@ import json
 import os
 import random
 import socket
+import struct
 import sys
 import time
 import urllib.parse
 from pathlib import Path
-from typing import List
+from typing import List, Optional, Tuple
 
 # Read version from root package.json (single source of truth)
 def _read_version() -> str:
@@ -25,10 +26,10 @@ def _read_version() -> str:
         Path.cwd() / 'package.json',
     ]:
         try:
-            return json.loads(candidate.read_text()).get('version', '5.8.12')
+            return json.loads(candidate.read_text()).get('version', '5.9.0')
         except Exception:
             pass
-    return '5.8.12'
+    return '5.9.0'
 
 APP_VERSION = _read_version()
 
@@ -111,6 +112,23 @@ class MockAgent:
         }
         # Pre-cache JPEG in RAM for instant 0% CPU delivery
         self.jpeg_cache = create_sample_jpeg(self.index, self.hostname)
+        self.is_online = True
+        self.is_streaming = False
+        self.offline_since = 0.0
+        self.ws_writer: Optional[asyncio.StreamWriter] = None
+
+    def set_online(self, online: bool):
+        self.is_online = online
+        if not online:
+            self.offline_since = time.monotonic()
+            if self.ws_writer:
+                try:
+                    self.ws_writer.close()
+                except Exception:
+                    pass
+                self.ws_writer = None
+        else:
+            self.offline_since = 0.0
 
     def get_register_payload(self) -> dict:
         # Simulate slight dynamic fluctuation in telemetry metrics
@@ -135,6 +153,22 @@ class MockAgent:
                 "disk": {"drive": "C:", "total_gb": 512, "free_gb": 256, "usage_percent": self.metrics["disk"]}
             }
         }
+
+    def get_log_content(self) -> str:
+        now_str = time.strftime('%Y-%m-%d %H:%M:%S')
+        return (
+            f"[{now_str}] [INFO] ========================================================\n"
+            f"[{now_str}] [INFO] GridSight Student Agent gs-agent v{APP_VERSION}\n"
+            f"[{now_str}] [INFO] Device Identity: Host={self.hostname}, MAC={self.mac}, IP={self.ip}\n"
+            f"[{now_str}] [INFO] OS: Windows 11 Pro 64-bit | CPU: {self.metrics['cpu']}% | RAM: {self.metrics['ram']}%\n"
+            f"[{now_str}] [INFO] ScreenCapturer active. Desktop Resolution: 1920x1080 @ 30 FPS.\n"
+            f"[{now_str}] [INFO] H.264 Hardware Encoder: Initialized (Bitrate: 2500 kbps, 0% CPU loss).\n"
+            f"[{now_str}] [INFO] Active Foreground Window: {self.active_window}\n"
+            f"[{now_str}] [INFO] Reverse WebSocket Channel: Outbound connected to Teacher Console.\n"
+            f"[{now_str}] [INFO] Telemetry Diagnostic: 0 dropped frames, network jitter: 0.9ms.\n"
+            f"[{now_str}] [INFO] Self-Check Status: All internal services operating normally.\n"
+            f"[{now_str}] [INFO] ========================================================\n"
+        )
 
     async def handle_client(self, reader: asyncio.StreamReader, writer: asyncio.StreamWriter):
         try:
@@ -195,15 +229,7 @@ class MockAgent:
                 await writer.drain()
 
             elif path.startswith('/api/logs') or path.startswith('/logs'):
-                now_str = time.strftime('%Y-%m-%d %H:%M:%S')
-                log_content = (
-                    f"[{now_str}] [INFO] Mock Agent gs-agent (Host: {self.hostname}, MAC: {self.mac}) initialized successfully.\n"
-                    f"[{now_str}] [INFO] ScreenCapturer active. Capturing desktop resolution (1920x1080).\n"
-                    f"[{now_str}] [INFO] HttpServer listening on port {self.port}.\n"
-                    f"[{now_str}] [INFO] H.264 Hardware Encoder initialized with 30 FPS / 2500 kbps bitrate.\n"
-                    f"[{now_str}] [INFO] Active foreground window: {self.active_window}\n"
-                    f"[{now_str}] [WARN] Stream diagnostic check: Mock stream simulation active.\n"
-                ).encode('utf-8')
+                log_content = self.get_log_content().encode('utf-8')
                 resp_headers = (
                     "HTTP/1.1 200 OK\r\n"
                     "Content-Type: text/plain; charset=utf-8\r\n"
@@ -268,16 +294,17 @@ def get_default_local_ip() -> str:
     return ip
 
 
-def _ws_mask_frame(payload: bytes) -> bytes:
-    """RFC 6455 client frame (text, masked)."""
+def _ws_mask_frame(payload: bytes, opcode: int = 1) -> bytes:
+    """RFC 6455 client frame (text or binary, masked)."""
     mask = os.urandom(4)
     n = len(payload)
+    b0 = 0x80 | (opcode & 0x0F)
     if n < 126:
-        header = bytes([0x81, 0x80 | n])
+        header = bytes([b0, 0x80 | n])
     elif n < 65536:
-        header = bytes([0x81, 0x80 | 126]) + n.to_bytes(2, 'big')
+        header = bytes([b0, 0x80 | 126]) + n.to_bytes(2, 'big')
     else:
-        header = bytes([0x81, 0x80 | 127]) + n.to_bytes(8, 'big')
+        header = bytes([b0, 0x80 | 127]) + n.to_bytes(8, 'big')
     masked = bytes(b ^ mask[i % 4] for i, b in enumerate(payload))
     return header + mask + masked
 
@@ -286,6 +313,10 @@ async def ws_agent_connection(teacher_ip: str, teacher_port: int, agent: MockAge
     """Connects the mock agent to the teacher console over a single outbound
     reverse WebSocket (/ws/agent) and sends AGENT_INFO_REGISTER + periodic
     re-registration. Mirrors the real gs-agent flow in the new architecture."""
+    if not agent.is_online:
+        await asyncio.sleep(2)
+        return
+
     key = base64.b64encode(os.urandom(16)).decode()
     query = "?mac=" + urllib.parse.quote(agent.mac) + "&ip=" + urllib.parse.quote(agent.ip)
     try:
@@ -294,6 +325,7 @@ async def ws_agent_connection(teacher_ip: str, teacher_port: int, agent: MockAge
         await asyncio.sleep(3)
         return
 
+    agent.ws_writer = writer
     try:
         req = (
             f"GET /ws/agent{query} HTTP/1.1\r\n"
@@ -320,7 +352,7 @@ async def ws_agent_connection(teacher_ip: str, teacher_port: int, agent: MockAge
 
         print(f"[WS] {agent.hostname} ({agent.mac}) registered -> ws://{teacher_ip}:{teacher_port}/ws/agent")
         last_register = 0.0
-        while True:
+        while agent.is_online:
             now = time.monotonic()
             if now - last_register >= 10:
                 payload = json.dumps(agent.get_register_payload()).encode('utf-8')
@@ -352,12 +384,61 @@ async def ws_agent_connection(teacher_ip: str, teacher_port: int, agent: MockAge
             elif opcode == 10:  # pong
                 if length:
                     await reader.readexactly(length)
+            elif opcode == 1:  # Text frame (command from console)
+                frame_payload = await reader.readexactly(length) if length else b""
+                try:
+                    msg = json.loads(frame_payload.decode('utf-8'))
+                    action = msg.get('action')
+                    if action == 'START_ROLL_CALL':
+                        rc_id = msg.get('rollCallId') or ''
+                        async def delayed_rollcall(a=agent, rid=rc_id, w=writer):
+                            await asyncio.sleep(random.uniform(0.4, 2.0))
+                            resp_obj = {
+                                "action": "ROLL_CALL_RESPONSE",
+                                "rollCallId": rid,
+                                "studentId": f"S{11000 + a.index:05d}"
+                            }
+                            resp_bytes = json.dumps(resp_obj).encode('utf-8')
+                            try:
+                                w.write(_ws_mask_frame(resp_bytes))
+                                await w.drain()
+                                print(f"[RollCall] 📝 {a.hostname} checked in as {resp_obj['studentId']}")
+                            except Exception:
+                                pass
+                        asyncio.create_task(delayed_rollcall())
+                    elif action == 'GET_LOGS':
+                        resp_obj = {
+                            "action": "LOGS_REPORT",
+                            "logs": agent.get_log_content()
+                        }
+                        resp_bytes = json.dumps(resp_obj).encode('utf-8')
+                        writer.write(_ws_mask_frame(resp_bytes))
+                        await writer.drain()
+                        print(f"[Log] 📜 {agent.hostname} ({agent.mac}) successfully returned diagnostic logs to teacher console")
+                    elif action == 'START_STREAM':
+                        agent.is_streaming = True
+                        async def stream_worker(a=agent, w=writer):
+                            print(f"[Stream] 🎥 {a.hostname} ({a.mac}) started live focus streaming")
+                            while a.is_streaming and a.is_online and a.ws_writer == w:
+                                try:
+                                    w.write(_ws_mask_frame(a.jpeg_cache, opcode=2))
+                                    await w.drain()
+                                except Exception:
+                                    break
+                                await asyncio.sleep(0.033)  # ~30 FPS
+                            print(f"[Stream] ⏹️ {a.hostname} ({a.mac}) stopped live focus streaming")
+                        asyncio.create_task(stream_worker())
+                    elif action == 'STOP_STREAM':
+                        agent.is_streaming = False
+                except Exception:
+                    pass
             else:
                 if length:
-                    await reader.readexactly(length)  # ignore bulk (e.g. video) messages
+                    await reader.readexactly(length)  # ignore other bulk messages
     except Exception:
         pass
     finally:
+        agent.ws_writer = None
         try:
             writer.close()
             await writer.wait_closed()
@@ -365,23 +446,28 @@ async def ws_agent_connection(teacher_ip: str, teacher_port: int, agent: MockAge
             pass
 
 
+async def _agent_ws_runner(teacher_ip: str, teacher_port: int, agent: MockAgent, interval: float = 1.0):
+    while True:
+        if agent.is_online:
+            try:
+                await ws_agent_connection(teacher_ip, teacher_port, agent)
+            except Exception:
+                pass
+        await asyncio.sleep(interval)
+
+
 async def ws_register_loop(agents: List[MockAgent], teacher_ip: str, teacher_port: int = 3000, interval: float = 1.0):
     """Connects every simulated agent to the teacher console via reverse WS
-    and registers its identity (replaces the old BEACON broadcast)."""
-    if not teacher_ip:
-        print("[WS] No --teacher-ip provided; skipping WebSocket registration (HTTP snapshot pushes still feed the roster).")
-        return
-
+    and registers its identity."""
     print(f"[WS] Reverse WebSocket registration loop -> ws://{teacher_ip}:{teacher_port}/ws/agent ({len(agents)} agents)")
-
-    while True:
-        tasks = [ws_agent_connection(teacher_ip, teacher_port, agent) for agent in agents]
-        await asyncio.gather(*tasks, return_exceptions=True)
-        await asyncio.sleep(interval)
+    workers = [asyncio.create_task(_agent_ws_runner(teacher_ip, teacher_port, agent, interval)) for agent in agents]
+    await asyncio.gather(*workers)
 
 
 async def push_single_snapshot(teacher_ip: str, teacher_port: int, agent: MockAgent):
     """Sends a single HTTP POST snapshot asynchronously via raw TCP socket."""
+    if not agent.is_online:
+        return
     try:
         reader, writer = await asyncio.open_connection(teacher_ip, teacher_port)
         req_headers = (
@@ -404,10 +490,7 @@ async def push_single_snapshot(teacher_ip: str, teacher_port: int, agent: MockAg
 
 
 async def snapshot_push_loop(agents: List[MockAgent], teacher_ip: str, teacher_port: int = 3000, interval: float = 1.0):
-    """Asynchronously pushes snapshots for all 70 agents concurrently to the teacher console."""
-    if not teacher_ip:
-        return
-
+    """Asynchronously pushes snapshots for all agents concurrently to the teacher console."""
     print(f"[Snapshot Push] Async non-blocking push loop active -> http://{teacher_ip}:{teacher_port}/api/agent/snapshot")
 
     while True:
@@ -421,16 +504,113 @@ async def snapshot_push_loop(agents: List[MockAgent], teacher_ip: str, teacher_p
         await asyncio.sleep(interval)
 
 
+def listen_discovery_sync(mcast_ip: str, mcast_port: int, local_ip: str, timeout: float = 3.0) -> Optional[Tuple[str, int]]:
+    """Listens synchronously for a single DISCOVERY packet from the teacher console."""
+    sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM, socket.IPPROTO_UDP)
+    sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+    if hasattr(socket, "SO_REUSEPORT"):
+        try:
+            sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEPORT, 1)
+        except Exception:
+            pass
+    try:
+        sock.bind(("", mcast_port))
+    except Exception:
+        return None
+
+    try:
+        mreq = struct.pack("4s4s", socket.inet_aton(mcast_ip), socket.inet_aton(local_ip))
+        sock.setsockopt(socket.IPPROTO_IP, socket.IP_ADD_MEMBERSHIP, mreq)
+    except Exception:
+        try:
+            mreq = struct.pack("4sl", socket.inet_aton(mcast_ip), socket.INADDR_ANY)
+            sock.setsockopt(socket.IPPROTO_IP, socket.IP_ADD_MEMBERSHIP, mreq)
+        except Exception:
+            pass
+
+    sock.settimeout(timeout)
+    try:
+        data, _ = sock.recvfrom(2048)
+        pkt = json.loads(data.decode("utf-8", errors="ignore"))
+        if pkt.get("type") == "DISCOVERY" and pkt.get("teacherIp"):
+            return pkt["teacherIp"], int(pkt.get("teacherPort", 3000))
+    except Exception:
+        pass
+    finally:
+        sock.close()
+    return None
+
+
+async def churn_loop(agents: List[MockAgent], churn_count: int = 2, interval: float = 5.0, offline_duration: float = 10.0):
+    """Periodically flips online status of random agents to test UI disconnection & recovery."""
+    print(f"[Churn] 🎲 Flapping simulation active: picks {churn_count} agents every {interval}s to go offline (stays offline for >= {offline_duration}s)...")
+    while True:
+        await asyncio.sleep(interval)
+        now = time.monotonic()
+
+        # 1. 檢查離線時間已達到 offline_duration (預設 10s) 的 agents，予以恢復上線
+        offline_list = [a for a in agents if not a.is_online]
+        for a in offline_list:
+            elapsed = now - a.offline_since
+            if elapsed >= offline_duration:
+                a.set_online(True)
+                print(f"\033[92m[Churn] 🟢 {a.hostname} ({a.mac}) 離線滿 {elapsed:.1f}s，模擬重新連線 / 恢復上線！\033[0m")
+
+        # 2. 隨機挑選 churn_count 台在線 agents 斷線
+        online_list = [a for a in agents if a.is_online]
+        if online_list:
+            targets = random.sample(online_list, min(churn_count, len(online_list)))
+            for a in targets:
+                a.set_online(False)
+                print(f"\033[91m[Churn] 🔻 {a.hostname} ({a.mac}) 模擬網路中斷 / 異常離線（將維持離線至少 {offline_duration}s）...\033[0m")
+
+
+async def discovery_and_connect_loop(
+    agents: List[MockAgent],
+    mcast_ip: str,
+    mcast_port: int,
+    local_ip: str,
+    interval: float = 1.0,
+    churn: bool = False,
+    churn_count: int = 2,
+    churn_interval: float = 5.0,
+    churn_offline_duration: float = 10.0,
+):
+    """Auto-discovers the Teacher Console via multicast,
+    then launches reverse WebSocket registration and HTTP snapshot pushing."""
+    print(f"[Discovery] ⏳ Listening for DISCOVERY multicast announcement on {mcast_ip}:{mcast_port}...")
+    loop = asyncio.get_running_loop()
+    active_ip = ""
+    active_port = 3000
+
+    while not active_ip:
+        res = await loop.run_in_executor(None, listen_discovery_sync, mcast_ip, mcast_port, local_ip, 2.0)
+        if res:
+            active_ip, active_port = res
+            print(f"[Discovery] 📡 Auto-discovered Teacher Console via multicast: http://{active_ip}:{active_port}")
+            break
+        await asyncio.sleep(0.5)
+
+    ws_task = asyncio.create_task(ws_register_loop(agents, active_ip, active_port, interval))
+    push_task = asyncio.create_task(snapshot_push_loop(agents, active_ip, active_port, interval))
+    tasks = [ws_task, push_task]
+    if churn:
+        tasks.append(asyncio.create_task(churn_loop(agents, churn_count, churn_interval, churn_offline_duration)))
+    await asyncio.gather(*tasks)
+
+
 async def main():
     parser = argparse.ArgumentParser(description="GridSight High-Concurrency Mock Agent Cluster")
     parser.add_argument("--count", type=int, default=70, help="Number of simulated agents (default: 70)")
     parser.add_argument("--base-port", type=int, default=18081, help="Starting port (deprecated)")
     parser.add_argument("--local-ip", type=str, default="", help="Custom local IP to advertise (auto-detect if empty)")
-    parser.add_argument("--teacher-ip", type=str, default="", help="Teacher console IP for direct unicast / HTTP push")
-    parser.add_argument("--teacher-port", type=int, default=3000, help="Teacher console HTTP port (default: 3000)")
     parser.add_argument("--multicast-ip", type=str, default="239.255.42.99", help="Multicast IP group (default: 239.255.42.99)")
     parser.add_argument("--multicast-port", type=int, default=8888, help="Multicast UDP port (default: 8888)")
     parser.add_argument("--interval", type=float, default=1.0, help="Reconnect/register interval in seconds (default: 1.0)")
+    parser.add_argument("--churn", action="store_true", help="Enable random agent offline/online flapping simulation")
+    parser.add_argument("--churn-count", type=int, default=2, help="Number of agents to flap at a time (default: 2)")
+    parser.add_argument("--churn-interval", type=float, default=5.0, help="Interval between flapping events in seconds (default: 5.0)")
+    parser.add_argument("--churn-offline-duration", type=float, default=10.0, help="Minimum seconds an agent stays offline before recovery (default: 10.0)")
     args = parser.parse_args()
 
     local_ip = args.local_ip if args.local_ip else get_default_local_ip()
@@ -439,8 +619,8 @@ async def main():
     print(f"🚀 GridSight Mock Agent Cluster Initializing")
     print(f"   • Total Agents: {args.count} instances (MOCK-01 ~ MOCK-{args.count:02d})")
     print(f"   • Local Host IP: {local_ip}")
-    if args.teacher_ip:
-        print(f"   • Teacher Console: http://{args.teacher_ip}:{args.teacher_port}")
+    print(f"   • Teacher Console: Auto-discovery active (via {args.multicast_ip}:{args.multicast_port})")
+    print(f"   • Flapping Simulation (Churn): {'Enabled (' + str(args.churn_count) + ' agents every ' + str(args.churn_interval) + 's, offline for >= ' + str(args.churn_offline_duration) + 's)' if args.churn else 'Disabled'}")
     print(f"   • Pillow Rendering: {'Enabled (Realistic Thumbnails)' if HAS_PIL else 'Disabled (Minimal JPEG)'}")
     print("=" * 68)
 
@@ -468,20 +648,25 @@ async def main():
 
     print(f"[HTTP] All {args.count} agents listening successfully (Ports: {agents[0].port} ~ {agents[-1].port})!")
 
-    # Start Reverse WebSocket Registration Tasks (new architecture: no BEACON)
-    ws_task = asyncio.create_task(
-        ws_register_loop(agents, args.teacher_ip, args.teacher_port, args.interval)
+    # Start Auto-Discovery and Connection Tasks
+    connect_task = asyncio.create_task(
+        discovery_and_connect_loop(
+            agents,
+            args.multicast_ip,
+            args.multicast_port,
+            local_ip,
+            args.interval,
+            args.churn,
+            args.churn_count,
+            args.churn_interval,
+            args.churn_offline_duration,
+        )
     )
-
-    # If teacher IP specified, start async parallel snapshot push loop
-    push_task = None
-    if args.teacher_ip:
-        push_task = asyncio.create_task(snapshot_push_loop(agents, args.teacher_ip, args.teacher_port, args.interval))
 
     print(f"\n[Ready] Press Ctrl+C at any time to terminate the mock cluster.\n")
 
     try:
-        await asyncio.gather(ws_task, push_task if push_task else ws_task)
+        await connect_task
     except asyncio.CancelledError:
         pass
     finally:

@@ -29,6 +29,8 @@ private:
     std::shared_ptr<WebSocketStreamer> ws_streamer_;
     std::atomic<bool> running_{false};
     std::thread worker_thread_;
+    std::string last_teacher_ip_;
+    int last_teacher_port_ = 0;
 };
 
 } // namespace GridSight

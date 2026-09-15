@@ -30,6 +30,12 @@
 #ifndef _WIN32
 #define STB_IMAGE_WRITE_IMPLEMENTATION
 #include "../include/stb_image_write.h"
+#include <unistd.h>
+#include <fcntl.h>
+#include <sys/wait.h>
+#include <sys/types.h>
+#include <poll.h>
+#include <signal.h>
 #endif
 
 namespace GridSight {
@@ -151,7 +157,11 @@ void ConvertBGRAtoNV12_SIMD(const uint8_t* bgra_data, int width, int height, uin
 #endif
 }
 
+#ifdef _WIN32
 static const char* g_active_engine_name = "Windows GDI+ SIMD/Bilinear JPEG";
+#else
+static const char* g_active_engine_name = "Linux stb_image_write JPEG";
+#endif
 
 const char* ImageEncoder::GetActiveJpegEngineName() {
     return g_active_engine_name;
@@ -383,6 +393,71 @@ bool H264Encoder::Initialize(int width, int height, int fps, int bitrate_kbps) {
     pEncoder->ProcessMessage(MFT_MESSAGE_NOTIFY_START_OF_STREAM, 0);
 
     pEncoder_ = pEncoder;
+#else
+    Release();
+
+    int in_pipe[2];
+    int out_pipe[2];
+    if (pipe(in_pipe) != 0 || pipe(out_pipe) != 0) {
+        Utils::Log("ERROR", "[H264Encoder] Failed to create pipes for Linux FFmpeg H.264 encoder");
+        return false;
+    }
+
+    pid_t pid = fork();
+    if (pid < 0) {
+        Utils::Log("ERROR", "[H264Encoder] Failed to fork process for Linux FFmpeg H.264 encoder");
+        close(in_pipe[0]); close(in_pipe[1]);
+        close(out_pipe[0]); close(out_pipe[1]);
+        return false;
+    }
+
+    if (pid == 0) {
+        close(in_pipe[1]);
+        close(out_pipe[0]);
+        dup2(in_pipe[0], STDIN_FILENO);
+        dup2(out_pipe[1], STDOUT_FILENO);
+        close(in_pipe[0]);
+        close(out_pipe[1]);
+
+        int devnull = open("/dev/null", O_WRONLY);
+        if (devnull >= 0) {
+            dup2(devnull, STDERR_FILENO);
+            close(devnull);
+        }
+
+        std::string dims = std::to_string(width) + "x" + std::to_string(height);
+        std::string fps_str = std::to_string(fps);
+        std::string br_str = std::to_string(bitrate_kbps) + "k";
+
+        execlp("ffmpeg", "ffmpeg", "-y", "-loglevel", "quiet",
+               "-f", "rawvideo", "-pix_fmt", "bgra", "-s", dims.c_str(), "-r", fps_str.c_str(), "-i", "-",
+               "-c:v", "libx264", "-preset", "ultrafast", "-tune", "zerolatency",
+               "-pix_fmt", "yuv420p", "-b:v", br_str.c_str(), "-g", "30", "-keyint_min", "30",
+               "-f", "h264", "-", nullptr);
+        _exit(127);
+    }
+
+    close(in_pipe[0]);
+    close(out_pipe[1]);
+
+    ffmpeg_stdin_fd_ = in_pipe[1];
+    ffmpeg_stdout_fd_ = out_pipe[0];
+    ffmpeg_pid_ = pid;
+
+    int flags = fcntl(ffmpeg_stdout_fd_, F_GETFL, 0);
+    fcntl(ffmpeg_stdout_fd_, F_SETFL, flags | O_NONBLOCK);
+
+    Utils::SleepMs(15);
+    int status = 0;
+    pid_t res = waitpid(pid, &status, WNOHANG);
+    if (res == pid) {
+        Utils::Log("WARN", "[H264Encoder] ffmpeg process exited immediately (status: " + std::to_string(status) + "). Is ffmpeg installed?");
+        Release();
+        return false;
+    }
+
+    Utils::Log("INFO", "[H264Encoder] Linux FFmpeg real-time H.264 encoder initialized (PID: " + std::to_string(pid) + ")");
+    frame_count_ = 0;
 #endif
 
     initialized_ = true;
@@ -492,17 +567,50 @@ bool H264Encoder::EncodeFrame(const uint8_t* bgra_data, bool force_idr, std::vec
 
     return encoded_something || out_h264_nalu.empty();
 #else
-    out_h264_nalu.push_back(0x00);
-    out_h264_nalu.push_back(0x00);
-    out_h264_nalu.push_back(0x00);
-    out_h264_nalu.push_back(0x01);
-    out_h264_nalu.push_back(force_idr ? 0x65 : 0x41);
-
-    size_t sample_size = std::min((size_t)8192, (size_t)(width_ * height_ / 4));
-    for (size_t i = 0; i < sample_size; ++i) {
-        out_h264_nalu.push_back(bgra_data[i % (width_ * height_ * 4)]);
+    if (ffmpeg_stdin_fd_ < 0 || ffmpeg_stdout_fd_ < 0) {
+        return false;
     }
-    return true;
+
+    size_t frame_bytes = (size_t)width_ * height_ * 4;
+    ssize_t written = write(ffmpeg_stdin_fd_, bgra_data, frame_bytes);
+    if (written < 0) {
+        Utils::Log("WARN", "[H264Encoder] write to ffmpeg stdin failed");
+        return false;
+    }
+
+    // Poll for available H.264 NALUs from ffmpeg stdout (zerolatency outputs frame within ~1-20ms; first frame allows up to 350ms for process warmup)
+    int timeout_ms = (frame_count_ == 0) ? 350 : 35;
+    struct pollfd pfd = { ffmpeg_stdout_fd_, POLLIN, 0 };
+    int ret = poll(&pfd, 1, timeout_ms);
+    if (ret > 0 && (pfd.revents & POLLIN)) {
+        uint8_t buffer[65536];
+        while (true) {
+            ssize_t n = read(ffmpeg_stdout_fd_, buffer, sizeof(buffer));
+            if (n > 0) {
+                out_h264_nalu.insert(out_h264_nalu.end(), buffer, buffer + n);
+                // Allow a brief moment for pipe to finish draining multi-packet frame
+                struct pollfd pfd_more = { ffmpeg_stdout_fd_, POLLIN, 0 };
+                if (poll(&pfd_more, 1, 4) > 0 && (pfd_more.revents & POLLIN)) {
+                    continue;
+                }
+                break;
+            } else if (n < 0 && (errno == EAGAIN || errno == EWOULDBLOCK)) {
+                struct pollfd pfd_more = { ffmpeg_stdout_fd_, POLLIN, 0 };
+                if (poll(&pfd_more, 1, 4) > 0 && (pfd_more.revents & POLLIN)) {
+                    continue;
+                }
+                break;
+            } else {
+                break;
+            }
+        }
+    }
+
+    if (!out_h264_nalu.empty()) {
+        frame_count_++;
+        return true;
+    }
+    return false;
 #endif
 }
 
@@ -516,6 +624,20 @@ void H264Encoder::Release() {
         pEncoder_ = nullptr;
     }
     MFShutdown();
+#else
+    if (ffmpeg_stdin_fd_ >= 0) {
+        close(ffmpeg_stdin_fd_);
+        ffmpeg_stdin_fd_ = -1;
+    }
+    if (ffmpeg_stdout_fd_ >= 0) {
+        close(ffmpeg_stdout_fd_);
+        ffmpeg_stdout_fd_ = -1;
+    }
+    if (ffmpeg_pid_ > 0) {
+        kill(ffmpeg_pid_, SIGTERM);
+        waitpid(ffmpeg_pid_, nullptr, WNOHANG);
+        ffmpeg_pid_ = -1;
+    }
 #endif
     initialized_ = false;
 }
